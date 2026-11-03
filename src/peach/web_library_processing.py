@@ -356,6 +356,19 @@ def _processing_request(contract, config, previous, body):
     return retry_ids, asset_ids, stage
 
 
+def dispatch_incremental(contract):
+    """目录监视登记的新影片在主任务空闲时交给统一处理入口。"""
+    from .library_new_assets import pending
+    from .job_recovery import read
+    if _current(contract).get('status') in ACTIVE:
+        return
+    if read(contract.db_path, 'library-processing').get('status') == 'active':
+        return
+    selected = pending(contract.db_path)
+    if selected:
+        w_library_processing(contract, {'asset_ids': selected, 'stage': 'collect', 'automatic': True})
+
+
 def w_library_processing(contract, body, *, resume=False):
     config = settings_file.active()
     if (body or {}).get('action'):
@@ -389,6 +402,10 @@ def w_library_processing(contract, body, *, resume=False):
                     key: value for key, value in state.items() if key != 'job_id'}))
             contract.library_processing_job.update(job_id, **{key: value for key, value in result.items() if key != 'job_id'})
         finally:
+            if (body or {}).get('automatic'):
+                # 已尝试的失败保留在任务重试列表，避免恢复调度每秒重问同一来源。
+                from .library_new_assets import remember
+                remember(contract.db_path, completed=asset_ids)
             contract.cache_bust()
     # 起步那行字按这一趟真正要做的事写：点了「只扫描」却看到「读取本地资料」，
     # 人会以为点错了。

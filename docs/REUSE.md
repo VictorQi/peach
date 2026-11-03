@@ -1,5 +1,11 @@
 # 复用清单
 
+`metadata_amane.MAKER_PREFIXES` 复用 amane 固定 revision
+`fd9294fbe5b4aa88ce1df84d534f6816ad9460d5` 的
+[`official.py`](https://github.com/sqzw-x/amane/blob/fd9294fbe5b4aa88ce1df84d534f6816ad9460d5/src/amane/crawlers/sites/official.py)
+系列路由事实（GPL-3.0），只在桥的 revision 一致且仅查询 `makers` 时省去无适用路由的子进程。
+Peach 仍负责来源选择、验证页冷却与候选复核，不复制上游采集器。
+
 ## 跨平台任务资源计量
 
 继续使用 psutil 7.2.2 读取进程 CPU 时间和身份。该版本的 macOS 线程列表使用序号，不能与 Python 原生线程 ID 对应；因此使用系统 `libproc` 的 `PROC_PIDTHREADID64INFO` 取得指定线程的纳秒时间，接口与单位见 [XNU 实现](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/kern/bsd_kern.c)。Linux 的可用 CPU 容量复用亲和性、控制组成员和挂载信息，按可见 cgroup v1/v2 配额归一化。

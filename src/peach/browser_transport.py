@@ -454,11 +454,16 @@ class BrowserTransport:
         return self._browser
 
     def _state(self, browser: _Browser) -> dict:
+        from .processing_control import CURRENT
         try:
-            return json.loads(browser.evaluate(_STATE_SCRIPT))
+            state = json.loads(browser.evaluate(_STATE_SCRIPT))
         except RuntimeError:
             # 页面跳转的那一瞬执行环境被销毁，脚本会报错；这不是坏了，是还在加载。
             return {"title": "", "ready": "loading", "url": "", "head": ""}
+        if CURRENT.get() is not None and any(
+                mark in state.get('head', '') or mark in state.get('title', '') for mark in CHALLENGE_MARKS):
+            raise ChallengeUnsolved('后台采集遇到来源验证页，暂缓该来源并继续其他来源')
+        return state
 
     def _load(self, browser: _Browser, url: str, headers: Mapping[str, str], timeout: float) -> dict:
         """导航到 `url`，等浏览器过完验证、DOM 解析完，返回那一刻的页面状态。

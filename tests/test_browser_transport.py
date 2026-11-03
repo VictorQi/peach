@@ -34,6 +34,22 @@ def is_document(params) -> bool:
     return "getEntriesByType" in params["expression"]
 
 
+class BackgroundChallengeTests(unittest.TestCase):
+    def test_processing_context_leaves_challenge_without_waiting(self):
+        from types import SimpleNamespace
+        from peach.processing_control import CURRENT
+        transport = BrowserTransport('unused', Path('unused'))
+        browser = SimpleNamespace(evaluate=lambda _: state_reply('Just a moment'))
+        self.assertEqual(transport._state(browser)['title'], 'Just a moment')
+        token = CURRENT.set(object())
+        try:
+            with self.assertRaises(ChallengeUnsolved):
+                transport._state(browser)
+        finally:
+            CURRENT.reset(token)
+            transport.close()
+
+
 class FakeCdp(threading.Thread):
     """一个端口同时充当 `/json` 目标列表和页面的 WebSocket 端：回包按 `handler(method, params)`。"""
 

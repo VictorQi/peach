@@ -18,6 +18,10 @@ def _read(db):
     try:
         ids = json.loads(path.read_text(encoding='utf-8'))
     except FileNotFoundError:
+        patched = path.with_name('incremental-media.json')
+        if patched.is_file():
+            data = json.loads(patched.read_text(encoding='utf-8'))
+            return {int(key) for key, value in data['items'].items() if value['status'] == 'pending'}
         legacy = path.with_name('library-processing.json')
         try:
             state = json.loads(legacy.read_text(encoding='utf-8'))
@@ -56,5 +60,24 @@ def remember(db, ids=(), *, completed=()):
     with FileLock(str(path)+'.lock'):
         previous = _read(db)
         updated = set(_active_videos(db, sorted(previous | set(ids)))) - set(completed)
-        if updated != previous or (updated and not path.exists()):
+        if updated != previous or not path.exists():
             atomic_write_text(path,json.dumps(sorted(updated)))
+
+
+def observe(db, asset_id, size, mtime_ns, *, new=False):
+    """目录事件按文件版本去重；首次遇到旧文件只建立基线。"""
+    path = _path(db).with_name('incremental-media.json')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with FileLock(str(path) + '.lock'):
+        try:
+            data = json.loads(path.read_text(encoding='utf-8'))
+        except FileNotFoundError:
+            data = {'seen': {}, 'items': {}}
+        if not isinstance(data.get('seen'), dict) or not isinstance(data.get('items'), dict):
+            raise ValueError('增量媒体队列格式无效，请检查状态文件')
+        key, version = str(asset_id), [size, mtime_ns]
+        previous = data['seen'].get(key)
+        if new or previous is not None and previous != version:
+            remember(db, [asset_id])
+        data['seen'][key] = version
+        atomic_write_text(path, json.dumps(data, ensure_ascii=False))

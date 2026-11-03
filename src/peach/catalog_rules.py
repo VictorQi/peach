@@ -941,7 +941,51 @@ def _code_from_patterns(name: str, patterns: Iterable[re.Pattern]) -> str | None
     return None
 
 
+def _filename_code_input(name: str | None) -> str:
+    """文件名头尾的转载标记、转码说明与重复扩展名不参与番号身份。"""
+    text = str(name or "").strip()
+    text = re.sub(
+        r"^@(?:蜂鳥@)?[a-z0-9][a-z0-9.-]*\.(?:tv|vip|io|com|cn)[_-]\s*",
+        "", text, count=1, flags=re.I)
+    text = re.sub(r"^\[456km\.e\]", "", text, count=1, flags=re.I)
+    text = re.sub(r"^(?:Mosaic_reduce_|FHD_\d{1,2}M-)", "", text, count=1, flags=re.I)
+    extension = _ASSET_EXTENSION.search(text)
+    for _ in range(3):
+        stripped = _ASSET_EXTENSION.sub("", text)
+        if stripped == text:
+            break
+        text = stripped
+    text = strip_promo_markers(text)
+    text = re.sub(r"(?:[ _-]+C[ _-]+GG5|[ _-]+mp4)$", "", text, flags=re.I)
+    text = re.sub(r"(?:[-_ ](?:[1-8]k|hd|ch|c|fix))+$", "", text, flags=re.I)
+    return text + (extension.group(0) if extension else "")
+
+
 def release_code_from_filename(name: str | None, *, patterns: Iterable[re.Pattern] = ()) -> str | None:
+    """用户规则与完整文件名优先；未命中时尝试有界的传输标记清理。"""
+    patterns = tuple(patterns)
+    custom = _code_from_patterns(str(name or "").strip(), patterns)
+    if custom:
+        return custom
+    if not _ASSET_EXTENSION.search(str(name or "")):
+        return _release_code_from_filename(name, patterns=patterns)
+    cleaned = _filename_code_input(name)
+    if _STOPWORD_HEAD.match(_ASSET_EXTENSION.sub("", cleaned)):
+        return None
+    original = _release_code_from_filename(name, patterns=patterns)
+    if original:
+        return original
+    candidate = _release_code_from_filename(cleaned, patterns=patterns)
+    partless = _ASSET_EXTENSION.sub("", _PART_MARKER.sub("", cleaned))
+    whole = normalise_code_key(_ASSET_EXTENSION.sub("", cleaned))
+    if not is_jav_code(whole):
+        whole = normalise_code_key(partless)
+    if not is_jav_code(whole):
+        whole = release_code_from_text(partless) or release_code_from_text(_FILE_NOISE.sub("", partless))
+    return candidate if candidate and whole and same_release_code(candidate, whole) else None
+
+
+def _release_code_from_filename(name: str | None, *, patterns: Iterable[re.Pattern] = ()) -> str | None:
     r"""文件名带分卷、画质和重复计数，剥掉噪声后再解析。
 
     `patterns` 是用户在设置里写的番号识别规则（`compile_code_patterns`），先于内置

@@ -164,6 +164,15 @@ class ScrapeGateTests(unittest.TestCase):
 
 
 class ExtractionTests(unittest.TestCase):
+    def test_transport_markers_preserve_filename_identity_and_custom_rules(self):
+        for name in ('@media.example.tv_ABW-232.mp4', 'Mosaic_reduce_ABW-232.mp4',
+                     'FHD_8M-ABW-232.mp4', 'ABW-232.mp4.mp4', 'ABW-232-4k-fix.mp4'):
+            with self.subTest(name=name):
+                self.assertEqual(release_code_from_filename(name), 'ABW-232')
+        self.assertIsNone(release_code_from_filename('@media.example.tv_VIDEO-2022.mp4'))
+        self.assertEqual(release_code_from_filename('FHD_8M-ABW-232.mp4',
+                         patterns=compile_code_patterns([r'(?P<code>ABW-232)'])), 'ABW-232')
+
     def test_forum_url_wrapper_preserves_filename_and_custom_rules(self):
         for ending in ('[|url]', '[/url]'):
             for extension in ('', '.mp4'):

@@ -404,8 +404,10 @@ def ingest_path(
     finally:
         connection.close()
     junk.isolate(db_path, asset_ids=[asset_id])
-    from .library_new_assets import remember
+    from .library_new_assets import observe, remember
     remember(db_path, inserted_ids)
+    if medium == 'video':
+        observe(db_path, asset_id, stat.st_size, stat.st_mtime_ns, new=new)
     return IngestResult(location, str(ledger_path), True, stat.st_size, tracks,
                         asset_id=asset_id, new=new, reattached=reattached, acquired=acquired)
 

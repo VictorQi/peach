@@ -41,6 +41,33 @@ async def _collect(response, requested: bytes | None, method: str = "GET"):
     )
 
 
+class FilePrefetchTests(unittest.IsolatedAsyncioTestCase):
+    async def test_range_starts_with_small_block_and_preserves_requested_bytes(self):
+        from peach.streaming import BufferedFileResponse
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary).resolve() / 'clip.mp4'
+            payload = bytes(range(256)) * 8193
+            path.write_bytes(payload)
+            response = BufferedFileResponse(path)
+            sizes = []
+            send_chunks = response._send_chunks
+            async def measured(send, start, end):
+                async def sent(message):
+                    sizes.append(len(message.get('body', b'')))
+                    await send(message)
+                await send_chunks(sent, start, end)
+            response._send_chunks = measured
+            status, headers, body = await _collect(response, b'bytes=1024-2097151')
+            self.assertEqual(status, 206)
+            self.assertEqual(body, payload[1024:2097152])
+            self.assertEqual(int(headers['content-length']), len(body))
+            self.assertEqual(sizes[0], 65536)
+            for method, request in [('GET', b'bytes=-71'), ('HEAD', b'bytes=5-19')]:
+                status, headers, body = await _collect(BufferedFileResponse(path), request, method)
+                self.assertEqual(status, 206)
+                self.assertEqual(body, b'' if method == 'HEAD' else payload[-71:])
+
+
 class HlsDisconnectTests(unittest.IsolatedAsyncioTestCase):
     """分片请求使用真实子进程验证断开、退出和并发请求的隔离。"""
 

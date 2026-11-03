@@ -18,6 +18,47 @@ from support.ledger import fresh_ledger
 
 
 class ProcessingControlTests(unittest.TestCase):
+    def test_file_versions_queue_only_new_or_changed_events(self):
+        from peach.library_new_assets import observe, pending, remember
+        self.seed(2)
+        observe(self.db, 1, 100, 1000)
+        self.assertEqual(pending(self.db), [])
+        observe(self.db, 1, 100, 2000)
+        self.assertEqual(pending(self.db), [1])
+        remember(self.db, completed=[1])
+        observe(self.db, 1, 100, 2000)
+        self.assertEqual(pending(self.db), [])
+        observe(self.db, 2, 100, 1000, new=True)
+        self.assertEqual(pending(self.db), [2])
+
+    def test_automatic_collection_uses_pending_scope_and_respects_paused_work(self):
+        from peach.library_new_assets import remember
+        from peach.web_library_processing import dispatch_incremental
+        self.seed(3)
+        remember(self.db, [2])
+        contract = SimpleNamespace(db_path=self.db)
+        with patch('peach.web_library_processing._current', return_value={'status': 'complete'}), \
+                patch('peach.job_recovery.read', return_value={}), \
+                patch('peach.web_library_processing.w_library_processing') as launch:
+            dispatch_incremental(contract)
+            launch.assert_called_once_with(contract, {'asset_ids': [2], 'stage': 'collect', 'automatic': True})
+        with patch('peach.web_library_processing._current', return_value={'status': 'paused'}), \
+                patch('peach.web_library_processing.w_library_processing') as launch:
+            dispatch_incremental(contract)
+            launch.assert_not_called()
+
+    def test_patch_queue_import_keeps_only_pending_items_and_can_be_consumed(self):
+        from peach.library_new_assets import _path, pending, remember
+        self.seed(3)
+        state = _path(self.db).parent
+        state.mkdir(exist_ok=True)
+        (state / 'incremental-media.json').write_text(json.dumps({'items': {
+            '1': {'status': 'complete'}, '2': {'status': 'pending'}, '3': {'status': 'needs_retry'}}}), encoding='utf-8')
+        self.assertEqual(pending(self.db), [2])
+        remember(self.db, completed=[2])
+        self.assertEqual(pending(self.db), [])
+        self.assertTrue((state / 'library-new-assets.json').is_file())
+
     def assert_processing_status(self, contract, expected):
         from peach.web_library_processing import q_library_processing
         deadline = time.monotonic() + 5

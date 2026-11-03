@@ -209,10 +209,44 @@ class HostLimitedTransport:
                                               clock=clock, sleeper=sleeper)
 
     def __call__(self, request: HttpRequest, timeout: float, limit: int):
+        from collections import OrderedDict
+
+        key = self._image_probe_key(request, limit)
+        cache = self.__dict__.setdefault('_image_probe_cache', OrderedDict())
+        if key is not None and key in cache:
+            expires, response = cache.pop(key)
+            if expires > self.clock():
+                from peach.processing_control import checkpoint
+                checkpoint('network')
+                cache[key] = (expires, response)
+                return response
         self.limiter.wait(request.url)
-        return self.inner(request, timeout, limit)
+        response = self.inner(request, timeout, limit)
+        if (key is not None and response.status in (200, 206) and len(response.body) <= PROBE_BYTES
+                and not PLACEHOLDER.search(getattr(response, 'url', '') or request.url)):
+            try:
+                with Image.open(io.BytesIO(response.body)):
+                    pass
+            except (OSError, ValueError):
+                pass
+            else:
+                cache[key] = (self.clock() + 600.0, response)
+                while len(cache) > 128:
+                    cache.popitem(last=False)
+        return response
+
+    @staticmethod
+    def _image_probe_key(request: HttpRequest, limit: int):
+        """短时复用同一请求身份的图片头，完整图片和失败答复仍走来源传输。"""
+        headers = tuple(sorted((str(k).lower(), str(v)) for k, v in request.headers.items()))
+        if (request.method != 'GET' or request.body is not None
+                or dict(headers).get('range') != f'bytes=0-{PROBE_BYTES - 1}'
+                or not re.search(r'\.(?:jpe?g|png|webp)(?:\?|$)', request.url, re.I)):
+            return None
+        return request.url, headers, limit
 
     def renew(self) -> None:
+        self.__dict__.pop('_image_probe_cache', None)
         if hasattr(self.inner, "renew"):
             self.inner.renew()
             return
@@ -449,8 +483,11 @@ def proxyable_cover_url(url: str) -> bool:
 
 
 def content_id_images(content_id: str) -> list[Candidate]:
+    """数字版猜测路径补足五位；来源明确给出的图址由原图入口保留。"""
     candidates: list[Candidate] = []
     for cid in cid_variants(content_id):
+        if re.fullmatch(r'[a-z]+\d{1,4}', cid):
+            continue
         candidates.extend([
             candidate_for(AWS_MODERN.format(kind="digital/video", cid=cid)),
             candidate_for(AWS_LEGACY_DIGITAL.format(cid=cid)),

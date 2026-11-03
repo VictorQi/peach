@@ -45,6 +45,36 @@ BRIDGE_ROOT = PROJECT_ROOT / "tools" / "amane-bridge"
 BRIDGE_SCRIPT = BRIDGE_ROOT / "bridge.py"
 #: 源码部署的桥 venv 位于数据目录的工具区，名字与源码目录一致。
 BRIDGE_TOOL_NAME = "amane-bridge"
+
+# amane official.py 的系列路由事实（GPL-3.0），只在固定 revision 一致时使用。
+MAKER_ROUTE_REVISION = "fd9294fbe5b4aa88ce1df84d534f6816ad9460d5"
+MAKER_PREFIXES = frozenset("""
+ADN ALAD AND ANPD AOM ATAD ATID ATKD ATVR AVGL AZSD BBAN BBI BBVR BEB BF BIB BID BIST BLK
+BMW BWB CAWD CJOB CJOD CJVR CLUB CLVR COSD DAN DASD DASS DAZD DSVR EBOD EBVR EMLB EYAN FCVR FINH
+GCF HJBB HJMO HMN HND HNDB HNJC HNKY HNSE HNVR HPD HUNBL HUNT HUNTA HUNTB IDBD IPIT IPSD IPTD IPVR
+IPX IPZ IPZZ JBD JFB JUC JUFD JUFE JUK JUKD JUL JUMS JUNY JUQ JUSD JUVR JUX JUY KANE KAVR
+KAWD KIBD KIFD KIPX KIRD KISD KIVR KMIDE KRND KWBD KWSD KWSR MBYD MDE MDED MDF MDFD MDG MDGD MDI
+MDID MDJ MDJD MDL MDLD MDMD MDON MDPD MDRD MDUD MDVD MDVR MDYD MEVR MEYD MIAA MIAB MIAD MIAE MIAS
+MIBD MIDD MIDE MIDV MIFD MIGD MIID MIMK MIMU MINT MIQD MIRD MISM MIVD MIZD MKCK MMND MMVR MMXD MNYD
+MUCD MUDR MUKC MUKD MVBD MVR MVSD NIMA NJVR NNPJ NPJB NYB OBA OBE OFJE ONE ONED ONSD OPBD OPUD
+OPVR PBD PGD PID PJD PLA PPBD PPFD PPPD PPPE PPSD PPVR PRED PRTD PRVR PTV PXD RBB RBD RBK
+RKI RMID RMPD RMWD ROE ROEB ROYD RVR SAME SET SHKD SIVR SMCD SNIS SOE SPS SSIS SSNI SSPD STOL
+SUPD TKIPZ TKMIDD TKMIDE TKMIGD TKSOE TYSF URE VICD VIZD VSPD VVVD WAAA WANZ WAVR
+""".split())
+
+
+def unsupported_maker_report(number: str, names: Sequence[str], language: str):
+    """桥只传番号；固定系列表外的前缀无需启动子进程。"""
+    if list(names) != ['makers'] or pinned_revision() != MAKER_ROUTE_REVISION:
+        return None
+    prefix = re.match(r'[A-Za-z]+', number.replace('-', '').replace('_', '').lstrip('0123456789'))
+    if prefix is None or prefix.group().upper() in MAKER_PREFIXES:
+        return None
+    from .processing_control import checkpoint
+    checkpoint('work')
+    return {'number': number, 'language': language,
+            'sites': {'makers': {'status': 'not_found', 'reason': 'not_found', 'elapsed_s': 0.0}},
+            'amane': {'version': locked_version()}}
 #: 一次子进程的总时限。单请求 30 秒，普通失败最多重试一次；403/406 可额外轮换三次指纹，
 #: 搜索与详情共用这 60 秒，超时终止子进程并报可重试失败。
 DEFAULT_TIMEOUT = 60
@@ -482,6 +512,9 @@ class AmaneBridge:
             raise ValueError("未开放的 amane 站点：" + "、".join(unknown or ["（空）"]))
         if set(direct_sites) - set(names):
             raise ValueError("直连站点必须属于本次查询来源")
+        skipped = unsupported_maker_report(number, names, language)
+        if skipped is not None:
+            return skipped
         from .processing_control import low_mode, checkpoint
         if low_mode() and len(names) > 1:
             return self._serial_query(code, names, language=language, proxy_options=proxy_options,
