@@ -170,7 +170,7 @@ class RunnerTests(LedgerTestCase):
 
         with registered(echo_type("code-samples", run=chunk), echo_type(AVATAR_TASK_KEY, run=avatar)):
             self.store.enqueue_followups(parent.id, [
-                ("code-samples:stock", "code-samples", "补番号样张"),
+                ("code-samples:stock", "code-samples", "番号样张采集"),
                 ("entity-avatar:performer:1", AVATAR_TASK_KEY, "甲")])
             self.assertEqual(FollowupRunner(self.contract()).drain(), 4)
         self.assertEqual(order, ["code-samples:stock", "entity-avatar:performer:1",
@@ -352,7 +352,7 @@ class BackgroundJobDispatchTests(LedgerTestCase):
 
     def declared(self):
         return [{"key": "entity-avatar:performer:1", "task_key": AVATAR_TASK_KEY,
-                 "label": "补全资料图片：甲"}]
+                 "label": "资料图片补全：甲"}]
 
     def test_a_successful_run_dispatches_what_it_declared(self):
         job = self.job()

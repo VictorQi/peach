@@ -507,10 +507,8 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        from .error_reporting import asyncio_handler
-        loop = asyncio.get_running_loop()
-        previous_error_handler = loop.get_exception_handler()
-        loop.set_exception_handler(asyncio_handler)
+        # asyncio 异常处理器由 `cli._run_uvicorn` 装在 uvicorn 的事件循环上：它要拿着 uvicorn
+        # 的 Server，才能在监听被标准库关掉后重新监听。
         # 握手要等 cloudflared 连上边缘，断网时会等满 `wait_timeout`；放在后台，本机访问
         # 不等公网入口。连接进度由 `tunnel_manager.snapshot()` 报告。
         tunnel_startup = asyncio.create_task(asyncio.to_thread(_start_tunnel, settings, tunnel_manager))
@@ -535,7 +533,6 @@ def create_app(
             await activation.stop()
             _app.state.ledger_background_ready = False
             aggregate_stop.set()
-            loop.set_exception_handler(previous_error_handler)
             warmup.cancel()
             recovery_service.stop()
             follow_scheduler.stop()

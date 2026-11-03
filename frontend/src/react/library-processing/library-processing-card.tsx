@@ -18,6 +18,7 @@ import { apiSend, errorMessage } from '../../api';
 import { SCAN_CARD_TEXT } from '../../management';
 import type { LibraryProcessingProps } from '../bundle';
 import { Fieldset, FieldsetTitle } from '../components/fieldset';
+import { IssueRow } from '../components/issue-row';
 import { Note } from '../components/note';
 import { StatusLabel } from '../components/status-label';
 import { useOverlayScrollbar } from '../components/overlay-scrollbar';
@@ -136,19 +137,12 @@ function Outcome(
                   <Disclosure summary={details.label} contentClassName="gap-0">
                     {/* 轨道是滚动容器的兄弟，得有一层只裹着清单的定位祖先给它落脚。 */}
                     <div className="relative -mr-3">
-                      {/* 条间线画在每条自己身上，不用 `divide-y`：那一族的选择器裹在
-                          `:where()` 里没有特异性，压不过岛内 `@scope` 末尾那条把所有元素
-                          边框清零的 preflight，线会静默消失。 */}
                       <ul ref={list} className="max-h-96 overflow-y-auto">
                         {details.items.map((item) => (
-                          <li key={item.key}
-                            className="flex flex-col gap-1 border-b border-current/15 py-2 pr-6 wrap-anywhere first:pt-0 last:border-b-0 last:pb-0">
-                            {item.href
-                              ? <a href={item.href} className="text-body-2-medium underline-offset-4 hover:underline">{item.label}</a>
-                              : <span className="text-body-2-medium">{item.label}</span>}
+                          <IssueRow key={item.key} title={item.label} href={item.href}>
                             <span className="text-caption-1-regular">{item.note}</span>
                             {item.hint ? <code className="text-caption-1-regular break-all">{item.hint}</code> : null}
-                          </li>
+                          </IssueRow>
                         ))}
                       </ul>
                     </div>

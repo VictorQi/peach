@@ -1542,7 +1542,7 @@ class WebDataTests(unittest.TestCase):
             "/api/downloads", "/api/downloads/cancel", "/api/downloads/postprocess",
             "/api/library-processing", "/api/thumbnail-jobs", "/api/media-repair",
             "/api/media-processing",
-            "/api/scraping/settings", "/api/scraping/check", "/api/scraping/cover",
+            "/api/scraping/settings", "/api/scraping/check", "/api/scraping/cover", "/api/jav/cover",
             "/api/scraping/amane-bridge/check", "/api/scraping/amane-bridge/rebuild",
             "/api/activity", "/api/play", "/api/feedback", "/api/watch-later",
             "/api/playlist",

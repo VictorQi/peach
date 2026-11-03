@@ -447,6 +447,36 @@ class ProcessingControlTests(unittest.TestCase):
             'completed_metadata':['1:R:\\Media\\0.mp4']}),encoding='utf-8')
         self.assertEqual(pending(self.db),[2,3])
 
+    def test_new_asset_range_is_read_under_the_writer_lock(self):
+        """`remember` 持锁原子替换文件；Windows 替换瞬间读会撞上共享冲突，所以读也要等同一把锁。"""
+        from filelock import FileLock
+        from peach.library_new_assets import pending
+        from peach.update_tasks import state_for
+        self.seed(3)
+        path=state_for(self.db).parent/'library-new-assets.json'
+        path.parent.mkdir(parents=True,exist_ok=True)
+        outcome={}
+
+        def read():
+            try:
+                outcome['ids']=pending(self.db)
+            except Exception as error:
+                outcome['error']=error
+        with FileLock(str(path)+'.lock'):
+            path.write_text('[1, 2',encoding='utf-8')
+            reader=threading.Thread(target=read)
+            reader.start()
+            reader.join(0.5)
+            self.assertTrue(reader.is_alive(),f'写入方持锁期间读到了半份文件：{outcome}')
+            path.write_text('[1, 2]',encoding='utf-8')
+        reader.join(5)
+        self.assertEqual(outcome,{'ids':[1,2]})
+
+    def test_new_asset_range_is_empty_before_any_state_exists(self):
+        from peach.library_new_assets import pending
+        self.seed(1)
+        self.assertEqual(pending(self.db),[])
+
     def test_archiving_keeps_full_legacy_issues_and_export_rejects_changes(self):
         import json
         from peach.library_processing import state_path,_save
@@ -837,6 +867,23 @@ class ProcessingControlTests(unittest.TestCase):
         self.assertTrue(all(row['total'] == 0 for row in discovering))
         self.assertEqual((result.scanned, result.scanned_bytes), (4, 60))
         self.assertEqual(result.junk_isolated, 2)
+
+    def test_incremental_scan_probes_rows_moved_onto_new_files(self):
+        """按番号改指到新文件的旧行不算新行，但文件换了，增量扫描照样要探它。"""
+        from peach.library_processing import _scan_sources
+        config = PeachConfig(self.root, self.root / 'config.toml', present=True, locations={'local': ('R:\\Media',)})
+        scanned = SimpleNamespace(files=2, total_bytes=30, new_ids=(5,), relocated_ids=(7,), junk_isolated=0)
+        with patch('peach.library_processing.scan_location', return_value=scanned), \
+                patch('peach.library_processing._online_source_root', return_value=self.root), \
+                patch('peach.library_processing._ffprobe_path', return_value=None), \
+                patch('peach.library_processing.probe_unmeasured', return_value=0) as probe, \
+                patch('peach.library_processing.reattach_in') as reattach:
+            result = _scan_sources(config, self.db, locations=config.locations, asset_ids=None,
+                                   stage='scan', guard=Mock(), update=lambda **values: None,
+                                   issue=lambda *_args, **_kwargs: None, incremental=True)
+        self.assertEqual(probe.call_args.kwargs['asset_ids'], [5, 7])
+        self.assertEqual(result.new_ids, (5,), "改指的旧行不进新影片范围")
+        reattach.assert_called_once_with(self.db, (5,))
 
     def test_library_scan_reports_conflicting_records_and_processes_both_roots(self):
         import sqlite3

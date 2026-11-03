@@ -146,6 +146,8 @@ CREATE TABLE review_decision(
   category TEXT NOT NULL,item_key TEXT NOT NULL,status TEXT NOT NULL,
   reviewer TEXT NOT NULL DEFAULT 'local-default',note TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL,
   PRIMARY KEY(category,item_key));
+CREATE TABLE download_task(
+  id INTEGER PRIMARY KEY, code TEXT, state TEXT NOT NULL, ledger_path TEXT, asset_id INTEGER);
 CREATE TABLE genre_decision(
   source_genre TEXT PRIMARY KEY, raw_genre TEXT NOT NULL, peach_tag TEXT, decided_at TEXT NOT NULL,
   CHECK(peach_tag IS NULL OR length(trim(peach_tag))>0));
@@ -309,6 +311,9 @@ class FastApiContractTests(unittest.IsolatedAsyncioTestCase):
         con.executescript(BASE_SCHEMA)
         for migration in ("0018_online_follow.sql", "0034_feed_discovery.sql"):
             con.executescript((ROOT / "migrations" / migration).read_text(encoding="utf-8"))
+        # 删除与清空回收站后的缓存清理按想要清单认封面的主人；整份 0042 迁移还要连带
+        # 修订号与账户表，这里只建清理读的两列。
+        con.execute("CREATE TABLE want_item(code_key TEXT, state TEXT NOT NULL)")
         con.execute(
             """INSERT INTO asset(id,location,path,name,medium,size,creator,studio,duration,
                                   width,height,ctx_orient,snapshot_path,first_seen)
@@ -1342,6 +1347,30 @@ class FastApiContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(recovered.status_code, 200)
         self.assertGreater(len(asked), reached)
         self.assertFalse(marker.exists())
+
+    async def test_a_site_redirecting_to_an_unusable_address_counts_as_unreachable(self):
+        """重定向目标的主机名过不了 IDNA 时传输层抛 ValueError，地址本身不合法时抛 InvalidURL。
+
+        两者都不是 `httpx.HTTPError`，都按取不到处理：回 404 露出地球图标，失败窗口内不再出网。
+        """
+        self._archive_links(lambda url: "red")
+        for failure in (ValueError("encoding with 'idna' codec failed (UnicodeError: label empty or too long)"),
+                        httpx.InvalidURL("Invalid port: 'abc'")):
+            with self.subTest(failure=type(failure).__name__):
+                for marker in (self.root / "generated" / "link-marks").glob("*.failed"):
+                    marker.unlink()
+                asked = []
+
+                def broken(request, failure=failure, asked=asked):
+                    asked.append(str(request.url))
+                    raise failure
+                self._swap_http_client(broken)
+                answer = await self.client.get("/link-mark?t=secret&id=901")
+                self.assertEqual(answer.status_code, 404)
+                reached = len(asked)
+                self.assertTrue(reached)
+                self.assertEqual((await self.client.get("/link-mark?t=secret&id=901")).status_code, 404)
+                self.assertEqual(len(asked), reached, "失败窗口内不再出网")
 
     async def test_unauthorized_keeps_three_shapes_grouped_by_route_class(self):
         """401 三种形态按路由类分组，收敛到 Depends 之后也不许并成一种。

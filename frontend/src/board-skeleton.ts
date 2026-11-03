@@ -26,7 +26,7 @@ const followReadings = () => `<div class="inline-grid w-full grid-cols-2 gap-3 s
 const followTabKey = (tab = '') => (FOLLOW_TABS.some(([key]) => key === tab) ? tab : 'list');
 const followTabs = (tab: string) => `<div data-section-nav data-section-items class="flex max-w-full flex-nowrap overflow-x-auto">${FOLLOW_TABS.map(([key, name]) => `<span class="whitespace-nowrap" aria-selected="${key === tab}">${name}</span>`).join('')}</div>`;
 /** Board UI `Checkbox` 的未勾静止态；给了字就是「全选本页」那种带标签的一枚。 */
-const followCheck = (label = '') => `<span class="group inline-flex items-center select-none gap-2"><span class="flex shrink-0 items-center justify-center rounded-sm size-4 border bg-background-primary-default shadow-xs border-border-checkbox-default"></span>${label ? `<span class="text-body-medium text-text-primary">${label}</span>` : ''}</span>`;
+export const followCheck = (label = '') => `<span class="group inline-flex items-center select-none gap-2"><span class="flex shrink-0 items-center justify-center rounded-sm size-4 border bg-background-primary-default shadow-xs border-border-checkbox-default"></span>${label ? `<span class="text-body-medium text-text-primary">${label}</span>` : ''}</span>`;
 
 /* 工具行：检查全部是主按钮，视图切换是一组两颗 ghost 纯图标键、选中那颗由 `aria-pressed` 标出，
    排序框写着地址栏那一档的名字，方向键朝着同一头。工具行窄于 740px 时 React 把带字的键收成
@@ -54,7 +54,7 @@ const followPageSize = (): number => {
    当前排序落在哪一列，那一列的指示就朝哪头。 */
 const TABLE_COLUMNS = [['select', ''], ['author', '创作者'], ['source', '来源'], ['provider', '站点'], ['status', '状态'], ['checked', '上次检查'], ['actions', '']] as const;
 const COLUMN_OF: Partial<Record<SortKey, string>> = { name: 'author', source: 'source', provider: 'provider', status: 'status', checked: 'checked' };
-const SORT_MARK = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12.7071 15.2929C12.3166 15.6834 11.6834 15.6834 11.2929 15.2929L7.70711 11.7071C7.07714 11.0771 7.52331 10 8.41421 10H15.5858C16.4767 10 16.9229 11.0771 16.2929 11.7071L12.7071 15.2929Z" fill="currentColor"/></svg>';
+export const SORT_MARK = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12.7071 15.2929C12.3166 15.6834 11.6834 15.6834 11.2929 15.2929L7.70711 11.7071C7.07714 11.0771 7.52331 10 8.41421 10H15.5858C16.4767 10 16.9229 11.0771 16.2929 11.7071L12.7071 15.2929Z" fill="currentColor"/></svg>';
 const followTable = (rows: number, { sort, dir }: { sort: SortKey; dir: SortDir }) => {
   const head = TABLE_COLUMNS.map(([id, name]) => {
     if (!name) return '<th></th>';

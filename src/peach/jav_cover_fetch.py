@@ -64,6 +64,7 @@ from peach.task_runs import TaskRunHandle, cli_run, inert_handle
 from peach.platform import system_volume
 from peach.catalog_rules import (
     code_letter_stem,
+    code_serial,
     is_amateur_code,
     is_jav_code,
     is_korean_mib_code,
@@ -603,9 +604,10 @@ def is_cross_product_cover(code: str, url: str) -> bool:
     if stem not in cid:
         return True
     # 字母段对上还不够：`YUJ-101` 取回的是 `yuj00011`，`CHU-201` 是 `chu00021`，
-    # `435MFC-135` 是 `h_1711mfcc00027`。数字段按整数比，补零和厂牌前缀都不影响。
+    # `435MFC-135` 是 `h_1711mfcc00027`。数字段按 `code_serial` 比，补零和厂牌前缀都不影响；
+    # 只有 `SHORT_SERIAL_PREFIXES` 的短号例外：DMM 的 `mcdv00024` 是有码 `MCDV-024`，不是无码 `MCDV-24`。
     wanted, got = _CODE_NUMBER.search(code or ""), _CID_NUMBER.search(cid)
-    return bool(wanted and got) and int(wanted.group(1)) != int(got.group(1))
+    return bool(wanted and got) and code_serial(stem, wanted.group(1)) != code_serial(stem, got.group(1))
 
 
 def _is_prestige(evidence: MetadataEvidence) -> bool:
