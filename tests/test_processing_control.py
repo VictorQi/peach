@@ -1,5 +1,6 @@
 """馆藏处理控制与启动粗估的隔离行为回归。"""
 import json
+import os
 import tempfile
 import threading
 import time
@@ -19,15 +20,19 @@ from support.ledger import fresh_ledger
 
 class ProcessingControlTests(unittest.TestCase):
     def test_file_versions_queue_only_new_or_changed_events(self):
-        from peach.library_new_assets import observe, pending, remember
+        from peach.library_new_assets import _path, observe, pending, remember
         self.seed(2)
         observe(self.db, 1, 100, 1000)
         self.assertEqual(pending(self.db), [])
         observe(self.db, 1, 100, 2000)
         self.assertEqual(pending(self.db), [1])
         remember(self.db, completed=[1])
+        versions = _path(self.db).with_name('incremental-media.json')
+        os.utime(versions, (1, 1))
+        previous_write = versions.stat().st_mtime_ns
         observe(self.db, 1, 100, 2000)
         self.assertEqual(pending(self.db), [])
+        self.assertEqual(versions.stat().st_mtime_ns, previous_write)
         observe(self.db, 2, 100, 1000, new=True)
         self.assertEqual(pending(self.db), [2])
 

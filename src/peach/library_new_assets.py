@@ -87,6 +87,8 @@ def observe(db, asset_id, size, mtime_ns, *, new=False):
             raise ValueError('增量媒体队列格式无效，请检查状态文件')
         key, version = str(asset_id), [size, mtime_ns]
         previous = data['seen'].get(key)
+        if not new and previous == version:
+            return
         if new or previous is not None and previous != version:
             remember(db, [asset_id])
         data['seen'][key] = version
