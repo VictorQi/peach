@@ -22,6 +22,15 @@ class AtomicWriteTests(unittest.TestCase):
         self.assertEqual(target.read_text(encoding="utf-8"), '{"a": 1}')
         self.assertEqual(self.leftovers(), [])
 
+    def test_a_cache_path_below_the_windows_limit_can_be_written_atomically(self):
+        parent = self.root / ('cache-' + 'd' * max(1, 164 - len(str(self.root))))
+        target = parent / ('a' * 64 + '.source.json')
+        self.assertLess(len(str(target)), 260)
+        atomic_write_text(target, 'old')
+        atomic_write_text(target, 'new')
+        self.assertEqual(target.read_text(encoding='utf-8'), 'new')
+        self.assertEqual(self.leftovers(), [])
+
     def test_a_failed_write_keeps_the_old_content_and_drops_the_staging_file(self):
         target = self.root / "marker.json"
         atomic_write_text(target, "old")
