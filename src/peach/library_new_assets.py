@@ -114,11 +114,12 @@ def snapshot(db, ids=None):
         return {asset_id: seen.get(str(asset_id)) for asset_id in (pending(db) if ids is None else ids)}
 
 
-def finish(db, versions):
+def finish(db, versions, *, completed=None):
     """仅确认已处理的版本，期间到达的同文件新版本继续等待处理。"""
     path = _path(db).with_name('incremental-media.json')
     path.parent.mkdir(parents=True, exist_ok=True)
     with FileLock(str(path) + '.lock'):
         seen = json.loads(path.read_text(encoding='utf-8')).get('seen', {}) if path.exists() else {}
+        wanted = set(versions if completed is None else completed)
         remember(db, completed=[asset_id for asset_id, version in versions.items()
-                                if seen.get(str(asset_id)) == version])
+                                if asset_id in wanted and seen.get(str(asset_id)) == version])

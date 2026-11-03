@@ -2981,7 +2981,5 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
             flush_candidates(force=True)
             remote.close()
         from .library_new_assets import finish
-        attempted = {row['id'] for row in rows}
-        finish(db_path, {asset_id: version for asset_id, version in processing_versions.items()
-                         if asset_id in attempted})
+        finish(db_path, processing_versions, completed=[row['id'] for row in rows])
         return state
