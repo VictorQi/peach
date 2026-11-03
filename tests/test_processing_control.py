@@ -19,6 +19,44 @@ from support.ledger import fresh_ledger
 
 
 class ProcessingControlTests(unittest.TestCase):
+    def test_completed_versions_preserve_changes_that_arrive_during_processing(self):
+        from peach.library_new_assets import finish, observe, pending, snapshot
+        self.seed(2)
+        observe(self.db, 1, 100, 1000, new=True)
+        observe(self.db, 2, 100, 1000, new=True)
+        versions = snapshot(self.db, [1, 2])
+        observe(self.db, 1, 100, 2000)
+        finish(self.db, versions)
+        self.assertEqual(pending(self.db), [1])
+        finish(self.db, snapshot(self.db, [1]))
+        self.assertEqual(pending(self.db), [])
+
+    def test_automatic_collection_preserves_interrupted_and_later_file_versions(self):
+        from peach.library_new_assets import observe, pending
+        self.seed(2)
+        for asset_id in (1, 2):
+            observe(self.db, asset_id, 100, 1000, new=True)
+        job = Mock()
+        job.start.side_effect = lambda work, **kwargs: work('isolated-job') or {}
+        contract = SimpleNamespace(db_path=self.db, candidate_root=self.root / 'candidates',
+            cover_root=self.root / 'covers', database=Mock(), library_processing_job=job, cache_bust=Mock())
+        with patch('peach.web_library_processing.settings_file.active', return_value=self.config), \
+                patch('peach.web_library_processing._current', return_value={}), \
+                patch('peach.web_library_processing._processing_request', return_value=(None, [1, 2], 'collect')), \
+                patch('peach.web_library_processing.initial_estimate', return_value={}), \
+                patch('peach.web_library_processing.process_library') as process:
+            process.side_effect = RuntimeError('isolated-interruption')
+            with self.assertRaisesRegex(RuntimeError, 'isolated-interruption'):
+                w_library_processing(contract, {'asset_ids': [1, 2], 'automatic': True})
+            self.assertEqual(pending(self.db), [1, 2])
+            def complete(*args, **kwargs):
+                observe(self.db, 1, 100, 2000)
+                return {'status': 'failed', 'stage': '处理结束', 'completed_at': 1,
+                        'retryable_asset_ids': [2]}
+            process.side_effect = complete
+            w_library_processing(contract, {'asset_ids': [1, 2], 'automatic': True})
+            self.assertEqual(pending(self.db), [1])
+
     def test_file_versions_queue_only_new_or_changed_events(self):
         from peach.library_new_assets import _path, observe, pending, remember
         self.seed(2)

@@ -1,5 +1,12 @@
 # 复用清单
 
+文件变更事件与整库扫描共用 `library_new_assets` 的待处理范围、文件版本和 `FileLock`。
+扫描复用已取得的文件属性，按已提交批次保存版本，不额外读取媒体内容。
+处理开始时冻结版本，正常结束只确认这些版本；处理中到达的变化和中断任务继续留在队列，
+已完成的失败版本交给显式重试列表。重新接回的影片沿用原身份并重新入队。
+显式 `new_only` 扫描继续仅发现未登记文件；旧补丁队列只在正式队列不存在时导入一次。
+播放器音量与静音复用原生媒体事件和浏览器 `localStorage`，换源时同步媒体适配器，无新增依赖。
+
 `metadata_amane.MAKER_PREFIXES` 复用 amane 固定 revision
 `fd9294fbe5b4aa88ce1df84d534f6816ad9460d5` 的
 [`official.py`](https://github.com/sqzw-x/amane/blob/fd9294fbe5b4aa88ce1df84d534f6816ad9460d5/src/amane/crawlers/sites/official.py)

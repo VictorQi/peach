@@ -390,6 +390,8 @@ def w_library_processing(contract, body, *, resume=False):
     control_for(config).request('set_speed', mode=mode)
     def work(job_id):
         try:
+            from .library_new_assets import finish, snapshot
+            versions = snapshot(contract.db_path, asset_ids) if (body or {}).get('automatic') else {}
             result = process_library(config, contract.db_path, contract.candidate_root, contract.cover_root,
                 job_id=job_id, retry_ids=retry_ids, stage=stage, asset_ids=asset_ids, incremental=incremental,
                 # 自动落库与页面写的是同一个 `LedgerDatabase`：进程内写锁在实例上，
@@ -400,12 +402,11 @@ def w_library_processing(contract, body, *, resume=False):
                 active=lambda: (contract.library_processing_job.snapshot() or {}).get('job_id') == job_id,
                 report=lambda state: contract.library_processing_job.update(job_id, **{
                     key: value for key, value in state.items() if key != 'job_id'}))
+            if versions and result.get('completed_at') and result.get('stage') == '处理结束':
+                # 完成的失败版本由任务重试列表接管；中断与后到版本仍留在队列。
+                finish(contract.db_path, versions)
             contract.library_processing_job.update(job_id, **{key: value for key, value in result.items() if key != 'job_id'})
         finally:
-            if (body or {}).get('automatic'):
-                # 已尝试的失败保留在任务重试列表，避免恢复调度每秒重问同一来源。
-                from .library_new_assets import remember
-                remember(contract.db_path, completed=asset_ids)
             contract.cache_bust()
     # 起步那行字按这一趟真正要做的事写：点了「只扫描」却看到「读取本地资料」，
     # 人会以为点错了。

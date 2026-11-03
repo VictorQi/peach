@@ -411,6 +411,8 @@ def ingest_path(
                 registered[str(ledger_path).casefold()] = str(ledger_path)
         relocated = _relocate_ingested(connection, registered, location, ledger_path, here,
                                        declared_roots=declared_roots, mounts=mounts, windows=windows)
+        before = connection.execute('SELECT size,mtime,disposal FROM asset WHERE location=? AND path=?',
+            (location, registered.get(str(ledger_path).casefold(), str(ledger_path)))).fetchone()
         inserted_ids = _upsert_records(connection, [(location, str(ledger_path), name, medium,
                                      stat.st_size, mtime, now, now)], registered, conflicts)
         stored_path = registered[str(ledger_path).casefold()]
@@ -433,7 +435,8 @@ def ingest_path(
     from .library_new_assets import observe, remember
     remember(db_path, inserted_ids)
     if medium == 'video':
-        observe(db_path, asset_id, stat.st_size, stat.st_mtime_ns, new=new)
+        changed = before is not None and (before[2] == 'vanished' or before[:2] != (stat.st_size, mtime))
+        observe(db_path, asset_id, stat.st_size, stat.st_mtime_ns, new=new or changed)
     return IngestResult(location, str(ledger_path), True, stat.st_size, tracks,
                         asset_id=asset_id, new=new, reattached=reattached, acquired=acquired,
                         relocated=relocated)
@@ -641,13 +644,14 @@ def _scan_file_stat(connection, identities, registered, observations, location, 
                     direct, relocate=lambda path: None):
     """读取本次文件快照，接回已移动的身份或同番号的旧行，并积累提交后的身份观测。"""
     stat = entry.stat()
+    native = None
     if identities is not None:
         native = Path(directory) / entry.name
         if direct and not stat.st_ino:
             stat = native.stat()
         if identities.relocate(connection, location, ledger_path, native, stat):
             registered[ledger_path.casefold()] = ledger_path
-        observations.append((location, ledger_path, native, stat))
+    observations.append((location, ledger_path, native, stat))
     if (ledger_path.casefold() not in registered and medium_of(entry.name) == "video"
             and relocate(ledger_path) is not None):
         registered[ledger_path.casefold()] = ledger_path
@@ -655,6 +659,16 @@ def _scan_file_stat(connection, identities, registered, observations, location, 
 
 
 def _commit_scan_records(connection, db, batch, registered, conflicts, identities, observations):
+    media = {}
+    for location, path, native, stat in observations:
+        if medium_of(path) == 'video' and path.casefold() not in conflicts:
+            media.setdefault(location, {})[registered.get(path.casefold(), path)] = stat
+    previous = {}
+    for location, paths in media.items():
+        for path, size, mtime, disposal in connection.execute(
+                'SELECT path,size,mtime,disposal FROM asset WHERE location=? '
+                'AND path IN (SELECT value FROM json_each(?))', (location, json.dumps(list(paths)))):
+            previous[location, path] = (size, mtime, disposal)
     inserted = _upsert_records(connection, batch, registered, conflicts)
     if identities is not None:
         for location, path, native, stat in observations:
@@ -662,8 +676,20 @@ def _commit_scan_records(connection, db, batch, registered, conflicts, identitie
     connection.commit()
     if identities is not None:
         identities.save()
-    from .library_new_assets import remember
+    from .library_new_assets import observe_many, remember
     remember(db, inserted)
+    versions = []
+    for location, paths in media.items():
+        for asset_id, path in connection.execute(
+                "SELECT id,path FROM asset WHERE location=? AND medium='video' "
+                'AND path IN (SELECT value FROM json_each(?))', (location, json.dumps(list(paths)))):
+            stat = paths[path]
+            before = previous.get((location, path))
+            changed = before is None or before[2] == 'vanished' or before[:2] != (
+                stat.st_size, time.strftime('%Y-%m-%d', time.localtime(stat.st_mtime)))
+            versions.append((asset_id, stat.st_size, stat.st_mtime_ns, changed))
+    if versions:
+        observe_many(db, versions)
     batch.clear()
     observations.clear()
     return inserted

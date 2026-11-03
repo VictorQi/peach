@@ -2811,6 +2811,8 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
             if incremental and not scope_ids:
                 _settle_collection_state(state, {}, [], update)
                 return state
+            from .library_new_assets import snapshot
+            processing_versions = snapshot(db_path, scope_ids)
             _prepare_processing_media(config, db_path, judgement_database, locations, sources,
                                       scope_ids, protected_ids, stage, state, update)
             finish_step('inspect')
@@ -2978,7 +2980,8 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
             # 被打断也把已经攒下的候选写全：文件里要么是上一份完整的，要么是这一份完整的。
             flush_candidates(force=True)
             remote.close()
-        from .library_new_assets import remember
-        unfinished = set(state['retryable_asset_ids'])
-        remember(db_path, completed=[row['id'] for row in rows if row['id'] not in unfinished])
+        from .library_new_assets import finish
+        attempted = {row['id'] for row in rows}
+        finish(db_path, {asset_id: version for asset_id, version in processing_versions.items()
+                         if asset_id in attempted})
         return state

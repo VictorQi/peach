@@ -76,6 +76,11 @@ def remember(db, ids=(), *, completed=()):
 
 def observe(db, asset_id, size, mtime_ns, *, new=False):
     """目录事件按文件版本去重；首次遇到旧文件只建立基线。"""
+    observe_many(db, [(asset_id, size, mtime_ns, new)])
+
+
+def observe_many(db, observations):
+    """一个已提交的扫描批次只读取和保存一次版本文件。"""
     path = _path(db).with_name('incremental-media.json')
     path.parent.mkdir(parents=True, exist_ok=True)
     with FileLock(str(path) + '.lock'):
@@ -85,11 +90,35 @@ def observe(db, asset_id, size, mtime_ns, *, new=False):
             data = {'seen': {}, 'items': {}}
         if not isinstance(data.get('seen'), dict) or not isinstance(data.get('items'), dict):
             raise ValueError('增量媒体队列格式无效，请检查状态文件')
-        key, version = str(asset_id), [size, mtime_ns]
-        previous = data['seen'].get(key)
-        if not new and previous == version:
-            return
-        if new or previous is not None and previous != version:
-            remember(db, [asset_id])
-        data['seen'][key] = version
-        atomic_write_text(path, json.dumps(data, ensure_ascii=False))
+        pending_ids, changed = [], False
+        for asset_id, size, mtime_ns, new in observations:
+            key, version = str(asset_id), [size, mtime_ns]
+            previous = data['seen'].get(key)
+            if new or previous is not None and previous != version:
+                pending_ids.append(asset_id)
+            if previous != version:
+                data['seen'][key] = version
+                changed = True
+        if pending_ids:
+            remember(db, pending_ids)
+        if changed:
+            atomic_write_text(path, json.dumps(data, ensure_ascii=False))
+
+
+def snapshot(db, ids=None):
+    """冻结处理开始时的文件版本；未建立指纹的旧待处理项也保留身份。"""
+    path = _path(db).with_name('incremental-media.json')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with FileLock(str(path) + '.lock'):
+        seen = json.loads(path.read_text(encoding='utf-8')).get('seen', {}) if path.exists() else {}
+        return {asset_id: seen.get(str(asset_id)) for asset_id in (pending(db) if ids is None else ids)}
+
+
+def finish(db, versions):
+    """仅确认已处理的版本，期间到达的同文件新版本继续等待处理。"""
+    path = _path(db).with_name('incremental-media.json')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with FileLock(str(path) + '.lock'):
+        seen = json.loads(path.read_text(encoding='utf-8')).get('seen', {}) if path.exists() else {}
+        remember(db, completed=[asset_id for asset_id, version in versions.items()
+                                if seen.get(str(asset_id)) == version])
