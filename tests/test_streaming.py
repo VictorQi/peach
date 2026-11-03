@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import sys
 import tempfile
+import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -396,6 +398,49 @@ class StreamSessionRegistryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(headers["content-length"], "73")
         self.assertEqual(headers["content-type"], "video/mp4")
         self.assertEqual(body, b"")
+
+    async def test_a_slow_spliced_close_keeps_other_requests_responsive_during_cancellation(self):
+        from starlette.responses import Response
+        from peach.mp4repair import RepairedHeader
+        from peach.streaming import SplicedMp4Response
+
+        loop = asyncio.get_running_loop()
+        loop_thread = threading.get_ident()
+        closing = asyncio.Event()
+        release = threading.Event()
+        closed = threading.Event()
+        close_threads = []
+
+        class SlowFile(io.BytesIO):
+            def close(self):
+                close_threads.append(threading.get_ident())
+                loop.call_soon_threadsafe(closing.set)
+                release.wait(3)
+                super().close()
+                closed.set()
+
+        handle = SlowFile(b'media')
+        response = SplicedMp4Response(Path('remote.mp4'), RepairedHeader(
+            prefix=b'', payload_start=0, payload_end=5))
+        response.path = SimpleNamespace(open=lambda mode: handle)
+        task = asyncio.create_task(_collect(response, None))
+        try:
+            await asyncio.wait_for(closing.wait(), 5)
+            self.assertFalse(closed.is_set(), '文件关闭期间事件循环没有继续服务')
+            self.assertEqual(await _collect(Response(b'healthy'), None), (200, {
+                'content-length': '7',
+            }, b'healthy'))
+            task.cancel()
+            await asyncio.sleep(0)
+            task.cancel()
+            await asyncio.sleep(0)
+            self.assertFalse(task.done(), '取消必须等句柄清理完成')
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+        self.assertTrue(task.cancelled())
+        self.assertTrue(closed.is_set())
+        self.assertNotIn(loop_thread, close_threads)
 
     async def test_a_legacy_repair_streams_the_corrected_head_and_original_payload(self):
         import tempfile

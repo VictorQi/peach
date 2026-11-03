@@ -416,4 +416,7 @@ class SplicedMp4Response(Response):
                 yield chunk
                 remaining -= len(chunk)
         finally:
-            handle.close()
+            # 关闭也可能等移动盘或 SMB；清理期间仍让事件循环服务其他请求。
+            close = asyncio.create_task(asyncio.to_thread(handle.close))
+            await _wait_for_tasks(close)
+            close.result()

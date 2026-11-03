@@ -1001,6 +1001,12 @@ Python、npm 与 GitHub Actions 的版本由 `.github/dependabot.yml` 每周检�
 
 播放生命周期复用 [PR190](https://github.com/peach-mitao/peach/pull/190) 的 `e41222e312443b5d0fc7be87d2f7eca9c1d61055`：共享分片按消费者计数，最后消费者离开才取消生成，并等待子进程回收；文件响应保留外层取消与运行错误。头像确认的图像和数据库工作共用工作线程，安装按实体加锁。当前 ASGI 响应头中间件、SMB 输入和图像预处理保留 Peach 主线实现；未采用该 PR 的界面、依赖和测试调度改动。
 
+修复头 MP4 的文件关闭复用标准库 `asyncio.to_thread` 与现有 `_wait_for_tasks`：关闭在工作线程执行，重复取消仍等待句柄清理，事件循环继续处理其他请求。故障注入用例在关闭尚未返回时发送另一响应，再重复取消原请求。此清理不等于取消 Windows 驱动中的读取；运行中的同步 I/O 需要原生取消机制，且驱动不保证支持，见 [Windows I/O 取消](https://learn.microsoft.com/en-us/windows/win32/fileio/canceling-pending-i-o-operations)。未新增依赖。
+
+并发排查分别核对事件循环、asyncio 默认执行器、AnyIO 工作线程、领域锁和 FFmpeg 子进程。[Starlette 的线程池说明](https://github.com/Kludex/starlette/blob/main/docs/threadpool.md)指出同步端点、文件响应与同步依赖共享 AnyIO 容量；HLS 计划使用 Peach 自有的两个工作线程。后台采集继续复用 `JobDeferred`、处理锁与检查点让路。当前没有跨所有后台任务、按物理磁盘调度播放优先级的统一机制；单项媒体读取子进程的超时也不覆盖 Range 响应中的文件读取。
+
+社区方案核对了 [Video.js VHS 的播放监视器](https://github.com/videojs/http-streaming/blob/main/src/playback-watcher.js)、[Chromium 缓冲策略](https://www.chromium.org/audio-video/)与 [FFmpeg 硬件加速](https://ffmpeg.org/ffmpeg.html#Advanced-Video-options)。VHS 的分片恢复不能证明原生 MP4 的挂起会恢复；Chromium 按缓冲水位主动停取和续取，页面换算速率不能当磁盘吞吐。当前继续使用浏览器原生解码与随包 FFmpeg 子进程，不增加重复解码链、FFI 或新解释器。新增实现须分别取得读取、线程等待、解码和恢复证据。
+
 匿名签名校验复用 [PR150](https://github.com/peach-mitao/peach/pull/150) 的唯一入口、时间戳表达式及字符串约束，适配已存在的动态变量解析接口。媒体响应复用 [PR131](https://github.com/peach-mitao/peach/pull/131) 的被动类型校验、CSP `sandbox` 和 `nosniff`；HLS 清单继续可读，旧活动文档缓存不命中。以上均使用现有标准库、Starlette 和 filelock，无新增依赖。
 
 ## 静态检查
