@@ -35,7 +35,7 @@ describe('馆藏与口味分享的明确同意', () => {
     await click(buttonNamed('预览上传内容', host));
     await settle();
     expect(fetcher).toHaveBeenCalledTimes(1);
-    expect(host.textContent).toContain('KiB。不含账号、设备、文件路径和浏览器历史记录等个人数据。');
+    expect(host.textContent).toContain('KiB。不含账号、设备、文件路径和浏览器历史记录；作品编号与偏好仍可能反映个人兴趣。');
     expect((buttonNamed('同意并开启上传', host) as HTMLButtonElement).disabled).toBe(true);
     expect(actionOrder(buttonNamed('同意并开启上传', host)!.parentElement)).toEqual(['取消', '预览上传内容', '同意并开启上传']);
     await click(host.querySelector('input[type="checkbox"]:not([role="switch"])'));

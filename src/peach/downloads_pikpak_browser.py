@@ -114,7 +114,7 @@ def _attended_browser(executable: str, profile: Path) -> _Browser:
                         proxy=options.get('proxy', ''))
     if flags is None:
         raise BrowserUnavailable('浏览器登录不支持带凭据的代理地址，请选择系统代理或无需认证的本机代理')
-    return _Browser(executable, profile, flags, attended=True)
+    return _Browser(executable, profile, flags)
 
 
 class BrowserLogin:

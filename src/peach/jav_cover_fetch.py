@@ -57,7 +57,7 @@ from peach.scripting import USER_AGENT, open_readonly
 from peach.config import COVER_DIR, DATABASE_PATH, GENERATED_DIR, SOURCES_DIR
 from peach.http import HttpRequest, HttpTransport, HttpxTransport
 from peach.scripting import HostLimiter
-from peach.scraping_access import SOURCES, SourceBudgetExhausted, SourcePaused, SourceTransport, source_for
+from peach.scraping_access import SourceBudgetExhausted, SourcePaused, SourceTransport
 from peach.config import SECRETS_DIR
 from peach.jobs import DiskGuard, JobPolicyError
 from peach.task_runs import TaskRunHandle, cli_run, inert_handle
@@ -263,18 +263,8 @@ def _sleep_within(delay: float, deadline: float | None) -> None:
 
 #: 一条请求给传输的时限上限。
 REQUEST_TIMEOUT = 30.0
-#: 由本机浏览器过验证的来源（`scraping_access.SOURCES` 里登记了 `browser`）一条请求的时限，
-#: 不按剩余预算往下裁。浏览器自动过验证最多等 `browser_transport.AUTO_SECONDS`（40 秒），
-#: 2026-09-25 实测 JAVten 最慢 25 秒；时限给到 30 秒以下，自动阶段没等完就被掐断，那一站白问一次。
-BROWSER_REQUEST_TIMEOUT = 45.0
-
-
 def request_timeout(url: str, remaining: float | None) -> float:
-    """这一条请求给传输多少秒：普通来源不超过剩余预算与 `REQUEST_TIMEOUT`，浏览器来源固定
-    `BROWSER_REQUEST_TIMEOUT`——等浏览器过验证的那一段不归单项预算管（ADR-0065 第二条）。"""
-    source = source_for(url)
-    if source and SOURCES[source].get("browser"):
-        return BROWSER_REQUEST_TIMEOUT
+    """每条请求遵守传输上限与调用方剩余预算。"""
     return REQUEST_TIMEOUT if remaining is None else max(1.0, min(REQUEST_TIMEOUT, remaining))
 
 

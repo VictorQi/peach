@@ -36,7 +36,7 @@ LOCAL_EXCEPTION_TYPES = frozenset({
     ("peach.jav_cover_fetch", "Unavailable"), ("peach.jav_cover_fetch", "DeadlineExceeded"),
     ("peach.scraping_access", "SourcePaused"), ("peach.previews", "PreviewUnavailable"),
     ("peach.transcodes", "TranscodeCancelled"), ("peach.segments", "SegmentCancelled"),
-    ("peach.browser_transport", "BrowserUnavailable"), ("peach.browser_transport", "ChallengeUnsolved"),
+    ("peach.browser_transport", "BrowserUnavailable"),
     ("peach.face_detect", "FaceModelUnavailable"), ("peach.avatar_watermark", "WatermarkModelUnavailable"),
     ("starlette.requests", "ClientDisconnect"),
 })

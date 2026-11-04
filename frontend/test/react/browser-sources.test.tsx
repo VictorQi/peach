@@ -47,3 +47,13 @@ it('删除浏览器来源会删掉已导入的历史，确认弹层用危险样�
   await click(host.querySelector('[aria-label="删除 Chrome"]'));
   expect(modal.mock.calls[0]?.[0]).toMatchObject({ title: '删除 Chrome', confirmLabel: '删除浏览器来源', danger: true });
 });
+
+it('停止读取直接生效，不弹确认，也不删除已导入记录', async () => {
+  const modal = vi.spyOn(legacyUi, 'confirmModal');
+  const fetcher = vi.fn(async (_path: string, _init?: RequestInit) => ({ ok: true, json: async () => ({ dashboard: {} }) }));
+  vi.stubGlobal('fetch', fetcher);
+  const host = await open();
+  await click(host.querySelector('[aria-label="停止读取 Chrome"]'));
+  expect(modal).not.toHaveBeenCalled();
+  expect(JSON.parse(fetcher.mock.calls[0]![1]?.body as string)).toEqual({ operation: 'disable', id: 'chrome', window: '90d' });
+});

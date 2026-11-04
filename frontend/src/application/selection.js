@@ -56,7 +56,7 @@ export async function runCatalogBatch(operation,button){
   const labels={like:'喜欢',seen:'标为看过',later:'加入稍后看',dispose:'移入回收站',restore:'还原',delete:'彻底删除'};
   const titles={like:'喜欢所选项目',seen:'标记为已看',later:'加入稍后看',dispose:'移入回收站',restore:'还原所选项目',delete:'永久删除所选项目'};
   const ids=[...selected];if(!ids.length)return;
-  return confirmModal({title:titles[operation],body:`将处理选中的 ${ids.length} 项。${operation==='delete'?'文件和馆藏记录会永久删除，无法恢复。':operation==='dispose'?'馆藏记录可在回收站还原。':''}`,confirmLabel:titles[operation],danger:operation==='delete',onConfirm:async()=>{
+  const execute=async()=>{
   setActionBusy(button);
   try{const r=await api('/api/batch',{method:'POST',body:JSON.stringify({ids,operation})});
     if(r.blocked&&r.blocked.length)throw new Error(`已永久删除 ${r.purged} 项；${r.blocked.length} 项未能删除，仍在回收站：\n`
@@ -74,7 +74,9 @@ export async function runCatalogBatch(operation,button){
     }:null})}
   catch(error){setActionBusy(button,false);throw error}
   finally{setActionBusy(button,false);paintSelection()}
-  }});
+  };
+  if(operation==='delete')return confirmModal({title:titles[operation],body:`选中的 ${ids.length} 项文件和馆藏记录会永久删除，无法恢复。`,confirmLabel:titles[operation],danger:true,onConfirm:execute});
+  try{return await execute()}catch(error){receiptsState.actionFailure('批量'+labels[operation],error)}
 }
 
 export async function pickBatchRegion(){
@@ -109,8 +111,6 @@ export async function pickBatchRegion(){
 export async function runFollowBatch(action,button){
   const items=[...followSelected];if(!items.length)return;
   const labels={save:'保存到数据库',seen:'标记已看',ignored:'忽略'};
-  const titles={save:'保存所选作品',seen:'标记为已看',ignored:'忽略所选作品'};
-  return confirmModal({title:titles[action],body:`将处理选中的 ${items.length} 项关注作品。`,confirmLabel:titles[action],danger:false,onConfirm:async()=>{
   setActionBusy(button);
   try{
     const path=action==='save'?'/api/follow/save':'/api/follow/status';
@@ -119,16 +119,13 @@ export async function runFollowBatch(action,button){
     // 标记完按地址重读这一页：路由树的关注元素推一个新代次，列表重取、不重挂。
     setSelectMode(false,true);if(location.pathname==='/follow')writeShell({pageOpens:pageOpens+1});
     receiptsState.actionReceipt(`已${labels[action]} ${items.length} 项`);
-  }catch(error){setActionBusy(button,false);throw error}
+  }catch(error){receiptsState.actionFailure('批量'+labels[action],error)}
   finally{setActionBusy(button,false);paintSelection()}
-  }});
 }
 
 export async function runJunkBatch(operation,button){
   const ids=[...selected];if(!ids.length)return;
   const labels={'dismiss-junk':'不是垃圾','reconsider-junk':'重新判断',dispose:'移入回收站'};
-  const titles={'dismiss-junk':'标记为非垃圾','reconsider-junk':'重新检查文件',dispose:'移入回收站'};
-  return confirmModal({title:titles[operation],body:`将处理选中的 ${ids.length} 个文件。`,confirmLabel:titles[operation],danger:false,onConfirm:async()=>{
   setActionBusy(button);
   try{
     await api('/api/batch',{method:'POST',body:JSON.stringify({ids,operation,
@@ -140,9 +137,8 @@ export async function runJunkBatch(operation,button){
       await api('/api/batch',{method:'POST',body:JSON.stringify({ids,operation:inverse})});
       await loadCatalog();
     }:null});
-  }catch(error){setActionBusy(button,false);throw error}
+  }catch(error){receiptsState.actionFailure('批量'+labels[operation],error)}
   finally{setActionBusy(button,false);paintSelection()}
-  }});
 }
 
 export function mountBatchDock(){

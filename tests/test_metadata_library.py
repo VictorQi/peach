@@ -2462,41 +2462,12 @@ class LibraryNfoTests(unittest.TestCase):
                          [('外部资料本趟没轮到：r18.dev：撞上了验证页', 'paused')])
         self.assertEqual(state['paused_count'], 1)
 
-    def test_waiting_for_someone_to_click_a_verification_is_not_charged_to_the_title(self):
-        """浏览器来源第一次弹验证窗口要等两分多钟，那段时间不算进这部片的预算：下一站照样有预算可问。
 
-        ADR-0065 第二条：弹窗那一段从弹出起算、不受请求时限约束，一部片 90 秒的资料预算装不下它。
-        """
-        from peach.library_processing import LibraryMetadataProvider
-        from peach.sources.base import FailureReason, SourceFailure
-        clock = [100.0]
-        seen = {}
-
-        class Challenged:
-            def records(self, code, *, session):
-                seen['fc2ppvdb'] = session.deadline
-                clock[0] += 45 + 120
-                raise SourceFailure(FailureReason.NOT_FOUND, '没有')
-
-        class Next:
-            def records(self, code, *, session):
-                seen['javten'] = session.deadline
-                return [SimpleNamespace(payload=lambda: {'id': code, 'title': '日本語タイトル'})]
-
-        provider = LibraryMetadataProvider.__new__(LibraryMetadataProvider)
-        provider.transport = Mock()
-        with patch.dict('peach.sources.SITE_SOURCES', {'fc2ppvdb': Challenged, 'javten': Next}), \
-                patch('peach.library_processing.time', SimpleNamespace(monotonic=lambda: clock[0])):
-            found = provider.fc2('FC2-PPV-1234567', deadline=190.0, route=('fc2ppvdb', 'javten'), covers=True)
-        self.assertEqual([name for name, _ in found], ['javten'])
-        self.assertEqual((seen['fc2ppvdb'], seen['javten']), (190.0, 310.0))
-        self.assertEqual(provider.excused, 120.0)
-
-    def test_a_browser_source_gets_the_whole_automatic_verification_window(self):
-        """浏览器来源一条请求给 45 秒，不按剩余预算往下裁：自动过验证最多要 40 秒。"""
-        from peach.jav_cover_fetch import BROWSER_REQUEST_TIMEOUT, request_timeout
-        self.assertEqual(request_timeout('https://fc2ppv-db.com/ja/articles/1', 10.0), BROWSER_REQUEST_TIMEOUT)
-        self.assertEqual(request_timeout('https://javten.com/video/1', None), BROWSER_REQUEST_TIMEOUT)
+    def test_source_requests_obey_the_remaining_budget(self):
+        """每个来源的请求服从剩余预算，默认上限为三十秒。"""
+        from peach.jav_cover_fetch import request_timeout
+        self.assertEqual(request_timeout('https://fc2ppv-db.com/ja/articles/1', 10.0), 10.0)
+        self.assertEqual(request_timeout('https://javten.com/video/1', None), 30.0)
         self.assertEqual(request_timeout('https://r18.dev/videos/1', 10.0), 10.0)
         self.assertEqual(request_timeout('https://r18.dev/videos/1', None), 30.0)
 

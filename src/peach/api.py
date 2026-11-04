@@ -35,7 +35,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.datastructures import MutableHeaders
 from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES, GZipMiddleware
 
-from . import (__version__, browser_transport, feeds, tunnel, web_contract,
+from . import (__version__, feeds, tunnel, web_contract,
                web_feeds, web_follow, web_settings)
 from . import routes_api, routes_auth, routes_configuration, routes_jav_browser, routes_media, routes_pages, routes_subtitles
 from .buildinfo import frozen_build
@@ -728,7 +728,6 @@ def create_app(
                 "ledger_writer_origin": settings.review_writer_origin if read_only else None,
                 "scheme": "https" if settings.tls_enabled else "http",
                 # 采集用的浏览器窗口正等着人点验证的站，供排查时看一眼；窗口本身就是提醒，不另弹通知（ADR-0065）。
-                "attention": browser_transport.attention(),
                 # 健康检查可能被公网探针访问，不能在这里回传随机 Tunnel URL。
                 "tunnel": {"enabled": settings.tunnel_enabled, "state": tunnel_state.state},
         }

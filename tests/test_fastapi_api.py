@@ -387,7 +387,6 @@ class FastApiContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["version"], __version__)
         # 采集浏览器等人点验证的站列在这里，供排查（ADR-0065）；平时是空表。
-        self.assertEqual(response.json()["attention"], [])
         checks = response.json()["checks"]
         self.assertEqual(set(checks), {"database", "schema", "configured", "ffmpeg", "media_mounts", "security"})
         self.assertTrue(all(set(check) == {"status", "reason"} for check in checks.values()))
@@ -2322,7 +2321,7 @@ class FastApiContractTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn('<script>', payload)
                 self.assertEqual(response.headers['cache-control'], 'no-store')
 
-    async def test_tutorial_entry_first_frame_uses_shared_ledger_completion(self):
+    async def test_help_entry_stays_available_after_completion_and_reopening(self):
         from html.parser import HTMLParser
         from peach.web_tutorial import CAMPAIGN
 
@@ -2338,7 +2337,7 @@ class FastApiContractTests(unittest.IsolatedAsyncioTestCase):
                              encoding='utf-8')
         await self.client.post('/login', content='token=secret&next=%2F',
                                headers={'Content-Type': 'application/x-www-form-urlencoded'})
-        for action, hidden in ((None, False), ('complete', True), ('reopen', False)):
+        for action in (None, 'complete', 'reopen'):
             if action:
                 result = await self.client.post('/api/tutorial-progress', json={'campaign': CAMPAIGN, 'action': action})
                 self.assertEqual(result.status_code, 200, result.text)
@@ -2348,7 +2347,7 @@ class FastApiContractTests(unittest.IsolatedAsyncioTestCase):
                 parsed = Buttons()
                 parsed.feed(response.text)
                 self.assertIsNotNone(parsed.entry)
-                self.assertEqual('hidden' in parsed.entry, hidden)
+                self.assertNotIn('hidden', parsed.entry)
 
     async def test_canonical_page_urls_require_authentication(self):
         for path in ('/assets/1', '/posts/1', '/works/ABC-001', '/performers/1',

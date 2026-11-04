@@ -342,18 +342,9 @@ class LibraryMetadataProvider:
                             max_bytes=MAX_SOURCE_BYTES, max_seconds=MAX_SOURCE_SECONDS),
             2.0, limiter=SOURCE_LIMITER)
 
-    #: 由本机浏览器过验证的来源累计等人点验证的秒数（`_excuse`）。调用方拿它前后相减，把这段时间
-    #: 从单项动作预算里扣掉：一个站第一次弹验证窗口时，那一问要等 `min(40, timeout) + 120` 秒，
-    #: 超过一部片 90 秒的资料预算，不扣掉的话这部片会被记成「预算内未取得」（ADR-0065 第二条）。
+    #: 首次准备采集工具的耗时不计入单项资料请求预算。
     excused = 0.0
 
-    def _excuse(self, source, started):
-        """`source` 是浏览器来源、这一问超过了 `BROWSER_REQUEST_TIMEOUT`：超出的那段按等人点验证算。"""
-        from .jav_cover_fetch import BROWSER_REQUEST_TIMEOUT
-        from .scraping_access import SOURCES
-        spent = time.monotonic() - started
-        if SOURCES.get(source, {}).get('browser') and spent > BROWSER_REQUEST_TIMEOUT:
-            self.excused += spent - BROWSER_REQUEST_TIMEOUT
 
     def amane(self, code, *, deadline=None, route=()):
         """经 amane 桥问 `route` 里那几站，一次子进程并发问完，返回 `[(来源, 资料)]`。
@@ -511,8 +502,8 @@ class LibraryMetadataProvider:
         Product 就归 `not_found`——那不是抓取失败，是这部片在站上没有了。本地这批没封面的 FC2 多数是
         这种，所以接着问 fc2cmadb：它留着下架作品的标题、卖家、标签与封面原图。再往下是 FC2PPV-DB
         （女优、卖家、販売日与流出标记，不给封面）与 JAVten（日文标题、标签与存储原件地址），这两站
-        在 Cloudflare 验证后面，经本机浏览器过验证（ADR-0065）；验证没过就整站冷却，链照常往下走。
-        浏览器那一问里等人点验证的时间记进 `excused`，不算进这部片的动作预算。最后才落到 JavArchive，
+        需要可用的站点会话；验证页只记录未取得并冷却，链照常往下走。
+        验证或访问失败按来源记录并继续下一站。最后才落到 JavArchive，
         那一档只给标题和一张转存封面，比官方原图差一档（2026-09-22 实测 `FC2-PPV-4137487`
         在 fc2cmadb 是 404，JavArchive 上有）；它的每一条转存各交一份（`records()`）。几处都
         没有才按 `NotFound` 交出去，记进「没有」的记忆，一周内不再问。
@@ -547,7 +538,6 @@ class LibraryMetadataProvider:
                                                 and _lacks_performers(required, answered)):
                 break
             state['asked'].add(name)
-            started = time.monotonic()
             additions = []
             try:
                 session = Session(self.transport, _extended(deadline, self.excused - mark))
@@ -563,8 +553,6 @@ class LibraryMetadataProvider:
                 _raise_task_failure(error)
                 if not is_missing(error):
                     state['problems'].append(error)
-            finally:
-                self._excuse(name, started)
             received(additions)
         if state['found'] or known:
             return state['found']
@@ -1697,7 +1685,6 @@ class _RemoteSession:
                 if source != 'fc2':
                     continue
             try:
-                # 浏览器来源等人点验证的那段不算进这部片的预算（`LibraryMetadataProvider.excused`）。
                 update(current_source={'key': source, 'label': PROVIDER_NAMES.get(source, source)})
                 found = self._ask(source, code, members, cached, required=required, evidence=evidence,
                                   deadline=_extended(deadline, _excused(self._provider) - mark),

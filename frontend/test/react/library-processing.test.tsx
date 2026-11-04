@@ -17,7 +17,7 @@ import { LibraryProcessingNotice } from '../../src/react/library-processing/libr
 import { setProcessingNoticeVisible } from '../../src/react/library-processing/processing-notice-visibility';
 import type { LibraryProcessingProps } from '../../src/react/bundle';
 
-import { actionOrder, buttonNamed as textButtonNamed, click, mount, mountRoot, submit } from './render';
+import { actionOrder, buttonNamed as textButtonNamed, click, mount, mountRoot } from './render';
 
 // 取消要过真的确认框：桩里的 `confirmModal` 不画对话框。
 vi.mock('@peach/legacy/ui', async (original) => ({
@@ -137,19 +137,18 @@ const menuItem = (label: string) =>
 
 const startFrom = async (element: Element | null | undefined) => {
   await click(element);
-  await submit(document.querySelector('dialog form'));
 };
 
 it.each([
-  ['同步新增文件', '同步新增文件', '新增文件与待补全影片', {incremental:true}, {stage:'all',incremental:'1'}],
-  ['仅发现新增文件', '发现新增文件', '尚未登记的新增文件', {stage:'scan',incremental:true}, {stage:'scan',incremental:'1'}],
-  ['补全待处理影片', '补全待处理影片', '已登记的待补全影片', {stage:'collect',scope:'new'}, {stage:'collect',scope:'new'}],
-  ['同步整个媒体库', '同步整个媒体库', '整个媒体库', {}, {stage:'all'}],
-  ['仅扫描文件', '扫描全部文件', '整个媒体库', {stage:'scan'}, {stage:'scan'}],
-  ['补全资料与预览', '补全已入库影片', '整个媒体库', {stage:'collect'}, {stage:'collect'}],
-  ['仅补全影片资料', '仅补全影片资料', '整个媒体库', {stage:'metadata'}, {stage:'metadata'}],
-  ['仅补全预览图', '仅补全预览图', '已入库的本地视频', {stage:'previews'}, {stage:'previews'}],
-] as const)('%s 的确认范围、预估请求与提交保持一致', async (label, title, scope, command, estimate) => {
+  ['同步新增文件', {incremental:true}],
+  ['仅发现新增文件', {stage:'scan',incremental:true}],
+  ['补全待处理影片', {stage:'collect',scope:'new'}],
+  ['同步整个媒体库', {}],
+  ['仅扫描文件', {stage:'scan'}],
+  ['补全资料与预览', {stage:'collect'}],
+  ['仅补全影片资料', {stage:'metadata'}],
+  ['仅补全预览图', {stage:'previews'}],
+] as const)('%s 直接提交用户选定的范围，不另开确认框或读取预估', async (label, command) => {
   const {fetcher, posts} = await open({status:'idle',new_asset_count:2});
   const host = await mount(card({toast:vi.fn()}));
   if (label === '同步新增文件') await click(buttonNamed(label,host));
@@ -157,18 +156,9 @@ it.each([
     await click(host.querySelector('[data-split-button] [aria-haspopup="dialog"]'));
     await click(menuItem(label));
   }
-  expect(document.querySelector('dialog')?.textContent).toContain(title);
-  expect(document.querySelector('[data-processing-scope]')?.textContent).toBe(`处理范围：${scope}`);
-  const requested = fetcher.mock.calls.map(([path]) => String(path)).find(path => path.includes('estimate=1'))!;
-  const params = new URL(requested, 'https://peach.test').searchParams;
-  expect(Object.fromEntries(params)).toEqual({estimate:'1',...estimate});
-  await submit(document.querySelector('dialog form'));
+  expect(document.querySelector('dialog')).toBeNull();
+  expect(fetcher.mock.calls.some(([path]) => String(path).includes('estimate=1'))).toBe(false);
   expect(posts()).toEqual([command]);
-});
-const chooseLow = () => act(async () => {
-  const slider = document.querySelector('dialog input[type="range"]')!;
-  slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
-  slider.dispatchEvent(new KeyboardEvent('keyup', { key: 'Home', bubbles: true }));
 });
 
 it('来源说没有只报一个数，不算问题也不提供失败重试', async () => {
@@ -509,20 +499,11 @@ it('来源说没有的计数带千分位，等待时长按分、时、天进位'
     .toBe('采集缺失封面 · 已等待 3 天 0 小时');
 });
 
-it('日常同步先显示流量预估，确认模式后才启动，取消不启动', async () => {
-  const served = await open({ status: 'idle', speed_mode: 'standard' }, () => ({ status: 'running', job_id: 'one' }));
+it('日常同步直接启动，处理强度沿用服务端已有配置', async () => {
+  const served = await open({ status: 'idle', speed_mode: 'low' }, () => ({ status: 'running', job_id: 'one' }));
   const host = await mount(card({ toast: vi.fn() }));
   await click(buttonNamed('同步新增文件', host));
-  expect(served.posts()).toEqual([]);
-  expect(document.querySelector('dialog')?.textContent).toContain('可能让电脑变慢');
-  await click(buttonNamed('取消', document.querySelector('dialog')!));
-  expect(served.posts()).toEqual([]);
-  await click(buttonNamed('同步新增文件', host));
-  expect(document.querySelector('dialog [aria-label="流量预估"]')?.textContent).toContain('预计流量');
-  expect(host.querySelector('[data-processing-controls]')).toBeNull();
-  await chooseLow();
-  await submit(document.querySelector('dialog form'));
-  expect(served.posts()).toEqual([{ incremental:true, speed_mode: 'low' }]);
+  expect(served.posts()).toEqual([{ incremental: true }]);
   expect(document.querySelector('dialog')).toBeNull();
 });
 
@@ -646,16 +627,16 @@ it('扫描总量未知时显示已发现文件数，已知阶段显示完成数'
   expect(processingLine({ status: 'paused', checked: 38, total: 100 })).toBe('已暂停 · 38 / 100 项');
 });
 
-it('启动失败时提示弹窗保留模式选择和重试入口', async () => {
+it('启动失败留在任务卡片内，可以直接重试', async () => {
   await open({ status: 'idle' });
-  vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => init?.method === 'POST'
+  const fetcher = vi.fn(async (_url: string, init?: RequestInit) => init?.method === 'POST'
     ? { ok: false, status: 400, json: async () => ({ error: '媒体目录不可用' }) }
-    : { ok: true, status: 200, json: async () => ({ status: 'idle' }) }));
+    : { ok: true, status: 200, json: async () => ({ status: 'idle' }) });
+  vi.stubGlobal('fetch', fetcher);
   const host = await mount(card({ toast: vi.fn() }));
   await click(buttonNamed('同步新增文件', host));
-  await chooseLow();
-  await submit(document.querySelector('dialog form'));
-  expect(document.querySelector('dialog')?.textContent).toContain('媒体目录不可用');
-  expect(document.querySelector<HTMLInputElement>('dialog input[type="range"]')?.value).toBe('0');
-  expect(document.querySelector('[data-modal-confirm]')?.getAttribute('aria-busy')).toBeNull();
+  expect(host.textContent).toContain('媒体目录不可用');
+  expect(document.querySelector('dialog')).toBeNull();
+  await click(buttonNamed('同步新增文件', host));
+  expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(2);
 });

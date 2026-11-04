@@ -350,7 +350,7 @@ class RemoteReportingTests(unittest.TestCase):
         import asyncio
         from concurrent.futures import CancelledError
         from peach import error_reporting
-        from peach.browser_transport import BrowserUnavailable, ChallengeUnsolved
+        from peach.browser_transport import BrowserUnavailable
         from peach.jav_cover_fetch import CoverConnectError, DeadlineExceeded
         from peach.jobs import JobPaused, MeteredSourceDenied, DiskSpaceDenied, TaskRunConflict
         from peach.metadata import MetadataProviderError
@@ -363,7 +363,7 @@ class RemoteReportingTests(unittest.TestCase):
         errors = [asyncio.CancelledError(), CancelledError(), InterruptedError(), JobPaused(),
                   MeteredSourceDenied(), DiskSpaceDenied(), TaskRunConflict('processing', 1),
                   SourcePaused(), DeadlineExceeded(), CoverConnectError(), PreviewUnavailable(),
-                  SegmentCancelled(), TranscodeCancelled(), BrowserUnavailable(), ChallengeUnsolved(),
+                  SegmentCancelled(), TranscodeCancelled(), BrowserUnavailable(),
                   ClientDisconnect(),
                   MetadataProviderError('auth', kind='auth'),
                   MetadataProviderError('absent', kind='not_found'),

@@ -210,8 +210,7 @@ Wiki 与视频作品资料无关。
 - 封面那一步接着用资料那一步的快照：r18.dev 快照里的作品 JSON 直接给出原图地址，社区那几家的快照直接交给
   图源印证；手上有一张候选宽到 700 就不再问 r18.dev 与 MGS（`best_cover` 的 `sites_when_needed`）。r18.dev
   不在这个番号的链上时，封面那一步也不问它。
-- 浏览器来源（FC2PPV-DB、JAVten）一条请求给 45 秒，不按剩余预算往下裁。第一次弹验证窗口时等人点的那段
-  时间记进 `LibraryMetadataProvider.excused`，不算进这部片的动作预算（ADR-0065 第二条）。
+- 各来源请求服从剩余动作预算，默认上限 30 秒。验证失败按来源冷却，继续下一站，不启动浏览器或等待用户点击。
 
 ### 手动替换一条链
 
@@ -315,49 +314,17 @@ JavBus 对 FC2 都给不出东西，javdb 收了一部分但配额紧）。所�
 
 ### FC2PPV-DB 与 JAVten 的 Cloudflare 验证
 
-这两站都在 Cloudflare 的 JS 验证后面。httpx 与模拟 Chrome 指纹的 curl_cffi 直连都回 403、标题
-`Just a moment...`（`sources.base.challenge_page`）。只有浏览器过完验证发下的 `cf_clearance` 能进，而它绑着
-解题那台浏览器的 User-Agent 与出口 IP，且只活 30 分钟。
+这两站可能返回 Cloudflare 验证页。HTTP 请求使用来源设置中的连接方式与用户按需提供的 Cookie；未取得可用会话时跳过受限部分，不启动浏览器、请求登录或代替用户点击年龄确认。已有资料与其他来源继续使用。
 
-所以这两站的页由本机浏览器打开（`peach.browser_transport`，ADR-0065）：
-
-1. Peach 拉起用户机器上的 Chrome，没有才用 Edge（InPrivate）。独立 profile 放在 `peach-data/secrets/browser/`，
-   窗口在屏幕外。
-2. 导航到地址。落到验证页就等它自己过（一般 3～25 秒，不用人点）。自动阶段最多等
-   `min(40 秒, 这条请求的 timeout)`。
-3. 没过就把窗口顶到前面让人点一下，再等两分钟；这两分钟不受 timeout 约束。同一站弹过没点就不再弹。
-4. 还没过，按 `blocked_pause` 整站冷却（15 分钟起翻倍到 6 小时），链照常往下走。
-5. 过了就把最终地址、状态码与文档读回来。
-
-其他规则：
-
-- 不是验证页、却在 timeout 内没打开的页，按连接失败重试。
-- 冷却记录带 `via`：直连 403 攒下的冷却在切到浏览器时作废，反之亦然，规则见 ADR-0065 第二条。
-- FC2PPV-DB 第一次进站落年龄确认页（`/age-verify`），传输按 `SOURCES` 里的 `browser_gate` 替人点那颗按钮。
-- 浏览器 10 分钟不用就自己退出。
-- 这台机器没有 Chrome／Edge（`find_browser`）时走 HTTP：整站 UA（`peach.user_agent.USER_AGENT`）要与用户的
-  Chrome 一致，「来源和凭证」里贴 Cookie，连接方式选与那台浏览器同一个出口。403 同样冷却，保存新 Cookie
-  清冷却。JAVten 搜索一跳的 Location 是 `http://`，HTTP 层把同主机的明文跳转升回 https 再带 Cookie；浏览器
-  路径里由浏览器自己跟跳。
+拒绝访问和验证页按来源冷却，首次 15 分钟，连续拒绝逐步延长至 6 小时。429 尊重 Retry-After，已有冷却在传输方式变化后仍保留。各次请求服从剩余任务预算。用户主动更新来源会话或连接配置后，沿用现有设置保存语义重新检查。
 
 ### minnano-av 的间歇拦截
 
-minnano-av 也在 Cloudflare 后面，但对 HTTP 客户端是间歇拦截：2026-10-01 同一出口上，检索页被拦、一分钟后
-资料页照常回 200。所以它不像上面两站那样一开始就走浏览器，在 `scraping_access.SOURCES` 里登记的是
-`browser_fallback`：
+补别名、补女优资料与名册维护共用 `SourceTransport` 的 HTTP 连接策略和来源冷却。403、429、验证页和服务器暂时不可用分别记录并停止本轮访问，不转交独立 Chrome 或 Edge。522 表示来源连接问题，不作为要求用户登录的依据。
 
-1. 先走 HTTP 客户端（`SourceTransport`，连接方式按「来源和凭证」里这一站的设置）。
-2. 回 403、429 或验证页时，由本机浏览器取同一页验证（`peach.browser_transport`，与上面两站共用 profile 与进程）。
-3. 浏览器取到 200 的正常页：这一站固定走浏览器，写进来源设置 `secrets/follow/scraping-minnano-av.json` 的
-   `transport: browser`；HTTP 客户端攒下的冷却清掉。之后的请求不再先问 HTTP 客户端，删掉这个键才回到第一步。
-4. 浏览器也没取到（没有浏览器、验证没过、同样被拦）：照 HTTP 客户端被拦那样冷却，15 分钟起翻倍到 6 小时。
+旧配置中的 `transport: browser` 不再启用浏览器采集，旧冷却仍有效。用户主动发起的账号连接与后台采集边界见 [ADR-0131](adr/0131-consumer-control-and-privacy.md)。
 
-补别名、补女优资料（`MinnanoPages`）与 `harvest_performer_links.py`、`harvest_agency_rosters.py`、
-`resync_performer_agency.py` 都经 `SourceTransport` 取 minnano-av，共用同一份冷却与固定状态。2026-10-01 实测：
-临时 profile 的 Chrome 取检索页，跟到资料页 `actress695633.html`，资料表解析正常。
-
-候选备援（未接入）：OpenAver 0.16.13 拔掉 minnano-av 后按 xcity → 维基 → graphis 逐字段合并女优资料；只作 minnano-av
-取不到时的补位，不替换它，因为它是目前唯一能从名字走到事务所名册的入口（调研见 ADR-0092）。
+候选备援（未接入）：OpenAver 的其他资料来源可作为 minnano-av 取不到时的补位，身份与事务所关联仍须按既有证据判据核验，调研见 ADR-0092。
 
 ### JavArchive
 

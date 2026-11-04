@@ -87,13 +87,16 @@ describe('检查更新', () => {
     expect(host.textContent?.split('尚未检查')).toHaveLength(2);
   });
 
-  it('刷新后接着已准备好的更新，弹一次重启确认，确认前不发重启', async () => {
+  it('准备好的更新留在设置页，用户点击重启后才确认与安装', async () => {
     vi.useFakeTimers();
     const modal = vi.spyOn(legacyUi, 'confirmModal');
     const fetcher = fetchMock(200, { state: 'restarting', progress: 0 });
     vi.stubGlobal('fetch', fetcher);
     const host = await mount(<ReleaseUpdates initial={release} initialJob={{ state: 'ready', progress: 100, version: '0.10.0' }} />);
     expect(host.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('100');
+    expect(modal).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+    await click(buttonNamed('重启安装', host));
     expect(modal).toHaveBeenCalledTimes(1);
     expect(modal.mock.calls[0]?.[0]).toMatchObject({
       title: '更新已准备好', body: 'Peach 0.10.0 将在重启后安装。', confirmLabel: '立即重启', cancelLabel: '稍后',

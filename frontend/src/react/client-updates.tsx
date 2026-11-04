@@ -1,7 +1,5 @@
-/** 应用级更新提示读取本机快照；刷新由用户明确触发。 */
-import { useEffect, useRef, useState, type MouseEvent } from 'react';
-import { createPortal } from 'react-dom';
-import { LinkButton } from '@/components/base/buttons/link-button';
+/** 设置页按需读取本机更新与补修快照。 */
+import { useEffect, useRef, useState } from 'react';
 
 import { apiGet } from '../api';
 import type { ReleaseState, UpdateJob } from './bundle';
@@ -20,8 +18,6 @@ export interface ClientUpdates {
 export const CLIENT_UPDATES_INTERVAL = 120_000;
 const REQUEST_TIMEOUT = 15_000;
 const visible = () => document.visibilityState !== 'hidden';
-const ACTIVE = new Set(['downloading', 'verifying', 'extracting', 'preparing', 'restarting', 'installing']);
-export const RELEASE_UPDATES_PATH = '/settings/maintenance#releaseUpdates';
 
 function pageRuntime(): ClientUpdates['runtime'] | null {
   try {
@@ -82,43 +78,4 @@ export function useClientUpdates() {
   const refresh = !!snapshot && !!baseline.current && (snapshot.runtime.version !== baseline.current.version
     || snapshot.runtime.build_id !== baseline.current.build_id);
   return { snapshot, refresh };
-}
-
-/** 横幅复用项目 Banner，动作使用 BoardUI；关闭只作用于当前状态。 */
-export function ClientUpdateBanner({ navigate }: { navigate(path: string): void }) {
-  const { snapshot, refresh } = useClientUpdates();
-  const [dismissed, setDismissed] = useState('');
-  const host = document.querySelector('[data-network-banner]');
-  if (!snapshot || !host) return null;
-  const { release, update_job: job, runtime } = snapshot;
-  const kind = refresh ? 'refresh' : job.state === 'ready' ? 'ready' : ACTIVE.has(job.state) ? 'preparing'
-    : release.state === 'available' && release.latest_version ? 'available' : null;
-  if (!kind) return null;
-  const version = job.state === 'ready' || ACTIVE.has(job.state) ? job.version || release.latest_version : release.latest_version;
-  const identity = JSON.stringify(kind === 'refresh' ? [kind, runtime.version, runtime.build_id] : [kind, version]);
-  if (identity === dismissed) return null;
-  const message = kind === 'refresh' ? 'Peach 已更新，刷新页面即可使用。'
-    : kind === 'ready' ? '更新已准备好，可重启安装。'
-      : kind === 'preparing' ? '正在准备更新。' : '有可用更新。';
-  const openUpdates = (event: MouseEvent<HTMLAnchorElement>) => {
-    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    event.preventDefault();
-    navigate(RELEASE_UPDATES_PATH);
-  };
-  return createPortal(
-    <aside key={identity} className="ui-project-banner peach-react" role="status" data-client-update={kind}>
-      <div><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-info" /></svg>
-        <p><span data-copy-key={`clientUpdates.${kind}.message`}>{message}</span>
-          {kind !== 'refresh' && version ? <span data-copy-ignore=""> Peach {version}</span> : null}</p></div>
-      <div className="flex-wrap">
-        {kind === 'refresh'
-          ? <LinkButton variant="secondary" size="small" onClick={() => window.location.reload()}
-            data-copy-key="clientUpdates.refresh.action">刷新页面</LinkButton>
-          : <LinkButton variant="secondary" size="small" href={RELEASE_UPDATES_PATH} onClick={openUpdates}
-            data-copy-key={`clientUpdates.${kind}.action`}>{kind === 'preparing' ? '查看进度' : '查看更新'}</LinkButton>}
-        <LinkButton variant="secondary" size="small" onClick={() => setDismissed(identity)}
-          data-copy-key={`clientUpdates.${kind}.later`}>稍后</LinkButton>
-      </div>
-    </aside>, host,
-  );
 }

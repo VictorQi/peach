@@ -1,7 +1,7 @@
 (function() {
 	try {
 		var e = typeof globalThis < "u" ? globalThis : typeof window < "u" ? window : typeof global < "u" ? global : typeof self < "u" ? self : {}, t = new e.Error().stack;
-		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "0098747c-ee3e-470b-a9fa-39c221030d1f", e._sentryDebugIdIdentifier = "sentry-dbid-0098747c-ee3e-470b-a9fa-39c221030d1f");
+		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "ef03a0cf-3a1f-42db-ae2b-64130be767d5", e._sentryDebugIdIdentifier = "sentry-dbid-ef03a0cf-3a1f-42db-ae2b-64130be767d5");
 	} catch {}
 })();
 import { beginPlayerGuidePreview as e, closeDrawerAfterNav as t, disposeStage as n, peachHistory$1 as r } from "./peach-app.js";
@@ -855,16 +855,13 @@ function we(i) {
 		}
 		let t = document.querySelector(".peach-guide-popover");
 		if (!t) return;
-		let n = i.invitation && e.target instanceof Element && e.target.closest("#tutorialBtn");
-		if (!t.contains(e.target) && !n && e.key !== "Tab") {
+		if (!t.contains(e.target) && e.key !== "Tab") {
 			e.preventDefault(), e.stopImmediatePropagation();
 			return;
 		}
 		if (e.key !== "Tab") return;
-		let r = [...t.querySelectorAll("button:not([disabled]), summary, a[href], [tabindex=\"0\"]")].filter((e) => e.offsetWidth && e.offsetHeight), a = i.invitation ? document.getElementById("tutorialBtn") : null;
-		a && r.unshift(a);
-		let o = r.indexOf(document.activeElement);
-		e.preventDefault(), e.stopImmediatePropagation(), r[(o + (e.shiftKey ? -1 : 1) + r.length) % r.length]?.focus();
+		let n = [...t.querySelectorAll("button:not([disabled]), summary, a[href], [tabindex=\"0\"]")].filter((e) => e.offsetWidth && e.offsetHeight), r = n.indexOf(document.activeElement);
+		e.preventDefault(), e.stopImmediatePropagation(), n[(r + (e.shiftKey ? -1 : 1) + n.length) % n.length]?.focus();
 	};
 	window.addEventListener("keydown", g, !0), window.addEventListener("resize", t);
 	let _ = r.listen(() => {
@@ -897,7 +894,7 @@ function we(i) {
 			a = Se({
 				animate: !1,
 				smoothScroll: !1,
-				disableActiveInteraction: !i.invitation,
+				disableActiveInteraction: !0,
 				allowKeyboardControl: !1,
 				allowClose: !0,
 				overlayClickBehavior: () => i.close(),
@@ -955,4 +952,4 @@ function we(i) {
 }
 export { we as createGuideSession };
 
-//# debugId=0098747c-ee3e-470b-a9fa-39c221030d1f
+//# debugId=ef03a0cf-3a1f-42db-ae2b-64130be767d5

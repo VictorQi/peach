@@ -16,7 +16,7 @@ from unittest import mock
 from peach.follow import FollowHistoryEnd, FollowSourceError, FollowSourceRateLimited
 from peach.follow_check import plan_check, run_check
 from peach.follow_stream import FollowMediaResolver
-from peach.follow_secrets import CredentialError
+from peach.follow_secrets import CREDENTIAL_GUIDE, Credential, CredentialError, CredentialStore
 from peach.follow_sources import FanboxConnector, FollowCandidate, SourceFetch, _BaseConnector
 from peach.follow_store import FollowStore
 from peach.http import HttpResponse
@@ -34,7 +34,7 @@ class _Credentials:
         self._providers = set(providers)
 
     def load(self, provider):
-        return object() if provider in self._providers else None
+        return Credential(provider, {field: 'fixture' for field in CREDENTIAL_GUIDE.get(provider, {}).get('fields', ())}) if provider in self._providers else None
 
 
 class _Connector:
@@ -236,6 +236,18 @@ class SecondPhaseHandoffTests(_CheckCase):
 
 
 class PlanCheckTests(_CheckCase):
+    def test_required_sources_wait_for_complete_credentials_without_changing_the_source(self):
+        public = self._register()
+        restricted = self._register(provider='rule34xxx', ref='tag', url='https://rule34.xxx/?tags=tag')
+        credentials = CredentialStore(self.root / 'secrets')
+        before = self._row(restricted)
+        self.assertEqual([row['id'] for row in plan_check(self.store, credentials)], [public])
+        credentials.save('rule34xxx', {'user_id': 'fixture'})
+        self.assertEqual([row['id'] for row in plan_check(self.store, credentials)], [public])
+        self.assertEqual(self._row(restricted), before)
+        credentials.save('rule34xxx', {'user_id': 'fixture', 'api_key': 'fixture'})
+        self.assertEqual({row['id'] for row in plan_check(self.store, credentials)}, {public, restricted})
+
     def test_only_enabled_sources_are_planned(self):
         first = self._register()
         second = self._register(ref="other", url="https://other.fanbox.cc/")
@@ -268,8 +280,7 @@ class PlanCheckTests(_CheckCase):
         planned = plan_check(self.store, _Credentials({"rule34xxx"}))
         self.assertTrue(planned[0]["force_media_reparse"])
         without = plan_check(self.store, _Credentials())
-        self.assertFalse(without[0]["force_media_reparse"],
-                         "没配凭据就没有可生效的重解析，不该白打一次无条件请求")
+        self.assertEqual(without, [], "没有必要凭据时不进入采集队列")
 
     def test_paging_back_never_forces_a_refetch(self):
         """往回翻的那一页本来就没有游标，强制重取没有意义。"""
