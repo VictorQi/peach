@@ -70,7 +70,7 @@ React 与 BoardUI 的组件、颜色和尺寸采用 [BoardUI 适配](BOARD_UI.md
 - 遗留 Switch 分段器共享 radio `name`、初始一个 `checked` 并支持键盘；布尔状态使用对应体系的布尔控件，BoardUI Switch 不采用 radio 契约。
 - 菜单每项包含与入口相同的图标和文字，菜单内部滚动、`overscroll-behavior:contain`，不得把浏览器页面撑出滚动条。锚定菜单一律走 `wireAnchoredMenu`：高度压到触发钮那一侧真正剩下的空间（上沿是 `--topH` 顶栏下缘），装不下就在菜单内滚，不横跨触发钮；页面滚动关掉菜单，菜单自身的滚动不关。
 - 只读查询（搜索、筛选）不配提交按钮：回车即执行，忙态落在表单自己身上（`form[aria-busy]` 加前缀原位换 Spinner）。有副作用的提交必须有按钮，且回车同样要能提交。表单里除这个输入框外还有别的字段时浏览器不做隐式提交，回车要自己接管 `requestSubmit()` 并跳过 `isComposing`。判据与实测见 `docs/reference-snapshots/vercel-forms-submit-affordance.md`。
-- 弹层必要性先按 [消费者控制与隐私](adr/0131-consumer-control-and-privacy.md) 判断；配置、可选能力缺失和后台故障在原位呈现。必要的确认走 `confirmModal()`：原生 `<dialog>` 承载，标题是陈述句，正文先说后果并点名
+- 弹层必要性先按 [消费者控制与隐私](adr/0134-consumer-control-and-privacy.md) 判断；配置、可选能力缺失和后台故障在原位呈现。必要的确认走 `confirmModal()`：原生 `<dialog>` 承载，标题是陈述句，正文先说后果并点名
   涉及的两个值，主按钮是与标题同一动词的「动词+名词」，取消键就写「取消」，成功 Toast 与主
   按钮的动词一一对应。写入交给 `onConfirm`，忙态落在主按钮上，失败时弹层不关、原因留在正文
   下方等重试。形状与文案判据见 `docs/reference-snapshots/vercel-geist-modal-measured.md`。

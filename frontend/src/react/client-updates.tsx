@@ -9,7 +9,7 @@ export interface ClientUpdates {
   release: ReleaseState;
   update_job: UpdateJob;
   userscript: { version: string; minimum_version: string; install_url: string };
-  repairs: { state: string; available?: boolean; message?: string; items: {
+  repairs: { state: string; available?: boolean; enabled?: boolean; started?: boolean; message?: string; items: {
     id: string; label: string; state: string; changed?: Record<string, number>;
     pending?: number; failed?: number; queued?: number; review_count?: number;
   }[] };

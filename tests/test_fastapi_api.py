@@ -13,7 +13,7 @@ from collections import OrderedDict
 from contextlib import asynccontextmanager, closing
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, Mock, patch
 from types import SimpleNamespace
 from urllib.parse import parse_qs, quote, urlsplit
 
@@ -443,6 +443,26 @@ class FastApiContractTests(unittest.IsolatedAsyncioTestCase):
             response = await self.client.post('/api/configuration/upgrade-repairs/retry?t=secret', json={})
         self.assertEqual(response.status_code, 409)
         retry.assert_not_called()
+
+    async def test_repair_start_and_pause_are_local_explicit_actions(self):
+        service = self.app.state.upgrade_repairs
+        self.app.state.ledger_background_ready = False
+        activation = Mock(resume=AsyncMock(return_value=True))
+        self.app.state.ledger_activation = activation
+        with patch('peach.api._installation_in_progress', return_value=False), patch.object(
+                service, 'control') as control, patch.object(service, 'snapshot', return_value={'state': 'paused'}):
+            denied = await self.client.post('/api/configuration/upgrade-repairs', json={'action': 'start'})
+            self.assertEqual(denied.status_code, 401)
+            invalid = await self.client.post('/api/configuration/upgrade-repairs?t=secret', json={'action': 'unknown'})
+            self.assertEqual(invalid.status_code, 400)
+            paused = await self.client.post('/api/configuration/upgrade-repairs?t=secret', json={'action': 'pause'})
+            self.assertEqual(paused.status_code, 200)
+            activation.resume.assert_not_called()
+            control.assert_called_once_with('pause')
+            started = await self.client.post('/api/configuration/upgrade-repairs?t=secret', json={'action': 'start'})
+            self.assertEqual(started.status_code, 200)
+            activation.resume.assert_awaited_once()
+            self.assertEqual(control.call_args.args, ('start',))
 
     async def test_diagnostics_is_authenticated_local_and_uses_the_shared_report(self):
         from peach import diagnostics

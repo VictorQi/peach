@@ -96,8 +96,8 @@ TASK_LABELS = {
     "mp4-header-repair": "播放文件头修复",
     'jav-discovery-metadata': '发现页资料读取',
     'diagnostic-export': '诊断导出',
-    "upgrade-repairs": "自动修复",
-    "upgrade-library": "资料自动修复",
+    "upgrade-repairs": "资料更新",
+    "upgrade-library": "影片资料更新",
     "organize": "按模板整理",
     "batch": "批量操作",
     "scrape-codes": "番号资料刮削",
@@ -751,7 +751,7 @@ class TaskRunStore:
         没有父卡片可挂的散行。父行已被 `prune` 掉的后继自己算顶层。
 
         后继还在排或在跑的那几轮不算「完成」，由 `active_parents` 单独交给「正在进行」：
-        自动修复每分钟派一批，它们留在这里会占满第一页，「最近完成」就只剩一个「加载更早」。
+        资料更新分批派发，它们留在这里会占满第一页，「最近完成」就只剩一个「加载更早」。
         """
         size = max(1, min(int(limit), 500))
         marks = ",".join(f"'{name}'" for name in TERMINAL_STATUSES)

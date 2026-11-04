@@ -90,7 +90,7 @@ export function followupTally(counts: FollowupCounts | undefined, runs: TaskRunP
   return { total, active, failed, cancelled, settled: total - active };
 }
 
-/** 同一种任务连着派出的几轮合成一件事：自动修复每分钟派一批，一屏十几张「已完成」卡说的是同一件事。
+/** 同一种任务连着派出的几轮合成一件事：资料更新分批派发，一屏十几张「已完成」卡说的是同一件事。
  *  每组按最新那一轮排在前面，`runs[0]` 是最新那一轮。 */
 export function foldByKind(rows: TaskRunPayload[]): RunFold[] {
   const folds = new Map<string, RunFold>();

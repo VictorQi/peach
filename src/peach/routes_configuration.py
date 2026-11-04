@@ -740,6 +740,19 @@ def client_updates(request: Request, _args=Depends(require_auth)):
 
 @router.post('/api/configuration/upgrade-repairs/retry')
 async def retry_upgrade_repairs(request: Request, _args=Depends(require_auth)):
+    return await _operate_upgrade_repairs(request, 'retry')
+
+
+@router.post('/api/configuration/upgrade-repairs')
+async def control_upgrade_repairs(request: Request, body: dict = Body(...), _args=Depends(require_auth)):
+    local_only(request)
+    same_origin(request)
+    if body.get('action') not in ('start', 'pause'):
+        raise HTTPException(400, '请选择开始或停止派发')
+    return await _operate_upgrade_repairs(request, body['action'])
+
+
+async def _operate_upgrade_repairs(request: Request, action: str):
     import asyncio
     from .api import _installation_in_progress
     local_only(request)
@@ -749,10 +762,13 @@ async def retry_upgrade_repairs(request: Request, _args=Depends(require_auth)):
             raise ValueError('正在安装更新，请稍后重试')
         service = request.app.state.upgrade_repairs
         activation = getattr(request.app.state, 'ledger_activation', None)
-        if activation is not None and not request.app.state.ledger_background_ready:
+        if action != 'pause' and activation is not None and not request.app.state.ledger_background_ready:
             if not await activation.resume():
                 return service.snapshot()
-        await asyncio.to_thread(service.retry)
+        if action == 'retry':
+            await asyncio.to_thread(service.retry)
+        else:
+            await asyncio.to_thread(service.control, action)
         return service.snapshot()
     except (ValueError, OSError, Timeout) as exc:
         raise HTTPException(409, str(exc)) from exc

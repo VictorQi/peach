@@ -51,7 +51,7 @@ Movie demo data; see [asset credits and licenses](https://peach.video/en/credits
 - **Task center**: pause, resume or cancel local background tasks and view their CPU, GPU and download activity where available.
 - **Guided tours**: open help when needed to learn the interface and settings; tutorial progress is shared across devices connected to the same instance.
 
-Background collection does not open or control a browser. Restricted content is skipped when optional source credentials are missing, while your existing library remains available. Version information and update actions stay in settings.
+Background collection does not open or control a browser. Restricted content is skipped when optional source credentials are missing, while your existing library remains available. Optional library updates after an upgrade start when you choose and can be stopped. Version information and update actions stay in settings.
 
 ## Download and use
 

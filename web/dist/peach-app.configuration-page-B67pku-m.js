@@ -1,7 +1,7 @@
 (function() {
 	try {
 		var e = typeof globalThis < "u" ? globalThis : typeof window < "u" ? window : typeof global < "u" ? global : typeof self < "u" ? self : {}, t = new e.Error().stack;
-		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "ed7aebeb-33b1-4478-8e91-acb8e76b4036", e._sentryDebugIdIdentifier = "sentry-dbid-ed7aebeb-33b1-4478-8e91-acb8e76b4036");
+		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "49dea3a7-d96d-44ad-a3f5-168e44f16ee2", e._sentryDebugIdIdentifier = "sentry-dbid-49dea3a7-d96d-44ad-a3f5-168e44f16ee2");
 	} catch {}
 })();
 import { AnimatedItems as e, Cell as t, ChartBackground as n, ChartContainer as r, ChartLegend as i, ChartLegendContent as a, ChartTip as o, ChartTooltip as s, ChartTooltipContent as c, Curve as l, DATA_ITEM_GRAPHICAL_ITEM_ID_ATTRIBUTE_NAME as u, DATA_ITEM_INDEX_ATTRIBUTE_NAME as d, DefaultZIndexes as f, EvilBarChart as p, LabelList as m, LabelListFromLabelProp as h, Layer as g, LoadingIndicator as _, PolarChart as v, PolarLabelContextProvider as y, PolarLabelListContextProvider as b, RegisterGraphicalItemId as x, Sector as S, SetPolarGraphicalItem as C, SetPolarLegendPayload as w, SetTooltipEntrySettings as T, Shape as ee, TIP_SWATCH as te, Text as ne, ZIndexLayer as re, adaptEventsOfChild as ie, arrayTooltipSearcher as ae, createSelector as oe, defaultPolarChartProps as se, findAllByType as ce, get as le, getClassNameFromUnknown as ue, getColorsCount as de, getMaxRadius as fe, getPercentValue as pe, getTooltipNameProp as me, getValueByDataKey as he, interpolate as ge, isNumber as _e, matchAppend as ve, mathSign as ye, polarToCartesian as be, resolveDefaultProps as xe, selectActiveTooltipDataKey as Se, selectActiveTooltipGraphicalItemId as Ce, selectActiveTooltipIndex as we, selectChartDataAndAlwaysIgnoreIndexes as Te, selectChartOffsetInternal as Ee, selectUnfilteredPolarItems as De, svgPropertiesNoEvents as Oe, svgPropertiesNoEventsFromUnknown as ke, tone as Ae, useAnimationCallbacks as je, useAppSelector as Me, useMouseClickItemDispatch as Ne, useMouseEnterItemDispatch as Pe, useMouseLeaveItemDispatch as Fe, usePolarChartLayout as Ie } from "./peach-app.chart-tip-CRxYp6KT.js";
@@ -2460,8 +2460,10 @@ function xa() {
 }
 // src/react/settings/upgrade-repairs.tsx
 var Sa = {
-	pending: "等待修复",
-	running: "正在修复",
+	idle: "尚未开始",
+	paused: "已停止派发",
+	pending: "等待更新",
+	running: "正在更新",
 	failed: "需要重试",
 	review: "需要复核",
 	complete: "已完成",
@@ -2470,10 +2472,12 @@ var Sa = {
 function Ca() {
 	let { snapshot: e } = xa(), [t, n] = (0, Z.useState)(null), r = Y();
 	(0, Z.useEffect)(() => n(null), [e]);
-	let i = t ?? e?.repairs, a = i?.state || "pending", o = i?.items.reduce((e, t) => e + (t.pending || 0), 0) || 0, s = i?.items.reduce((e, t) => e + (t.failed || 0), 0) || 0, c = i?.items.reduce((e, t) => e + (t.review_count || 0), 0) || 0;
+	let i = t ?? e?.repairs, a = i?.state || "pending", o = i?.items.reduce((e, t) => e + (t.pending || 0), 0) || 0, s = i?.items.reduce((e, t) => e + (t.failed || 0), 0) || 0, c = i?.items.reduce((e, t) => e + (t.review_count || 0), 0) || 0, l = (e) => void r.run(e, (t) => G(e === "retry" ? "/api/configuration/upgrade-repairs/retry" : "/api/configuration/upgrade-repairs", e === "retry" ? {} : { action: e }, "POST", t), (e) => {
+		n(e), document.dispatchEvent(new Event("peach:client-updates"));
+	});
 	return /* @__PURE__ */ (0, Q.jsxs)(L, {
 		id: "upgradeRepairs",
-		title: "自动修复",
+		title: "资料更新",
 		aside: /* @__PURE__ */ (0, Q.jsx)(H, {
 			tone: a === "failed" ? "error" : a === "running" ? "progress" : a === "review" ? "warning" : a === "complete" ? "success" : "neutral",
 			children: /* @__PURE__ */ (0, Q.jsx)("span", {
@@ -2482,7 +2486,7 @@ function Ca() {
 			}, a)
 		}),
 		children: [
-			/* @__PURE__ */ (0, Q.jsx)(V, { children: /* @__PURE__ */ (0, Q.jsx)(N, { children: "升级后自动修正资料、更新缓存。" }) }),
+			/* @__PURE__ */ (0, Q.jsx)(V, { children: /* @__PURE__ */ (0, Q.jsx)(N, { children: "按当前来源设置补全已有资料和预览，可能联网。每轮只处理开始时已有的内容，稍后可停止。" }) }),
 			/* @__PURE__ */ (0, Q.jsxs)(ct, { children: [
 				/* @__PURE__ */ (0, Q.jsx)(j, {
 					term: "待完成",
@@ -2498,21 +2502,25 @@ function Ca() {
 				})
 			] }),
 			i?.message || r.error ? /* @__PURE__ */ (0, Q.jsx)(V, { children: /* @__PURE__ */ (0, Q.jsx)(k, { children: r.error || i?.message }) }) : null,
-			a === "running" ? /* @__PURE__ */ (0, Q.jsxs)(V, { children: [/* @__PURE__ */ (0, Q.jsx)(N, { children: "资料与预览正在后台补全。" }), /* @__PURE__ */ (0, Q.jsx)(Vt, {})] }) : null,
-			/* @__PURE__ */ (0, Q.jsx)(M, {
+			o || i?.enabled ? /* @__PURE__ */ (0, Q.jsxs)(V, { children: [/* @__PURE__ */ (0, Q.jsx)(N, { children: i?.enabled ? "资料与预览正在后台补全。" : "尚未完成的工作已保留，停止进度可在任务中心查看。" }), /* @__PURE__ */ (0, Q.jsx)(Vt, {})] }) : null,
+			/* @__PURE__ */ (0, Q.jsxs)(M, {
 				status: c ? /* @__PURE__ */ (0, Q.jsx)(A, {
 					href: "/api/configuration/upgrade-repairs/review",
 					children: "下载复核记录"
 				}) : void 0,
-				children: /* @__PURE__ */ (0, Q.jsx)(E, {
+				children: [/* @__PURE__ */ (0, Q.jsx)(E, {
 					size: "small",
 					variant: "secondary",
-					disabled: !i?.available || a === "running" || !!r.busy || !s && a !== "failed",
-					onClick: () => void r.run("retry", (e) => G("/api/configuration/upgrade-repairs/retry", {}, "POST", e), (e) => {
-						n(e), document.dispatchEvent(new Event("peach:client-updates"));
-					}),
+					disabled: !i?.available || !!r.busy,
+					onClick: () => l(i?.enabled ? "pause" : "start"),
+					children: i?.enabled ? "停止派发" : o ? "继续更新" : "开始更新"
+				}), /* @__PURE__ */ (0, Q.jsx)(E, {
+					size: "small",
+					variant: "secondary",
+					disabled: !i?.available || i?.enabled || !!r.busy || !s,
+					onClick: () => l("retry"),
 					children: "重试失败项"
-				})
+				})]
 			})
 		]
 	});
@@ -5562,4 +5570,4 @@ function ss({ data: e, receipt: t, reopenTutorial: n, section: r, diagnostics: i
 }
 export { is as ConfigurationPage };
 
-//# debugId=ed7aebeb-33b1-4478-8e91-acb8e76b4036
+//# debugId=49dea3a7-d96d-44ad-a3f5-168e44f16ee2
