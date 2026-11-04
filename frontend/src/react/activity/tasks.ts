@@ -14,7 +14,8 @@ export const TASKS_KEY = ['tasks'] as const;
 export type TaskControlAction = 'pause' | 'resume' | 'cancel';
 export type TaskControlState = 'running' | 'pausing' | 'paused' | 'cancelling';
 export type TaskResourceState = 'ready' | 'sampling' | 'unavailable';
-export interface TaskResourceMetric { state: TaskResourceState; high: boolean; reason?: string }
+/** `via` 只出现在未取得的网络读数上：`cloud` 是从网盘挂载读的，网速无法按任务计量。 */
+export interface TaskResourceMetric { state: TaskResourceState; high: boolean; reason?: string; via?: 'cloud' }
 export interface TaskPercentMetric extends TaskResourceMetric { percent: number | null }
 export interface TaskResourcesPayload {
   cpu: TaskPercentMetric;
@@ -228,6 +229,14 @@ export function problemDestination(run: TaskRunPayload, latest = true): { href: 
   return target ? { href: target[0], label: target[1] } : null;
 }
 
+/** 这一轮只处理一部作品时，摘要里带它的 `asset_id` 与文件名，任务卡据此链接到作品详情。 */
+export function taskSubject(run: TaskRunPayload): { href: string; label: string } | null {
+  const id = run.result_summary?.asset_id;
+  const name = run.result_summary?.name;
+  return typeof id === 'number' && Number.isInteger(id) && id > 0 && typeof name === 'string' && name
+    ? { href: `/assets/${id}`, label: name } : null;
+}
+
 /** `LATEST_ONLY` 里每种任务最新那一轮的 id。后继不算：它们挂在父任务下，不是这种任务的一轮。 */
 export function latestOfKind(rows: TaskRunPayload[]): Set<number> {
   const newest = new Map<string, number>();
@@ -286,7 +295,7 @@ export const isRoutine = (run: TaskRunPayload) => run.trigger === 'scheduled'
 export const isActive = (run: TaskRunPayload) => run.status === 'pending' || run.status === 'running';
 
 /** 后继那一行的说明：它在做哪一件（标签去掉与任务名重复的前缀）、做到第几项或结果如何。
- *  标题已经是任务名，这里再写一遍「取新作资料：」读起来就是同一句话说了两次。 */
+ *  标题已经是任务名，这里再写一遍「新作资料采集：」读起来就是同一句话说了两次。 */
 export function followupDetail(row: TaskRunPayload): string {
   const prefix = `${row.task_label}：`;
   const label = row.progress_label || '';

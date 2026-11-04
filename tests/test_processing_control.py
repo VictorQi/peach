@@ -1,5 +1,6 @@
 """馆藏处理控制与启动粗估的隔离行为回归。"""
 import json
+import os
 import tempfile
 import threading
 import time
@@ -18,6 +19,89 @@ from support.ledger import fresh_ledger
 
 
 class ProcessingControlTests(unittest.TestCase):
+    def test_completed_versions_preserve_changes_that_arrive_during_processing(self):
+        from peach.library_new_assets import finish, observe, pending, snapshot
+        self.seed(2)
+        observe(self.db, 1, 100, 1000, new=True)
+        observe(self.db, 2, 100, 1000, new=True)
+        versions = snapshot(self.db, [1, 2])
+        observe(self.db, 1, 100, 2000)
+        finish(self.db, versions)
+        self.assertEqual(pending(self.db), [1])
+        finish(self.db, snapshot(self.db, [1]))
+        self.assertEqual(pending(self.db), [])
+
+    def test_automatic_collection_preserves_interrupted_and_later_file_versions(self):
+        from peach.library_new_assets import observe, pending
+        self.seed(2)
+        for asset_id in (1, 2):
+            observe(self.db, asset_id, 100, 1000, new=True)
+        job = Mock()
+        job.start.side_effect = lambda work, **kwargs: work('isolated-job') or {}
+        contract = SimpleNamespace(db_path=self.db, candidate_root=self.root / 'candidates',
+            cover_root=self.root / 'covers', database=Mock(), library_processing_job=job, cache_bust=Mock())
+        with patch('peach.web_library_processing.settings_file.active', return_value=self.config), \
+                patch('peach.web_library_processing._current', return_value={}), \
+                patch('peach.web_library_processing._processing_request', return_value=(None, [1, 2], 'collect')), \
+                patch('peach.web_library_processing.initial_estimate', return_value={}), \
+                patch('peach.web_library_processing.process_library') as process:
+            process.side_effect = RuntimeError('isolated-interruption')
+            with self.assertRaisesRegex(RuntimeError, 'isolated-interruption'):
+                w_library_processing(contract, {'asset_ids': [1, 2], 'automatic': True})
+            self.assertEqual(pending(self.db), [1, 2])
+            def complete(*args, **kwargs):
+                observe(self.db, 1, 100, 2000)
+                return {'status': 'failed', 'stage': '处理结束', 'completed_at': 1,
+                        'retryable_asset_ids': [2]}
+            process.side_effect = complete
+            w_library_processing(contract, {'asset_ids': [1, 2], 'automatic': True})
+            self.assertEqual(pending(self.db), [1])
+
+    def test_file_versions_queue_only_new_or_changed_events(self):
+        from peach.library_new_assets import _path, observe, pending, remember
+        self.seed(2)
+        observe(self.db, 1, 100, 1000)
+        self.assertEqual(pending(self.db), [])
+        observe(self.db, 1, 100, 2000)
+        self.assertEqual(pending(self.db), [1])
+        remember(self.db, completed=[1])
+        versions = _path(self.db).with_name('incremental-media.json')
+        os.utime(versions, (1, 1))
+        previous_write = versions.stat().st_mtime_ns
+        observe(self.db, 1, 100, 2000)
+        self.assertEqual(pending(self.db), [])
+        self.assertEqual(versions.stat().st_mtime_ns, previous_write)
+        observe(self.db, 2, 100, 1000, new=True)
+        self.assertEqual(pending(self.db), [2])
+
+    def test_automatic_collection_uses_pending_scope_and_respects_paused_work(self):
+        from peach.library_new_assets import remember
+        from peach.web_library_processing import dispatch_incremental
+        self.seed(3)
+        remember(self.db, [2])
+        contract = SimpleNamespace(db_path=self.db)
+        with patch('peach.web_library_processing._current', return_value={'status': 'complete'}), \
+                patch('peach.job_recovery.read', return_value={}), \
+                patch('peach.web_library_processing.w_library_processing') as launch:
+            dispatch_incremental(contract)
+            launch.assert_called_once_with(contract, {'asset_ids': [2], 'stage': 'collect', 'automatic': True})
+        with patch('peach.web_library_processing._current', return_value={'status': 'paused'}), \
+                patch('peach.web_library_processing.w_library_processing') as launch:
+            dispatch_incremental(contract)
+            launch.assert_not_called()
+
+    def test_patch_queue_import_keeps_only_pending_items_and_can_be_consumed(self):
+        from peach.library_new_assets import _path, pending, remember
+        self.seed(3)
+        state = _path(self.db).parent
+        state.mkdir(exist_ok=True)
+        (state / 'incremental-media.json').write_text(json.dumps({'items': {
+            '1': {'status': 'complete'}, '2': {'status': 'pending'}, '3': {'status': 'needs_retry'}}}), encoding='utf-8')
+        self.assertEqual(pending(self.db), [2])
+        remember(self.db, completed=[2])
+        self.assertEqual(pending(self.db), [])
+        self.assertTrue((state / 'library-new-assets.json').is_file())
+
     def assert_processing_status(self, contract, expected):
         from peach.web_library_processing import q_library_processing
         deadline = time.monotonic() + 5
@@ -405,6 +489,36 @@ class ProcessingControlTests(unittest.TestCase):
             'scan_checkpoints':{'root':{'result':{'new_ids':[1,2,3]}}},
             'completed_metadata':['1:R:\\Media\\0.mp4']}),encoding='utf-8')
         self.assertEqual(pending(self.db),[2,3])
+
+    def test_new_asset_range_is_read_under_the_writer_lock(self):
+        """`remember` 持锁原子替换文件；Windows 替换瞬间读会撞上共享冲突，所以读也要等同一把锁。"""
+        from filelock import FileLock
+        from peach.library_new_assets import pending
+        from peach.update_tasks import state_for
+        self.seed(3)
+        path=state_for(self.db).parent/'library-new-assets.json'
+        path.parent.mkdir(parents=True,exist_ok=True)
+        outcome={}
+
+        def read():
+            try:
+                outcome['ids']=pending(self.db)
+            except Exception as error:
+                outcome['error']=error
+        with FileLock(str(path)+'.lock'):
+            path.write_text('[1, 2',encoding='utf-8')
+            reader=threading.Thread(target=read)
+            reader.start()
+            reader.join(0.5)
+            self.assertTrue(reader.is_alive(),f'写入方持锁期间读到了半份文件：{outcome}')
+            path.write_text('[1, 2]',encoding='utf-8')
+        reader.join(5)
+        self.assertEqual(outcome,{'ids':[1,2]})
+
+    def test_new_asset_range_is_empty_before_any_state_exists(self):
+        from peach.library_new_assets import pending
+        self.seed(1)
+        self.assertEqual(pending(self.db),[])
 
     def test_archiving_keeps_full_legacy_issues_and_export_rejects_changes(self):
         import json
@@ -796,6 +910,23 @@ class ProcessingControlTests(unittest.TestCase):
         self.assertTrue(all(row['total'] == 0 for row in discovering))
         self.assertEqual((result.scanned, result.scanned_bytes), (4, 60))
         self.assertEqual(result.junk_isolated, 2)
+
+    def test_incremental_scan_probes_rows_moved_onto_new_files(self):
+        """按番号改指到新文件的旧行不算新行，但文件换了，增量扫描照样要探它。"""
+        from peach.library_processing import _scan_sources
+        config = PeachConfig(self.root, self.root / 'config.toml', present=True, locations={'local': ('R:\\Media',)})
+        scanned = SimpleNamespace(files=2, total_bytes=30, new_ids=(5,), relocated_ids=(7,), junk_isolated=0)
+        with patch('peach.library_processing.scan_location', return_value=scanned), \
+                patch('peach.library_processing._online_source_root', return_value=self.root), \
+                patch('peach.library_processing._ffprobe_path', return_value=None), \
+                patch('peach.library_processing.probe_unmeasured', return_value=0) as probe, \
+                patch('peach.library_processing.reattach_in') as reattach:
+            result = _scan_sources(config, self.db, locations=config.locations, asset_ids=None,
+                                   stage='scan', guard=Mock(), update=lambda **values: None,
+                                   issue=lambda *_args, **_kwargs: None, incremental=True)
+        self.assertEqual(probe.call_args.kwargs['asset_ids'], [5, 7])
+        self.assertEqual(result.new_ids, (5,), "改指的旧行不进新影片范围")
+        reattach.assert_called_once_with(self.db, (5,))
 
     def test_library_scan_reports_conflicting_records_and_processes_both_roots(self):
         import sqlite3

@@ -340,8 +340,13 @@ def _finish_purge(outcome):
     return outcome
 
 
-def _purge_media_path(row, online_roots: dict[str, tuple[Path, ...]]) -> Path:
-    """核对永久删除目标的路径映射和来源可读性，失败时拒绝删除。"""
+def _purge_media_path(row, online_roots: dict[str, tuple[Path, ...]], *,
+                      missing_only: bool = False) -> Path:
+    """核对永久删除目标的路径映射和来源可读性，失败时拒绝删除。
+
+    `missing_only` 只删账本行：媒体目录已从设置里移除时，这一行不在任何来源根下，
+    所在的盘可读就交给调用方 `stat`，文件确实不在才删。要删媒体文件的仍只认在线来源根。
+    """
     media = row["path"]
     from .smb_media import resolve
     if remote := resolve(media):
@@ -351,10 +356,21 @@ def _purge_media_path(row, online_roots: dict[str, tuple[Path, ...]]) -> Path:
         raise OSError("媒体路径未映射到可访问的挂载目录")
     if PureWindowsPath(str(media)).drive:
         location = row["location"] if "location" in row.keys() else None
-        if not any(within_root(translated, root) and root_online(root)
-                   for root in online_roots.get(location, ())):
-            raise OSError("媒体来源未挂载或不可读取")
+        if any(within_root(translated, root) and root_online(root)
+               for root in online_roots.get(location, ())):
+            return translated
+        if missing_only and not _inside_declared_root(translated) and root_online(Path(translated.anchor)):
+            return translated
+        raise OSError("媒体来源未挂载或不可读取")
     return translated
+
+
+def _inside_declared_root(path: Path) -> bool:
+    """路径是否落在设置里任一来源根下，包括此刻离线的根。SMB 根下的行由 `resolve` 先接走。"""
+    from .smb_media import resolve
+    return any(within_root(path, translate_ledger_path(declaration))
+               for declarations in LOCATION_ROOT_DECLARATIONS.values()
+               for declaration in declarations if resolve(declaration) is None)
 
 
 def purge_assets(connection, rows, *, missing_only: bool = False):
@@ -374,7 +390,7 @@ def purge_assets(connection, rows, *, missing_only: bool = False):
             try:
                 if online_roots is None and PureWindowsPath(str(media)).drive:
                     online_roots = _online_source_roots()
-                translated = _purge_media_path(row, online_roots or {})
+                translated = _purge_media_path(row, online_roots or {}, missing_only=missing_only)
             except OSError as error:
                 blocked.append({"id": row["id"], "path": media,
                                 "reason": error.strerror or str(error)})

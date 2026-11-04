@@ -164,6 +164,15 @@ class ScrapeGateTests(unittest.TestCase):
 
 
 class ExtractionTests(unittest.TestCase):
+    def test_transport_markers_preserve_filename_identity_and_custom_rules(self):
+        for name in ('@media.example.tv_ABW-232.mp4', 'Mosaic_reduce_ABW-232.mp4',
+                     'FHD_8M-ABW-232.mp4', 'ABW-232.mp4.mp4', 'ABW-232-4k-fix.mp4'):
+            with self.subTest(name=name):
+                self.assertEqual(release_code_from_filename(name), 'ABW-232')
+        self.assertIsNone(release_code_from_filename('@media.example.tv_VIDEO-2022.mp4'))
+        self.assertEqual(release_code_from_filename('FHD_8M-ABW-232.mp4',
+                         patterns=compile_code_patterns([r'(?P<code>ABW-232)'])), 'ABW-232')
+
     def test_forum_url_wrapper_preserves_filename_and_custom_rules(self):
         for ending in ('[|url]', '[/url]'):
             for extension in ('', '.mp4'):
@@ -326,6 +335,44 @@ class DatedCodeSeparatorTests(unittest.TestCase):
             self.assertTrue(is_uncensored_code(value), value)
         for value in ("09241-001", "0924150-001", "092415-1", "ABW-232"):
             self.assertFalse(is_uncensored_code(value), value)
+
+
+class ShortSerialWidthTests(unittest.TestCase):
+    """登记过的字母段，短号按原写保留：#296 的 `MCDV-24` 与 `MCDV-024` 是两部片。
+
+    JavDB 实测：`MCDV-24` 是メルシーボークー的无码片（2015-06-25，110 分钟），
+    `MCDV-024` 是クリスタル映像的有码片（2004-12-10，130 分钟）。其余字母段的短号仍是
+    补零号的省略写法，两头都钉住，免得有人把例外推广成通用规则（ADR-0133）。
+    """
+
+    def test_other_prefixes_still_pad_short_serials(self):
+        self.assertEqual(normalise_code_key("LAF-41"), "LAF-041")
+        self.assertEqual(release_code_from_filename("laf41.mp4"), "LAF-041")
+        self.assertTrue(same_release_code("MESU-088", "MESU-88"))
+        self.assertEqual(jav_fallback_title("laf41 some title.mp4", "LAF-041"), "some title")
+
+    def test_the_key_keeps_the_written_width(self):
+        self.assertEqual(normalise_code_key("mcdv-24"), "MCDV-24")
+        self.assertEqual(normalise_code_key("MCDV24"), "MCDV-24")
+        self.assertEqual(normalise_code_key("MCDV-024"), "MCDV-024")
+        self.assertEqual(release_code_from_filename("MCDV-24.mp4"), "MCDV-24")
+        self.assertEqual(release_code_from_filename("mcdv-024.mp4"), "MCDV-024")
+
+    def test_the_two_widths_are_two_releases(self):
+        self.assertFalse(same_release_code("MCDV-24", "MCDV-024"))
+        self.assertTrue(same_release_code("MCDV-24", "mcdv24"))
+
+    def test_padding_beyond_three_digits_is_still_one_release(self):
+        # DMM content_id 补到五位：`mcdv00024` 是有码那部，`ssis00001` 是 `SSIS-001`。
+        self.assertTrue(same_release_code("mcdv00024", "MCDV-024"))
+        self.assertFalse(same_release_code("mcdv00024", "MCDV-24"))
+        self.assertTrue(same_release_code("ssis00001", "SSIS-001"))
+        self.assertEqual(normalise_code_key("SSIS-0001"), "SSIS-001")
+
+    def test_filename_matching_follows_the_same_width(self):
+        self.assertEqual(jav_fallback_title("MCDV-24 first title.mp4", "MCDV-24"), "first title")
+        self.assertEqual(jav_fallback_title("mcdv-024 other title.mp4", "MCDV-24"), "mcdv-024 other title")
+        self.assertEqual(jav_fallback_title("MCDV0024 other title.mp4", "MCDV-024"), "other title")
 
 
 class TokyoHotShapeTests(unittest.TestCase):

@@ -65,6 +65,7 @@ function GettingStarted({ go }: { go(path: string): void }) {
   </div>;
 }
 
+
 export function TutorialCenter({ actions }: { actions: ShellActions }) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<'start' | 'interface' | 'settings'>('interface');

@@ -288,7 +288,7 @@ MAKER_NUMBER_PREFIX = {
 _DATED_COMPACT = re.compile(rf"^{_MMDDYY}\d{{2,4}}$")
 _CODE_MAKER_PREFIXED = re.compile(r"^(\d{3})([A-Z]{2,8})-(\d{2,5})$")
 #: 数字前缀单独保留；`h_` 是 DMM content_id 的 label 标记。
-_RELEASE_ID = re.compile(r"^(\d{1,4})?([A-Z]{2,8})0*(\d{1,5})([A-Z]{0,2})$")
+_RELEASE_ID = re.compile(r"^(\d{1,4})?([A-Z]{2,8})(0*\d{1,5})([A-Z]{0,2})$")
 #: MGStage 给 SOD 作品加的店铺前缀：商品页 `107STARS-325` 与 DMM、javdb 的 `STARS-325` 是同一部，
 #: 账本与资源站都只用裸番号。2026-11-01 逐组核过 MGStage 商品页与 javdb 的标题、出演、日期，
 #: 账本里这三个字母段只挂 SOD Create。
@@ -445,18 +445,25 @@ RELEASE_EVIDENCE_KINDS = frozenset({"performer", "studio", "series"})
 #:
 #: 其余前缀取自官网 k-mib.com 的自有作品目录（2026-09-10 快照 368 部，合作厂牌的
 #: JS、STRC、SFL 等不在此列）。它们在账本里 MIB 目录外同样零条。
+#:
+#: 前两批来自本机文件名，其中 `AR`、`JA`、`MH`、`SIA`、`SY`、`WX` 在官网目录里一部都没有：
+#: 官网给同一演员用别的写法（`SY-101` 的 Soyeong 在官网是 `SOY-101`），或者根本不列。
+#: 它们仍留在表里，因为文件都在 MIB 目录下、片长 20～62 分钟、片名带 MIB 演员名。
+#: 代价是同号的日本片会被一起拦下：`SY` 也是 Plum「素人四畳半生中出し」的番号。
+#: `YUJ` 已于 2026-11-03 移出（ADR-0133）：`YUJ-101`、`YUJ-102` 是官网 `AIN-101`、
+#: `AIN-102` 的错名文件，而 `YUJ` 是 Attackers 的系列，`YUJ-072` 被这张表拦得刮不到资料。
 KOREAN_MIB_PREFIXES = frozenset({
     "WX", "AR", "JH", "CA", "IY", "JA", "MY", "SH", "HA", "MH", "DB", "JI",
     "ES", "SR", "SY", "CD", "YH", "UY", "NN", "SA", "JE", "YR",
     "CHU", "ENS", "ERI", "HAL", "HNL", "MIJ", "MIN", "SAR", "SEY", "SIA",
-    "SOY", "SRN", "SUY", "SYN", "YUJ",
+    "SOY", "SRN", "SUY", "SYN",
     "CY", "DK", "JM", "JW", "RA", "RI", "SJ", "UB", "YL",
     "AIN", "GUL", "HRI", "JIE", "KJI", "MGL", "MOI", "MOR", "SEI", "SEO",
     "XIA", "YEL", "YJI", "YNS", "YWN",
     "MOSA", "MOSY", "NOAH", "SJSK",
 })
 _KOREAN_MIB_CODE = re.compile(r"^([A-Z]{2,4})-\d+$")
-#: MIB 文件名常带站名方括号（`[K-MIB]NOAH-101(NOAH)(1)`）或用 `_` 分隔（`YUJ_103 片名`）。
+#: MIB 文件名常带站名方括号（`[K-MIB]NOAH-101(NOAH)(1)`）或用 `_` 分隔（`AIN_203 片名`）。
 #: `_titled_release_code` 只看第一段、只认 `-`，第一段又是 `K-MIB`，两种都接不住，
 #: 所以 MIB 前缀单独开这条路，前缀之外的仍走通用规则。
 _KOREAN_MIB_FILENAME = re.compile(
@@ -605,7 +612,42 @@ def normalise_code_key(code: str | None) -> str:
     shape = re.fullmatch(r"(\d{3})?([A-Z]+)-?(\d+)([A-Z]{0,2})", value)
     if not shape:
         return value
-    return f"{shape.group(1) or ''}{shape.group(2)}-{int(shape.group(3)):03d}{shape.group(4)}"
+    letters = shape.group(2)
+    return f"{shape.group(1) or ''}{letters}-{code_serial(letters, shape.group(3))}{shape.group(4)}"
+
+
+#: 短号与补零号是两部片的字母段（ADR-0133）。其余字母段的短号都是补零号的省略写法：
+#: 文件名写 `LAF-41`、来源返回 `MESU-88`、封面编号写 `278gyan17`，指的都是三位那部。
+#:
+#: `MCDV`：#296 报告，2026-11-03 在 JavDB 核实两部都在——`MCDV-24` 是メルシーボークー
+#: 的无码片（2015-06-25，110 分钟），`MCDV-024` 是クリスタル映像的有码片（2004-12-10，
+#: 130 分钟）。代价是随手写成 `MCDV-24` 的有码片会被认成无码那部。
+SHORT_SERIAL_PREFIXES = frozenset({"MCDV"})
+
+
+def _keeps_width(letters: str, digits: str) -> bool:
+    return len(digits) < 3 and letters.upper() in SHORT_SERIAL_PREFIXES
+
+
+def code_serial(letters: str, digits: str) -> str:
+    """番号数字段的规范写法：补零到三位，`SHORT_SERIAL_PREFIXES` 的短号按原写保留。
+
+    三位以上的前导零一律收掉：DMM 的 `mcdv00024` 与 `MCDV-024` 是同一部。
+    """
+    return digits if _keeps_width(letters, digits) else f"{int(digits):03d}"
+
+
+def code_serial_pattern(letters: str, digits: str) -> str:
+    """文件名和来源编号里认同一个数字段的写法，补零规则照 `code_serial`。
+
+    `MCDV-024` 认 `mcdv024`、`mcdv00024`，不认 `mcdv24`；`MCDV-24` 只认原写。
+    其余字母段补零多少都认：`LAF-041` 认 `laf41`。
+    """
+    if _keeps_width(letters, digits):
+        return digits
+    number = str(int(digits))
+    least = 3 - len(number) if letters.upper() in SHORT_SERIAL_PREFIXES else 0
+    return rf"0{{{max(0, least)},}}{number}"
 
 
 def is_jav_code(code: str | None) -> bool:
@@ -723,7 +765,7 @@ def release_identity(code: str | None) -> str:
             suffix = ""
         if (prefix, letters) in _RELEASE_PREFIX_ALIASES or str(code or "").upper().strip().startswith("H_"):
             prefix = ""
-        return f"{prefix}{letters}-{int(number)}{suffix}"
+        return f"{prefix}{letters}-{code_serial(letters, number)}{suffix}"
     return value
 
 
@@ -941,7 +983,51 @@ def _code_from_patterns(name: str, patterns: Iterable[re.Pattern]) -> str | None
     return None
 
 
+def _filename_code_input(name: str | None) -> str:
+    """文件名头尾的转载标记、转码说明与重复扩展名不参与番号身份。"""
+    text = str(name or "").strip()
+    text = re.sub(
+        r"^@(?:蜂鳥@)?[a-z0-9][a-z0-9.-]*\.(?:tv|vip|io|com|cn)[_-]\s*",
+        "", text, count=1, flags=re.I)
+    text = re.sub(r"^\[456km\.e\]", "", text, count=1, flags=re.I)
+    text = re.sub(r"^(?:Mosaic_reduce_|FHD_\d{1,2}M-)", "", text, count=1, flags=re.I)
+    extension = _ASSET_EXTENSION.search(text)
+    for _ in range(3):
+        stripped = _ASSET_EXTENSION.sub("", text)
+        if stripped == text:
+            break
+        text = stripped
+    text = strip_promo_markers(text)
+    text = re.sub(r"(?:[ _-]+C[ _-]+GG5|[ _-]+mp4)$", "", text, flags=re.I)
+    text = re.sub(r"(?:[-_ ](?:[1-8]k|hd|ch|c|fix))+$", "", text, flags=re.I)
+    return text + (extension.group(0) if extension else "")
+
+
 def release_code_from_filename(name: str | None, *, patterns: Iterable[re.Pattern] = ()) -> str | None:
+    """用户规则与完整文件名优先；未命中时尝试有界的传输标记清理。"""
+    patterns = tuple(patterns)
+    custom = _code_from_patterns(str(name or "").strip(), patterns)
+    if custom:
+        return custom
+    if not _ASSET_EXTENSION.search(str(name or "")):
+        return _release_code_from_filename(name, patterns=patterns)
+    cleaned = _filename_code_input(name)
+    if _STOPWORD_HEAD.match(_ASSET_EXTENSION.sub("", cleaned)):
+        return None
+    original = _release_code_from_filename(name, patterns=patterns)
+    if original:
+        return original
+    candidate = _release_code_from_filename(cleaned, patterns=patterns)
+    partless = _ASSET_EXTENSION.sub("", _PART_MARKER.sub("", cleaned))
+    whole = normalise_code_key(_ASSET_EXTENSION.sub("", cleaned))
+    if not is_jav_code(whole):
+        whole = normalise_code_key(partless)
+    if not is_jav_code(whole):
+        whole = release_code_from_text(partless) or release_code_from_text(_FILE_NOISE.sub("", partless))
+    return candidate if candidate and whole and same_release_code(candidate, whole) else None
+
+
+def _release_code_from_filename(name: str | None, *, patterns: Iterable[re.Pattern] = ()) -> str | None:
     r"""文件名带分卷、画质和重复计数，剥掉噪声后再解析。
 
     `patterns` 是用户在设置里写的番号识别规则（`compile_code_patterns`），先于内置
@@ -1023,7 +1109,7 @@ def _jav_code_pattern(code: str | None) -> str:
         prefix, letters, digits, suffix = amateur.groups()
         return (
             rf"{re.escape(prefix or '')}{re.escape(letters)}"
-            rf"[-_ ]*0*{re.escape(str(int(digits)))}{re.escape(suffix)}"
+            rf"[-_ ]*{code_serial_pattern(letters, digits)}{re.escape(suffix)}"
         )
     tokyo = _TOKYO_HOT_BODY.fullmatch(canonical)
     if tokyo:

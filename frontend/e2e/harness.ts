@@ -194,15 +194,22 @@ export async function visit(browser: Browser, path: string, viewport: Viewport,
       problems.push(`failed ${request.url().slice(origin.length)} ${reason}`);
     }
   });
+  /* 桩回调里的 `route.fetch`、`route.continue` 可能在关上下文时还没返回，之后会以
+   * 「Request context disposed」失败；没人等它，就成了整个文件的 unhandledRejection。
+   * `ignoreErrors` 先撤掉全部桩，让还在路上的那几趟失败时静默返回。 */
+  const close = async () => {
+    if (!page.isClosed()) await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await context.close();
+  };
   // 只打开到 load：等哪块主体、何时 settle 由用例决定，见 `settle` 的说明。
   try {
     await prepare?.(page);
     await page.goto(origin + path, { waitUntil: 'load' });
   } catch (error) {
-    await context.close();
+    await close();
     throw error;
   }
-  return { page, problems, close: () => context.close() };
+  return { page, problems, close };
 }
 
 /* 越界名单只报根因：页面一旦被撑宽，移动视口跟着变宽，`fixed` 的顶栏、Toast 会一起

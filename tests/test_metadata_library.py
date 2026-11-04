@@ -1557,7 +1557,7 @@ class LibraryNfoTests(unittest.TestCase):
         self.assertEqual(SOURCE_INTERVALS, {'javdb.com': 3.0, 'jdbstatic.com': 3.0})
 
     def test_every_provider_waits_on_one_shared_host_interval(self):
-        """取想要的资料、取新作资料与资料处理各起一个 provider；同时跑时问 javdb 也要排同一条队。"""
+        """想要作品资料采集、新作资料采集与资料处理各起一个 provider；同时跑时问 javdb 也要排同一条队。"""
         from peach.library_processing import SOURCE_LIMITER, LibraryMetadataProvider
         from peach.web_feeds import _transport
         with tempfile.TemporaryDirectory() as root:
@@ -3486,6 +3486,43 @@ class LibraryPreviewCompletionTests(unittest.TestCase):
         self.assertEqual(retried['status'], 'complete')
         self.assertEqual(retried['issue_count'], 0)
         self.assertEqual(retried['retryable_asset_ids'], [])
+
+    def test_selected_assets_fit_the_connection_parameter_limit(self):
+        from peach.library_processing import _asset_selection
+        connect = sqlite3.connect
+        def limited_connection(*args, **kwargs):
+            connection = connect(*args, **kwargs)
+            connection.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 1)
+            return connection
+        with patch('peach.library_processing.sqlite3.connect', side_effect=limited_connection):
+            self.assertEqual(_asset_selection(self.db, [2, 1, 2]), [2, 1])
+            for invalid in (3, 4, 99):
+                with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                    _asset_selection(self.db, [2, 1, invalid])
+
+    def test_selected_processing_queries_fit_the_connection_parameter_limit(self):
+        from peach.library_processing import _chosen_asset_paths, _collection_rows
+        from peach.processing_control import initial_estimate
+        from peach.processing_traffic_plan import ledger_rows
+        connect = sqlite3.connect
+        def limited_connection(*args, **kwargs):
+            connection = connect(*args, **kwargs)
+            connection.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 3)
+            return connection
+        selection = [2, 1] * 4
+        with patch('peach.library_processing.sqlite3.connect', side_effect=limited_connection):
+            with self.subTest(query='paths'):
+                self.assertEqual(set(_chosen_asset_paths(self.db, selection)), {'local', 'pikpak'})
+            with self.subTest(query='collection'):
+                rows, _ = _collection_rows(self.db, locations=self.config.locations,
+                                           online_roots=(self.media,), asset_ids=selection)
+                self.assertEqual([row['id'] for row in rows], [1])
+            with self.subTest(query='estimate'):
+                estimate = initial_estimate(self.config, self.db, 'all', selection, mode='high')
+                self.assertEqual(estimate['estimate_file_count'], 2)
+            with self.subTest(query='traffic'):
+                self.assertEqual({row['id'] for row in ledger_rows(self.db, selection)}, {1, 2})
+                self.assertEqual(ledger_rows(self.db, []), [])
 
     def test_selected_assets_require_active_videos(self):
         for selection in ([], [True], [0], [-1], ['1'], '1', [99], [3], [4]):

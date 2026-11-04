@@ -187,12 +187,16 @@ describe('设计决定：控件、状态与首页顶部', () => {
     ]);
     try {
       const danger = await tokenColor(opened.page, '.peach-react', '--color-border-error-default');
-      const border = (status: string) => opened.page.locator(`li[data-status="${status}"]`)
-        .evaluate((element) => getComputedStyle(element).borderTopColor);
-      assert.equal(await border('failed'), danger, '失败卡的框线不是 danger 色');
-      assert.notEqual(await border('succeeded'), danger, '没失败的卡也用了 danger 框线');
+      // 框线画成不占盒子的 outline：只比颜色会放过「有色无宽、根本没画出来」的线，宽度一起比。
+      const frame = (status: string) => opened.page.locator(`li[data-status="${status}"]`)
+        .evaluate((element) => {
+          const style = getComputedStyle(element);
+          return style.outlineStyle === 'none' ? '' : `${style.outlineWidth} ${style.outlineColor}`;
+        });
+      assert.equal(await frame('failed'), `1px ${danger}`, '失败卡的框线不是 danger 色');
+      assert.notEqual(await frame('succeeded'), `1px ${danger}`, '没失败的卡也用了 danger 框线');
       // 一屏十几行里逐行读红字比看一眼哪张卡的框是红的慢：原因那行留正文色。
-      const reason = await opened.page.locator('li[data-status="failed"] p').last()
+      const reason = await opened.page.locator('li[data-status="failed"] [data-task-error]')
         .evaluate((element) => getComputedStyle(element).color);
       assert.notEqual(reason, danger, '结束原因那行字被涂成了 danger 色');
       assert.deepEqual(opened.problems, []);

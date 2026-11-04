@@ -280,7 +280,7 @@ for (const chapter of SETTING_CHAPTERS) for (const item of chapter.steps) {
 export const GUIDE_CHAPTERS = [...INTERFACE_CHAPTERS, ...SETTING_CHAPTERS];
 
 export interface GuideTopic { id: string; kind: GuideChapter['kind']; title: string; summary: string; chapters: string[] }
-/** 目录按使用意图组织；小章节可单独阅读，页内说明继续对应实际设置分区。 */
+/** 目录按使用意图组织；小章节可单独阅读，设置步骤对应实际设置分区。 */
 export const GUIDE_TOPICS: GuideTopic[] = [
   { id: 'browse', kind: 'interface', title: '查找与发现', summary: '搜索播放、人物标签、JAV 追新', chapters: ['find-play', 'entities', 'jav'] },
   { id: 'collect', kind: 'interface', title: '收藏与关注', summary: '标记列表、创作者更新、口味统计', chapters: ['save', 'follow', 'insights'] },
@@ -291,18 +291,6 @@ export const GUIDE_TOPICS: GuideTopic[] = [
   { id: 'storage', kind: 'settings', title: '媒体与下载', summary: '媒体库、目录、读取与下载渠道', chapters: ['library', 'downloads'] },
   { id: 'system', kind: 'settings', title: '连接与维护', summary: '网络访问、应用维护、系统诊断', chapters: ['network', 'app-maintenance', 'diagnostics'] },
 ];
-export const SECTION_GUIDES: Record<string, string> = {
-  '来源凭据': 'credentials', '关注采集': 'follow-options', '检查更新': 'updates', '运行信息': 'facts',
-  '媒体库与目录': 'media', '挂载状态': 'mounts', 'CloudDrive 代理': 'cloud-proxy', '自动发现新文件': 'discovery',
-  '番号识别规则': 'codes', '视频预览': 'preview', '资源搜索': 'indexers', '作品资料站点': 'entry-links',
-  '云下载': 'download', 'PikPak 账号': 'pikpak', '浏览器添加 JAV': 'browser', '访问地址': 'port',
-  'Peach 代理': 'proxy', '访问密码': 'access', 'Cloudflare 公网入口': 'tunnel', '自动更新': 'automatic-updates',
-  '开机自启': 'startup', '视频播放': 'transcode', '存储空间': 'storage', '数据上传': 'reporting', '卸载 Peach': 'uninstall',
-};
-export function sectionGuide(title: string): GuideStep | undefined {
-  const id = SECTION_GUIDES[title] || title;
-  return id ? SETTING_CHAPTERS.flatMap(chapter => chapter.steps).find(item => item.id === id) : undefined;
-}
 export function contextualChapter(path: string): GuideChapter {
   if (path === '/') return INTERFACE_CHAPTERS[0]!;
   return SETTING_CHAPTERS.find(chapter => chapter.steps[0]?.route === path)

@@ -43,8 +43,10 @@ export type CardOptions = {
   /** 卡片带互斥选中态：选中时换成浮层那一档面、收掉接触阴影，最上层压一圈 2px 的焦点环色描边。 */
   selectable?: boolean;
   /** 填充之上另加的那条描边，只给底色和所在表面分不开的卡：灰卡里的白卡用 `--line`，
-   *  嵌在卡里的代码块与错误摘录用 `--line-soft`。`outlined` 自带描边，不必再给。 */
-  bordered?: 'line' | 'soft';
+   *  嵌在卡里的代码块与错误摘录用 `--line-soft`。`outlined` 自带描边，不必再给。
+   *  `error` 是失败的那一轮：整张卡的框线换成 danger 色，不给卡里的字上色。它画成内收的
+   *  outline，不占盒子：同一列里失败卡与正常卡的内容起点要对齐，真 border 会把内容挤进 1px。 */
+  bordered?: 'line' | 'soft' | 'error';
   className?: string;
 };
 
@@ -69,6 +71,7 @@ const RADIUS: Record<CardRadius, string> = {
 const BORDER = {
   line: 'border border-border-button-default',
   soft: 'border border-separator-border',
+  error: 'outline-1 -outline-offset-1 outline-border-error-default',
 };
 
 const PADDING: Record<CardPadding, string> = {

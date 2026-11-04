@@ -76,7 +76,7 @@ export function AutomaticUpdates({ initial, receipt }: { initial: AutomaticUpdat
           <Switch aria-label="自动检查新版本" isSelected={mode !== 'off'} isDisabled={!initial.available}
             onChange={(on) => setMode(on ? 'check' : 'off')} />
         </SettingsRow>
-        <SettingsRow label="自动下载更新">
+        <SettingsRow label="自动下载更新" description="发现新版本后先下载，重启安装前会询问。">
           <Switch aria-label="自动下载更新" isSelected={mode === 'download'}
             isDisabled={!initial.available || !initial.download_available || mode === 'off'}
             onChange={(on) => setMode(on ? 'download' : 'check')} />

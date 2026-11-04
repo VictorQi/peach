@@ -61,8 +61,7 @@ def atomic_path(target: Path | str, *, suffix: str | None = None) -> Iterator[Pa
     destination = Path(target)
     destination.parent.mkdir(parents=True, exist_ok=True)
     tail = destination.suffix if suffix is None else suffix
-    temporary = destination.with_name(
-        f".{destination.name}.{uuid.uuid4().hex[:12]}.tmp{tail}")
+    temporary = destination.with_name(f".{uuid.uuid4().hex}.tmp{tail}")
     try:
         yield temporary
     except BaseException:

@@ -42,10 +42,12 @@ class ScrapingAccessTests(unittest.TestCase):
                 transport = SourceTransport(self.root)
                 self.addCleanup(transport.close)
                 with patch('peach.scraping_access.client_for', side_effect=client), \
-                        patch('subprocess.Popen') as process, patch('webbrowser.open') as window:
+                        patch('subprocess.Popen') as process, patch('webbrowser.open') as window, \
+                        patch('peach.browser_transport._Browser') as browser:
                     self.assertEqual(transport(HttpRequest('GET', url, {}), 5, 1024).status, 200)
                 process.assert_not_called()
                 window.assert_not_called()
+                browser.assert_not_called()
         self.assertEqual(len(calls), 3)
 
     def test_refusal_verification_and_origin_failure_stop_without_opening_an_application(self):
@@ -63,7 +65,8 @@ class ScrapingAccessTests(unittest.TestCase):
                     return HttpResponse(status, {}, body, request.url)
                 transport.transports['minnano-av'] = answer
                 request = HttpRequest('GET', 'https://www.minnano-av.com/actress/1', {})
-                with patch('subprocess.Popen') as process, patch('webbrowser.open') as window:
+                with patch('subprocess.Popen') as process, patch('webbrowser.open') as window, \
+                        patch('peach.browser_transport._Browser') as browser:
                     with self.assertRaises(SourcePaused):
                         transport(request, 5, 1024)
                     with self.assertRaises(SourcePaused):
@@ -72,6 +75,7 @@ class ScrapingAccessTests(unittest.TestCase):
                 self.assertGreater(paused_until(root, 'minnano-av'), time.time())
                 process.assert_not_called()
                 window.assert_not_called()
+                browser.assert_not_called()
 
     def test_a_saved_browser_cooldown_survives_the_http_only_upgrade(self):
         from peach.scraping_access import SourcePaused, cooldown_path

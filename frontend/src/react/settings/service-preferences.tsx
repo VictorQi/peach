@@ -71,8 +71,8 @@ export function FollowPreferenceRows({ receipt }: { receipt(message: string): vo
       <Rows>
         <FollowScheduleRow />
         <FeedScheduleRow />
-        <SettingsRow label="首次采集范围">
-          <div id="followInitialDaysSetting">
+        <SettingsRow label="首次采集范围" description="新关注的来源第一次回看多久以前的内容。">
+          <div id="followInitialDaysSetting" className="shrink-0">
             <Select aria-label="首次采集范围" selectedKey={String(initialDays)}
               isDisabled={settings.isFetching || initial.isPending}
               onSelectionChange={(key) => {
@@ -87,8 +87,8 @@ export function FollowPreferenceRows({ receipt }: { receipt(message: string): vo
             </Select>
           </div>
         </SettingsRow>
-        <SettingsRow label="头像刷新">每 3 个月</SettingsRow>
-        <SettingsRow label="favicon 刷新">每年</SettingsRow>
+        <SettingsRow label="头像刷新" description="重新获取关注创作者的头像。"><span className="shrink-0">每 3 个月</span></SettingsRow>
+        <SettingsRow label="favicon 刷新" description="重新获取来源站点的图标。"><span className="shrink-0">每年</span></SettingsRow>
       </Rows>
       {error ? <Stack divided><ErrorText>{errorMessage(error)}</ErrorText></Stack> : null}
     </Section>

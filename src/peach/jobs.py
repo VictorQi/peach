@@ -554,11 +554,15 @@ class BackgroundJob:
         if self.runs is None:
             return
         total = state.get("total")
+        # 只处理一部作品的任务在初始状态里带 `asset_id` 与 `name`，开跑就写进任务行，任务卡据此链接到它。
+        asset_id, name = state.get("asset_id"), state.get("name")
+        subject = ({"asset_id": asset_id, "name": name}
+                   if type(asset_id) is int and asset_id > 0 and isinstance(name, str) and name else None)
         run = self.runs.start(
             self.task_key, trigger=trigger, mutex_key=self.mutex_key,
             conflict="raise" if trigger == "manual" else "skip",
             total=int(total) if isinstance(total, (int, float)) else None,
-            label=self._progress_label(state))
+            label=self._progress_label(state), summary=subject)
         if run is None:
             return
         self._run_ids[job_id] = run.id

@@ -32,6 +32,66 @@ class _Response:
         self.body = body
 
 
+from peach.http import HttpResponse
+
+
+class ImageProbeCacheTests(unittest.TestCase):
+    def make_transport(self, outcomes=None):
+        self.now = 0.0
+        self.calls = []
+        payload = jpeg(1200, 800)
+        def inner(request, timeout, limit):
+            self.calls.append(request)
+            if outcomes:
+                return outcomes[len(self.calls) - 1]
+            return HttpResponse(206, {}, payload)
+        return covers.HostLimitedTransport(inner, 0, clock=lambda: self.now, sleeper=lambda _: None)
+
+    def probe(self, transport, url='https://images.example/cover.jpg', referer='https://example/'):
+        request = covers.HttpRequest('GET', url, {'Range': 'bytes=0-65535', 'Referer': referer})
+        return transport(request, 10, 65536)
+
+    def test_repeated_image_probe_uses_one_network_request(self):
+        transport = self.make_transport()
+        first = self.probe(transport)
+        self.assertIs(self.probe(transport), first)
+        self.assertEqual(len(self.calls), 1)
+
+    def test_expired_probe_and_different_request_identity_are_fetched(self):
+        transport = self.make_transport()
+        self.probe(transport)
+        self.probe(transport, referer='https://other.example/')
+        self.now = 601
+        self.probe(transport)
+        self.assertEqual(len(self.calls), 3)
+
+    def test_errors_non_images_and_full_downloads_are_not_cached(self):
+        for outcome in (HttpResponse(404, {}, b''), HttpResponse(200, {}, b'not an image')):
+            with self.subTest(status=outcome.status):
+                transport = self.make_transport([outcome, outcome])
+                self.probe(transport)
+                self.probe(transport)
+                self.assertEqual(len(self.calls), 2)
+        transport = self.make_transport()
+        request = covers.HttpRequest('GET', 'https://images.example/cover.jpg', {})
+        transport(request, 10, 1024 * 1024)
+        transport(request, 10, 1024 * 1024)
+        self.assertEqual(len(self.calls), 2)
+
+    def test_cache_capacity_is_bounded_and_renewal_discards_entries(self):
+        transport = self.make_transport()
+        for i in range(129):
+            self.probe(transport, f'https://images.example/{i}.jpg')
+        self.assertEqual(len(transport._image_probe_cache), 128)
+        self.probe(transport, 'https://images.example/0.jpg')
+        self.assertEqual(len(self.calls), 130)
+        from unittest.mock import Mock
+        transport.inner = Mock()
+        transport.renew()
+        transport.inner.renew.assert_called_once()
+        self.assertNotIn('_image_probe_cache', transport.__dict__)
+
+
 class FetchRetryTests(unittest.TestCase):
     def test_larger_official_cover_beats_a_smaller_product_image(self):
         large = covers.candidate_for('https://official.example/full.jpg')
@@ -774,7 +834,7 @@ class CrossProductCoverTests(unittest.TestCase):
             "https://contents-thumbnail2.fc2.com/w1200/storage/x.jpg"))
 
     def test_dmm_content_id_must_carry_the_code_number(self):
-        # 字母段对上、数字段不对：MIB 的 `YUJ-101` 取回 `yuj00011`，`435MFC-135` 取回
+        # 字母段对上、数字段不对：`YUJ-101` 取回 `yuj00011`，`435MFC-135` 取回
         # `mfcc00027`。954 条成功记录里，这样的正好 9 条，全是错图。
         for code, cid in (("YUJ-101", "yuj00011"), ("CHU-201", "chu00021"),
                           ("435MFC-135", "h_1711mfcc00027")):
@@ -787,6 +847,12 @@ class CrossProductCoverTests(unittest.TestCase):
             with self.subTest(code=code):
                 self.assertFalse(covers.is_cross_product_cover(
                     code, f"https://pics.dmm.co.jp/mono/movie/{cid}/{cid}pl.jpg"))
+
+    def test_dmm_padding_does_not_cross_a_registered_short_serial(self):
+        # #296：DMM 的 `mcdv00024` 是クリスタル映像的有码 `MCDV-024`，不是无码的 `MCDV-24`。
+        url = "https://pics.dmm.co.jp/mono/movie/mcdv00024/mcdv00024pl.jpg"
+        self.assertTrue(covers.is_cross_product_cover("MCDV-24", url))
+        self.assertFalse(covers.is_cross_product_cover("MCDV-024", url))
 
     def test_an_fc2_image_named_after_another_work_is_cross_product(self):
         # JavArchive 图床的文件名就是作品号；十位的 `1654160016` 是上传时间戳，说明不了归属。
@@ -898,7 +964,7 @@ class KoreanMibCoverTests(unittest.TestCase):
             connection.execute("CREATE TABLE asset(code TEXT, medium TEXT, location TEXT)")
             connection.executemany(
                 "INSERT INTO asset(code,medium,location) VALUES(?, 'video', '115')",
-                [("ABW-232",), ("HA-101",), ("YUJ-101",)],
+                [("ABW-232",), ("HA-101",), ("AIN-101",)],
             )
             connection.commit(); connection.close()
             for only_shaped in (True, False):

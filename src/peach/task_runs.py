@@ -97,27 +97,27 @@ TASK_LABELS = {
     'jav-discovery-metadata': '发现页资料读取',
     'diagnostic-export': '诊断导出',
     "upgrade-repairs": "自动修复",
-    "upgrade-library": "自动修复资料",
+    "upgrade-library": "资料自动修复",
     "organize": "按模板整理",
     "batch": "批量操作",
     "scrape-codes": "番号资料刮削",
     "jav-covers": "封面批量抓取",
-    "entity-avatar": "补全资料图片",
-    "performer-profile": "补全女优资料",
-    "performer-alias": "补全女优别名",
-    "studio-mark": "补厂牌官网与标识",
-    "creator-identity": "查创作者身份",
-    "code-samples": "补番号样张",
+    "entity-avatar": "资料图片补全",
+    "performer-profile": "女优资料补全",
+    "performer-alias": "女优别名补全",
+    "studio-mark": "厂牌官网与标识补全",
+    "creator-identity": "创作者身份查找",
+    "code-samples": "番号样张采集",
     "feed-check": "订阅源拉取",
-    "feed-scrape": "取新作资料",
-    "feed-cover": "补新作封面",
-    "want-scrape": "取想要的资料",
+    "feed-scrape": "新作资料采集",
+    "feed-cover": "新作封面采集",
+    "want-scrape": "想要作品资料采集",
     "timeline-thumbnails": "视频缩略图采集",
     "download-postprocess": "云下载后处理",
-    "seed-import": "导入初始资料",
+    "seed-import": "初始资料导入",
     "follow-creator": "关注作者建档",
-    "amane-bridge": "重建 amane 桥",
-    "face-models": "下载人脸模型",
+    "amane-bridge": "amane 桥重建",
+    "face-models": "人脸模型下载",
 }
 
 
@@ -277,7 +277,8 @@ class TaskRunStore:
 
     def start(self, task_key: str, *, trigger: str, mutex_key: str | None = None,
               conflict: str = "skip", total: int | None = None,
-              label: str = "", pid: int | None = None) -> TaskRun | None:
+              label: str = "", pid: int | None = None,
+              summary: dict | None = None) -> TaskRun | None:
         from .update_tasks import admission
         with admission(self.database.db_path):
             from .job_recovery import current_run
@@ -285,7 +286,8 @@ class TaskRunStore:
             if resumed is not None:
                 return resumed
             return self._start(task_key, trigger=trigger, mutex_key=mutex_key,
-                               conflict=conflict, total=total, label=label, pid=pid)
+                               conflict=conflict, total=total, label=label, pid=pid,
+                               summary=summary)
 
     def suspend(self, run_id: int, *, label: str = '等待安装完成后继续',
                 paused_for_update: bool = True) -> None:
@@ -310,8 +312,11 @@ class TaskRunStore:
 
     def _start(self, task_key: str, *, trigger: str, mutex_key: str | None = None,
                conflict: str = "skip", total: int | None = None,
-               label: str = "", pid: int | None = None) -> TaskRun | None:
+               label: str = "", pid: int | None = None,
+               summary: dict | None = None) -> TaskRun | None:
         """开一轮。互斥冲突时按 `conflict` 处理，返回 None 或抛 `TaskRunConflict`。
+
+        `summary` 是开跑时就知道的那部分摘要，例如这一轮处理的是哪部作品；结算时由最终摘要替换。
 
         `conflict="skip"` 是定时触发的语义：本轮不跑，但要留下一条记录说明被谁挡了。
         `conflict="raise"` 是手动触发的语义：告诉用户是哪一轮挡着，让他自己决定。
@@ -329,9 +334,9 @@ class TaskRunStore:
                     "INSERT INTO task_run(task_key,trigger,status,mutex_key,pid,host,"
                     "started_at,heartbeat_at,progress_current,progress_total,"
                     "progress_label,result_summary) "
-                    "VALUES(?,?,'running',?,?,?,?,?,0,?,?,'{}')",
+                    "VALUES(?,?,'running',?,?,?,?,?,0,?,?,?)",
                     (task_key, trigger, mutex_key, pid if pid is not None else os.getpid(),
-                     self.host, moment, moment, total, label))
+                     self.host, moment, moment, total, label, json.dumps(summary or {}, ensure_ascii=False)))
                 run_id = int(cursor.lastrowid)
         except sqlite3.IntegrityError:
             if mutex_key is None:

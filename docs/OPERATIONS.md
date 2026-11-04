@@ -276,7 +276,7 @@ Windows 测试包默认使用 `%LOCALAPPDATA%\Peach\peach-data`。首次设置�
 
 没有保存过推送发现设置时，本地文件监控默认开启，CloudDrive 通知需另行配置；已明确关闭的设置保留。监控使用系统文件事件和去抖队列，空闲时等待事件，不定期遍历媒体目录；网络盘不递归监控。未收到通知或服务停机期间新增的文件可由「同步新增文件」补齐。
 
-本机移动事件和已记录的系统文件身份可保留改名、同卷移动后的影片 ID、人工资料和个人记录。文件身份随本地扫描和登记积累；升级前没有身份记录、停机时已经发生的移动，以及跨卷复制，不能仅凭同名或同大小自动认作原片。旧路径仍存在的副本与硬链接分别登记。
+本机移动事件和已记录的系统文件身份可保留改名、同卷移动后的影片 ID、人工资料和个人记录。文件身份随本地扫描和登记积累；升级前没有身份记录、停机时已经发生的移动，以及跨卷复制，不能仅凭同名或同大小自动认作原片。旧路径仍存在的副本与硬链接分别登记。改名时换了编码、文件身份对不上的影片，扫描按番号认回：同一媒体目录下这个番号的在库影片只有一部且旧文件已不在，新文件所在目录也只有这一部同番号视频，就沿用原记录与它的标签、封面和个人记录，时长与分辨率重新探测（[ADR-0131](adr/0131-scan-relocates-missing-row-by-code.md)）。
 
 一趟任务的结论、「7 天内不再问」、问题清单和完整记录收在同一块提示里。结束的任务可在完整记录旁「导出完整问题清单」，下载包含全部分页记录的 JSON。导出期间任务或记录变化会停止导出，取消或失败不会下载半份文件；缺少原始问题记录时提示导出诊断日志。「归档」收起这块提示，完整记录和任务历史仍保留；归档后留一条可「撤销」的提示，刷新页面后不再显示。
 
@@ -579,11 +579,21 @@ untrunc 按相同顺序查找，对应目录为 `tools/untrunc`。独立程序�
 - 同时最多进行 2 个转码或探测，单次最长 1 小时，关掉播放页会取消对应的任务。
 - 115 和 PikPak 的视频通过媒体库配置中声明的挂载目录播放。能不能播，以在 Peach 里实际打开一个已知视频为准。
 
-Peach 配置「媒体库与入库 → 视频预览」中的「抽帧解码方式」与「应用与维护 → 视频播放」中的「转码方式」分别保存为运行 Peach 那台电脑的偏好，两者互不影响，均可选择「自动（硬件优先）」或软件。抽帧设置控制封面、九宫格与时间轴；扫描、读 NFO 和时长探测不依赖 GPU。播放设置只控制 Peach 服务端的整片与 HLS 转码，浏览器直接播放时自行选择解码方式。保存无需重启，对新任务生效；已生成的有效缓存继续使用，运行中的 FFmpeg 不被强行中断。macOS 抽帧在同一超时预算内尝试 VideoToolbox，Windows 抽帧对 H.264、HEVC、VP9、AV1 尝试 D3D11VA，Linux 对同一范围尝试第一个可用 VAAPI 渲染节点，失败后都回退软件；视频编码格式探测按文件大小和修改时间缓存。Windows 播放的自动档依次探测 NVENC、AMF、QSV 编码，三者都不可用时用 D3D11VA 解码再交给 libx264；AMF 只接受 AMD 显卡上的 D3D11 设备，Peach 按显卡序号逐个探测。偏好通过 `/api/media-processing` 的 GET/POST 读写，`preview_acceleration` 和 `playback_acceleration` 分别接受 `auto/software`；省略的字段保持现值。这个接口与时间轴缩略图的 `/api/thumbnail-jobs` 和 `/api/configuration/*` 一样只接受运行 Peach 的电脑发来的请求，其他设备即使已登录或处于开放访问也返回 403。`PEACH_TRANSCODE_BACKEND` 可用于管理员诊断，支持 `auto/software/nvenc/amf/qsv/vaapi/videotoolbox`，显式 `software` 会保持禁用硬件。
+Peach 配置「媒体库与入库 → 视频预览」中的「抽帧解码方式」与「应用与维护 → 视频播放」中的「转码方式」分别保存为运行 Peach 那台电脑的偏好，两者互不影响，均可选择「自动（硬件优先）」或软件。抽帧设置控制封面、九宫格与时间轴；扫描、读 NFO 和时长探测不依赖 GPU。播放设置只控制 Peach 服务端的整片与 HLS 转码，浏览器直接播放时自行选择解码方式。保存无需重启，对新任务生效；已生成的有效缓存继续使用，运行中的 FFmpeg 不被强行中断。macOS 抽帧在同一超时预算内尝试 VideoToolbox，Windows 抽帧对 H.264、HEVC、VP9、AV1 尝试 D3D11VA，Linux 对同一范围尝试第一个可用 VAAPI 渲染节点，失败后都回退软件；视频编码格式探测按文件大小和修改时间缓存。Windows 播放的自动档依次探测 NVENC、AMF、QSV 编码，三者都不可用时用 D3D11VA 解码再交给 libx264；AMF 只接受 AMD 显卡上的 D3D11 设备，Peach 按显卡序号逐个探测；QSV 优先让解码、缩放和编码都留在 Intel 显卡上，以 Windows 服务方式运行时建不出这条链，改为 D3D11VA 解码后交给 QSV 编码。偏好通过 `/api/media-processing` 的 GET/POST 读写，`preview_acceleration` 和 `playback_acceleration` 分别接受 `auto/software`；省略的字段保持现值。这个接口与时间轴缩略图的 `/api/thumbnail-jobs` 和 `/api/configuration/*` 一样只接受运行 Peach 的电脑发来的请求，其他设备即使已登录或处于开放访问也返回 403。`PEACH_TRANSCODE_BACKEND` 可用于管理员诊断，支持 `auto/software/nvenc/amf/qsv/vaapi/videotoolbox`，显式 `software` 会保持禁用硬件。
 
 卡片悬停预览请求的 `/stream` 不带流会话，取消不了，也看不到浏览器断开。片源需要整片转码且没有现成缓存时，这条请求直接回 415，不启动 FFmpeg；详情与沉浸模式带会话播放，关闭时按会话结束转码。
 
 播放器进度条可以复用视频旁的 Jellyfin Trickplay、Emby／Roku／Plex 导出的 BIF、WebVTT 图片索引、HLS 和 DASH 图片轨。已有产物只读，时间轴采集遇到可用预览会跳过。命名、读取范围和缺少时间索引时的处理见[已有时间轴预览](VIDEO_PREVIEWS.md)。
+
+### 缓冲与后台任务竞争
+
+休眠恢复、移动盘唤醒和后台扫描可能同时影响播放。排查时记录同一次请求的起播时间、seek 位置、传输方式及后台任务；页面加载速率由缓冲推进估算，不能代替磁盘读取测量。
+
+- 缓冲不动时，同时读取 `/healthz` 与一个普通页面请求：区分整个服务停顿、工作线程排队与单个媒体请求等待。健康检查成功只能说明该端点仍有响应。
+- 对照任务中心的扫描、抽帧、采集和转码状态。标准处理强度限制当前任务的 FFmpeg 线程，不代表全应用共享一份 CPU 或磁盘预算；增加线程数可能增加机械盘寻道。
+- 活跃盘上的连续读取不能验收休眠故障。使用临时媒体分别验证首次打开、休眠恢复、连续 seek、断开后重开及后台任务并行；保留失败时的请求与任务记录，不清缓存掩盖状态。
+
+源码中的取消会话会停止继续发送并等待清理，但不保证 Windows 已取消驱动中的同步读取。刷新仍不能恢复而本机播放器能播放时，需要继续核对旧读取、线程等待与设备恢复；仅调整浏览器缓冲大小不足以解释该现象。
 
 ## 文件整理
 
@@ -641,6 +651,7 @@ PikPak 官方核验通道使用「推送发现」中该媒体根对应的唯一 
 - 点「不是垃圾」会记下这个文件的判断（可以撤销），它会出现在「已排除」视图里。这个判断只针对这一个文件，不会把整个域名或来源列入白名单。
 - 自动隔离要求达到自动线，并保护人工保留、喜欢、观看或播放列表等个人记录、已配对字幕、文件自身的作品番号和本次绑定的下载正片。写入前再次核对当前资产；已离开馆藏的条目不进入后续采集或整理。
 - 无关键词的极短附件可凭同目录长正片、数量及跨目录测量值进入复核；这类结构证据与「域名加序号」命名不能单独触发自动隔离。还原后确认要保留的文件，可同时标记「不是垃圾」。
+- 云下载落地目录里，正片以外、名字不带本片番号的文件按下载包附带文件计分：网址文本、图片等可直接达到自动线；短视频须有测量值，且正片远长于它；压缩包只进复核。带本片番号的封面、截图、分卷和 `poster`、`fanart` 这类作品图不算附件。同名同体积的小文件出现在三个以上带番号的发行包目录时，也计为垃圾证据。
 
 维护脚本 `scripts/trash_junk.py` 默认生成候选清单；永久删除使用 `--purge --review-csv`，
 复核 CSV 每行包含 `id`、`path`、`size`、`decision`、`confidence`、`why`。
@@ -700,7 +711,11 @@ curl -s --noproxy '*' -o /dev/null -w '%{http_code}\n' https://peach.local/healt
 
   验收四项：菜单栏只有一个 Peach 图标，`status` 报「已加载」；`launchctl print` 的 pid 就是那个菜单栏进程；`pfctl -s nat` 列出 80 → 8900、443 → 8443 两条 rdr；两条 `/healthz` 都返回 200。`peach.local` 换成本机 `[server].mdns_name` 的值。
 
-- 构建入口是 `scripts/build_windows.ps1`：先用 `scripts/generate_brand_assets.py` 生成方形 Logo 与多尺寸 `.ico`，再构建单一的 `dist/Peach/Peach.exe`。不带参数运行是托盘，`serve`／`migrate` 运行 CLI。
+- 本地构建环境使用 Node 24+、项目要求版本的 uv、Python 3.14 与 Inno Setup 6；在隔离工作树运行 `uv sync --locked --all-extras`，再运行 `uv pip check --python .venv/Scripts/python.exe` 核对环境。Python 解释器沿用标准 CPython；自由线程版、JIT 或其他解释器需另行取得原生依赖、并发行为和安装包的验收证据。
+- 国内网络可为本次命令设置 `npm_config_registry=https://registry.npmmirror.com` 与独立的 `npm_config_cache`；随后运行 `scripts/npm_ci.py --prefix frontend`。设置仅保留在构建进程中，不改全局 npm 配置或锁文件。uv 的锁文件还固定来源，直接更换 `--default-index` 可能被 `--locked` 拒绝；保留锁定检查，复用 uv 下载缓存，不通过重新生成锁文件切换本机镜像。
+- npm 的平台可选依赖在镜像未同步时可能下载失败，而安装命令仍返回成功。Windows 构建须实际核对 Sentry CLI；缺少 `@sentry/cli-win32-x64` 时，按前端锁文件的版本用 `npm cache add @sentry/cli-win32-x64@<锁定版本> --registry=https://registry.npmjs.org` 补入同一下载缓存，再运行锁定安装。安装过程继续校验锁文件中的完整性摘要。
+- 完整 Windows 包需要经过 `scripts/media_tool_bundle.py --validate-only` 核验的 FFmpeg、untrunc 目录与它们旁边的完整对应源码 ZIP。可以复用官方同版本 Release 的 `tools-ffmpeg.zip`、`tools-untrunc.zip` 及对应源码制品，先核对 `SHA256SUMS.txt`，再以 `-FFmpegPath`、`-UntruncPath` 传给构建入口；不能用普通系统工具目录替代分发材料。自行重编媒体工具时才需要 Linux、MinGW、NASM、CMake、Meson 等工具链，入口见 `scripts/build_ffmpeg_windows.sh` 和 `scripts/build_untrunc_windows.sh`。
+- 构建入口是 `scripts/build_windows.ps1`：先用 `scripts/generate_brand_assets.py` 生成方形 Logo 与多尺寸 `.ico`，再构建单一的 `dist/Peach/Peach.exe`。不带参数运行是托盘，`serve`／`migrate` 运行 CLI。仅构建不会安装或重启已有 Peach；独立程序目录必须按 `-Standalone` 或 `-Installer` 构建。
 - 对外测试包由 `.github/workflows/release.yml` 构建：`build_windows.ps1 -Standalone` 用 PyInstaller onedir 生成完整的 Windows 程序目录，压缩后由不检出源码的消费任务运行 `scripts/smoke_desktop.py`。冒烟测试会完成首次设置、以 `0.0.0.0` 重启、从本机局域网地址读 `/healthz`、确认 mDNS 已装配，并用访问密码登录。`v<__version__>` 标签与版本不一致会失败；制品验收通过后才创建 GitHub 预发布并附 SHA256。`workflow_dispatch` 只生成和验收制品。
 - 安装包由 `build_windows.ps1 -Installer` 在同一个程序目录上调 Inno Setup 6 的 `ISCC` 编译 `scripts/installer/peach.iss`，产物是 `dist/Peach-<版本>-windows-x64-setup.exe`；找 `ISCC` 的顺序是 `PEACH_ISCC`、`PATH`、两个默认安装位置。默认安装到当前用户的 `%LOCALAPPDATA%\Programs\Peach`，可选择独立、可写且不与数据目录重叠的程序目录。覆盖安装前由随包临时运行时执行 `--installer-prepare`，通知采集任务保存进度并暂停，随后停止托盘，覆盖程序并迁移实际数据目录中的已有 Peach 数据库，最后释放安装保护。安装期间的新采集请求进入等待；安装完成或取消后，仍在运行的 Peach 会续跑，已退出则在下次启动时恢复。卸载走 `--installer-uninstall`，撤销启动项与桌面图标并保留数据。约定与 `AppId` 在 `src/peach/desktop_installer.py`。
 - 独立包构建会把固定版本的官方 `cloudflared-windows-amd64.exe` 放在 `Peach.exe` 旁边，并用 `scripts/cloudflared-windows.json` 里的 SHA-256 校验。构建前运行 `scripts/fetch_cloudflared.ps1`，或给 `build_windows.ps1 -CloudflaredPath` 一个哈希相同的文件。源码运行不携带这个二进制。

@@ -1,7 +1,7 @@
 (function() {
 	try {
 		var e = typeof globalThis < "u" ? globalThis : typeof window < "u" ? window : typeof global < "u" ? global : typeof self < "u" ? self : {}, t = new e.Error().stack;
-		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "22d0d940-2bc2-4f30-92f2-b2fc76521097", e._sentryDebugIdIdentifier = "sentry-dbid-22d0d940-2bc2-4f30-92f2-b2fc76521097");
+		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "ed7aebeb-33b1-4478-8e91-acb8e76b4036", e._sentryDebugIdIdentifier = "sentry-dbid-ed7aebeb-33b1-4478-8e91-acb8e76b4036");
 	} catch {}
 })();
 import { AnimatedItems as e, Cell as t, ChartBackground as n, ChartContainer as r, ChartLegend as i, ChartLegendContent as a, ChartTip as o, ChartTooltip as s, ChartTooltipContent as c, Curve as l, DATA_ITEM_GRAPHICAL_ITEM_ID_ATTRIBUTE_NAME as u, DATA_ITEM_INDEX_ATTRIBUTE_NAME as d, DefaultZIndexes as f, EvilBarChart as p, LabelList as m, LabelListFromLabelProp as h, Layer as g, LoadingIndicator as _, PolarChart as v, PolarLabelContextProvider as y, PolarLabelListContextProvider as b, RegisterGraphicalItemId as x, Sector as S, SetPolarGraphicalItem as C, SetPolarLegendPayload as w, SetTooltipEntrySettings as T, Shape as ee, TIP_SWATCH as te, Text as ne, ZIndexLayer as re, adaptEventsOfChild as ie, arrayTooltipSearcher as ae, createSelector as oe, defaultPolarChartProps as se, findAllByType as ce, get as le, getClassNameFromUnknown as ue, getColorsCount as de, getMaxRadius as fe, getPercentValue as pe, getTooltipNameProp as me, getValueByDataKey as he, interpolate as ge, isNumber as _e, matchAppend as ve, mathSign as ye, polarToCartesian as be, resolveDefaultProps as xe, selectActiveTooltipDataKey as Se, selectActiveTooltipGraphicalItemId as Ce, selectActiveTooltipIndex as we, selectChartDataAndAlwaysIgnoreIndexes as Te, selectChartOffsetInternal as Ee, selectUnfilteredPolarItems as De, svgPropertiesNoEvents as Oe, svgPropertiesNoEventsFromUnknown as ke, tone as Ae, useAnimationCallbacks as je, useAppSelector as Me, useMouseClickItemDispatch as Ne, useMouseEnterItemDispatch as Pe, useMouseLeaveItemDispatch as Fe, usePolarChartLayout as Ie } from "./peach-app.chart-tip-CRxYp6KT.js";
@@ -2145,6 +2145,7 @@ function la({ initial: e, receipt: t }) {
 				}),
 				/* @__PURE__ */ (0, Q.jsx)(B, {
 					label: "自动下载更新",
+					description: "发现新版本后先下载，重启安装前会询问。",
 					children: /* @__PURE__ */ (0, Q.jsx)(U, {
 						"aria-label": "自动下载更新",
 						isSelected: n === "download",
@@ -2562,6 +2563,7 @@ function Ta({ startup: e, receipt: t }) {
 				}),
 				/* @__PURE__ */ (0, Q.jsx)(B, {
 					label: "只启动托盘，不打开网页",
+					description: "开机后在后台运行，需要时从托盘打开页面。",
 					children: /* @__PURE__ */ (0, Q.jsx)(U, {
 						"aria-label": "只启动托盘，不打开网页",
 						isSelected: i,
@@ -3265,6 +3267,7 @@ function Ja({ initial: e, receipt: t }) {
 				}),
 				/* @__PURE__ */ (0, Q.jsx)(B, {
 					label: "接收 CloudDrive2 通知",
+					description: "网盘目录有变化时由 CloudDrive2 推送过来。",
 					children: /* @__PURE__ */ (0, Q.jsx)(U, {
 						"aria-label": "接收 CloudDrive2 通知",
 						isSelected: n.cloud,
@@ -3945,8 +3948,10 @@ function fo({ receipt: e }) {
 			/* @__PURE__ */ (0, Q.jsx)(mo, {}),
 			/* @__PURE__ */ (0, Q.jsx)(B, {
 				label: "首次采集范围",
+				description: "新关注的来源第一次回看多久以前的内容。",
 				children: /* @__PURE__ */ (0, Q.jsx)("div", {
 					id: "followInitialDaysSetting",
+					className: "shrink-0",
 					children: /* @__PURE__ */ (0, Q.jsx)(R, {
 						"aria-label": "首次采集范围",
 						selectedKey: String(i),
@@ -3965,11 +3970,19 @@ function fo({ receipt: e }) {
 			}),
 			/* @__PURE__ */ (0, Q.jsx)(B, {
 				label: "头像刷新",
-				children: "每 3 个月"
+				description: "重新获取关注创作者的头像。",
+				children: /* @__PURE__ */ (0, Q.jsx)("span", {
+					className: "shrink-0",
+					children: "每 3 个月"
+				})
 			}),
 			/* @__PURE__ */ (0, Q.jsx)(B, {
 				label: "favicon 刷新",
-				children: "每年"
+				description: "重新获取来源站点的图标。",
+				children: /* @__PURE__ */ (0, Q.jsx)("span", {
+					className: "shrink-0",
+					children: "每年"
+				})
 			})
 		] }), a ? /* @__PURE__ */ (0, Q.jsx)(V, {
 			divided: !0,
@@ -4821,6 +4834,7 @@ function Bo({ initial: e, receipt: t }) {
 		children: [
 			/* @__PURE__ */ (0, Q.jsx)(I, { children: /* @__PURE__ */ (0, Q.jsx)(B, {
 				label: "连接方式",
+				description: "Peach 访问外网和采集来源时使用。",
 				children: /* @__PURE__ */ (0, Q.jsx)(No, {
 					mode: i,
 					onChange: a
@@ -5548,4 +5562,4 @@ function ss({ data: e, receipt: t, reopenTutorial: n, section: r, diagnostics: i
 }
 export { is as ConfigurationPage };
 
-//# debugId=22d0d940-2bc2-4f30-92f2-b2fc76521097
+//# debugId=ed7aebeb-33b1-4478-8e91-acb8e76b4036

@@ -11,7 +11,6 @@ import { setCollapseOpen } from '@peach/legacy/ui';
 import { SettingsCard, SettingsSectionLabel } from '@/components/application/settings/settings-rows';
 import { LinkButton } from '@/components/base/buttons/link-button';
 import { cx } from '@/utils/cx';
-import { GuideHelp } from '../onboarding/guide-help';
 
 interface SectionProps {
   title: string;
@@ -39,7 +38,6 @@ export function Section({ title, guide, icon, id, aside, onSubmit, children }: S
             <div className="flex min-w-0 max-w-full">{aside}</div>
           </div>
         : <SettingsSectionLabel>{label}</SettingsSectionLabel>}
-      {guide ? <GuideHelp section={guide} /> : null}
       <SettingsCard>{children}</SettingsCard>
     </>
   );

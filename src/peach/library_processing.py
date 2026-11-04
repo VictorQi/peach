@@ -92,7 +92,7 @@ MISS_TTL_SECONDS = 7 * 24 * 3600
 #: 那条批量线仍按 5 秒跑。撞上 403 不再是盲等 24 小时——`scraping_access.FIRST_BLOCKED_PAUSE`
 #: 先停 15 分钟，连着再撞才翻倍，所以这一档收紧的代价是有限且可观测的（docs/SOURCING.md）。
 SOURCE_INTERVALS = {'javdb.com': 3.0, 'jdbstatic.com': 3.0}
-#: 按 `SOURCE_INTERVALS` 等的那一份间隔，整个进程共用。取想要的资料、取新作资料、资料处理
+#: 按 `SOURCE_INTERVALS` 等的那一份间隔，整个进程共用。想要作品资料采集、新作资料采集、资料处理
 #: 各起各的 provider，间隔若各算各的，几条同时跑时问同一主机的请求就叠在一起，配额照样按
 #: 出口 IP 一份算。
 SOURCE_LIMITER = HostLimiter(SOURCE_INTERVALS, default_interval=2.0)
@@ -141,7 +141,7 @@ def _extended(deadline, extra):
 
 
 def _excused(provider):
-    """provider 累计等人点验证的秒数（`LibraryMetadataProvider.excused`）；没有这一项的 provider 按 0 算。"""
+    """provider 的工具准备耗时；没有这一项的 provider 按 0 算。"""
     value = getattr(provider, 'excused', 0.0)
     return value if isinstance(value, (int, float)) else 0.0
 
@@ -1929,11 +1929,10 @@ def _chosen_asset_paths(db_path, asset_ids):
     """
     if not asset_ids:
         return {}
-    placeholders = ','.join('?' * len(asset_ids))
     with closing(sqlite3.connect(db_path, timeout=30)) as connection:
         rows = connection.execute(
-            f"SELECT location,path FROM asset WHERE id IN ({placeholders}) "
-            "AND medium='video' AND disposal IS NULL", asset_ids).fetchall()
+            "SELECT location,path FROM asset WHERE id IN (SELECT value FROM json_each(?)) "
+            "AND medium='video' AND disposal IS NULL", (json.dumps(asset_ids),)).fetchall()
     chosen = {}
     for source, path in rows:
         chosen.setdefault(str(source), []).append(translate_ledger_path(path))
@@ -2021,7 +2020,8 @@ def _scan_sources(config, db_path, *, locations, asset_ids, stage, guard, update
                 if stage == SCAN_STAGE:
                     result.probed += probe_unmeasured(
                         db_path, ffprobe, source, root, config=config,
-                        on_junk=count_junk, asset_ids=list(registered.new_ids) if incremental else None,
+                        on_junk=count_junk,
+                        asset_ids=[*registered.new_ids, *registered.relocated_ids] if incremental else None,
                         report=lambda done, total: update(stage='读取时长与分辨率',
                             checked=result.probed + done, total=result.probed + total, probed=result.probed + done))
                 reattach_in(db_path, registered.new_ids)
@@ -2143,8 +2143,8 @@ def _collection_rows(db_path, *, locations, online_roots, asset_ids):
     query = f"SELECT asset.*, {multi} FROM asset WHERE medium='video' AND disposal IS NULL"
     parameters = []
     if asset_ids is not None:
-        query += ' AND id IN (' + ','.join('?' * len(asset_ids)) + ')'
-        parameters = asset_ids
+        query += ' AND id IN (SELECT value FROM json_each(?))'
+        parameters = [json.dumps(asset_ids)]
     query += ' ORDER BY id'
     library_roots = tuple(root for roots in locations.values() for root in roots)
     with closing(sqlite3.connect(db_path, timeout=30)) as connection:
@@ -2202,10 +2202,10 @@ def _asset_selection(db_path, asset_ids):
             type(value) is not int or value <= 0 for value in asset_ids):
         raise ValueError('请选择有效的视频项目')
     chosen = list(dict.fromkeys(asset_ids))
-    marks = ','.join('?' * len(chosen))
     with closing(sqlite3.connect(db_path, timeout=30)) as connection:
         found = {row[0] for row in connection.execute(
-            f"SELECT id FROM asset WHERE id IN ({marks}) AND medium='video' AND disposal IS NULL", chosen)}
+            "SELECT id FROM asset WHERE id IN (SELECT value FROM json_each(?)) "
+            "AND medium='video' AND disposal IS NULL", (json.dumps(chosen),))}
     if found != set(chosen):
         raise ValueError('所选视频已不存在或已移入回收站，请刷新后重试')
     return chosen
@@ -2798,6 +2798,8 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
             if incremental and not scope_ids:
                 _settle_collection_state(state, {}, [], update)
                 return state
+            from .library_new_assets import snapshot
+            processing_versions = snapshot(db_path, scope_ids)
             _prepare_processing_media(config, db_path, judgement_database, locations, sources,
                                       scope_ids, protected_ids, stage, state, update)
             finish_step('inspect')
@@ -2965,7 +2967,6 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
             # 被打断也把已经攒下的候选写全：文件里要么是上一份完整的，要么是这一份完整的。
             flush_candidates(force=True)
             remote.close()
-        from .library_new_assets import remember
-        unfinished = set(state['retryable_asset_ids'])
-        remember(db_path, completed=[row['id'] for row in rows if row['id'] not in unfinished])
+        from .library_new_assets import finish
+        finish(db_path, processing_versions, completed=[row['id'] for row in rows])
         return state

@@ -1,5 +1,18 @@
 # 复用清单
 
+文件变更事件与整库扫描共用 `library_new_assets` 的待处理范围、文件版本和 `FileLock`。
+扫描复用已取得的文件属性，按已提交批次保存版本，不额外读取媒体内容。
+处理开始时冻结版本，正常结束只确认这些版本；处理中到达的变化和中断任务继续留在队列，
+已完成的失败版本交给显式重试列表。重新接回的影片沿用原身份并重新入队。
+显式 `new_only` 扫描继续仅发现未登记文件；旧补丁队列只在正式队列不存在时导入一次。
+播放器音量与静音复用原生媒体事件和浏览器 `localStorage`，换源时同步媒体适配器，无新增依赖。
+
+`metadata_amane.MAKER_PREFIXES` 复用 amane 固定 revision
+`fd9294fbe5b4aa88ce1df84d534f6816ad9460d5` 的
+[`official.py`](https://github.com/sqzw-x/amane/blob/fd9294fbe5b4aa88ce1df84d534f6816ad9460d5/src/amane/crawlers/sites/official.py)
+系列路由事实（GPL-3.0），只在桥的 revision 一致且仅查询 `makers` 时省去无适用路由的子进程。
+Peach 仍负责来源选择、验证页冷却与候选复核，不复制上游采集器。
+
 ## 跨平台任务资源计量
 
 继续使用 psutil 7.2.2 读取进程 CPU 时间和身份。该版本的 macOS 线程列表使用序号，不能与 Python 原生线程 ID 对应；因此使用系统 `libproc` 的 `PROC_PIDTHREADID64INFO` 取得指定线程的纳秒时间，接口与单位见 [XNU 实现](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/kern/bsd_kern.c)。Linux 的可用 CPU 容量复用亲和性、控制组成员和挂载信息，按可见 cgroup v1/v2 配额归一化。
@@ -293,7 +306,7 @@ HLS 分片请求复用 Range 传输的 ASGI 断开监听、Python 3.14 的 `asyn
 
 Peach 只保留设备选择、一次性合成帧探测、命令尝试顺序与失败回退；探测结果由两个服务共享。复用检索覆盖当前 NVENC 链、媒体工具解析器与 Git 历史，没有独立 VAAPI 路径。FFmpeg 已覆盖编解码与滤镜，ffmpeg-python 一类包装层不提供设备驱动或硬件可用性判定，因此沿用项目 subprocess 入口，不新增 Python 依赖。回归用合成输入与进程替身验证 Linux 节点选择、权限和超时、10-bit 转 NV12、整片及分片回退。2026-10-19 的 Windows NVENC 实测使用 640×360 合成帧完成探测，合成 10-bit HEVC 经整片 MP4 与 HLS 两条 CUDA / NVENC 路径输出 H.264 `yuv420p`；128×128 不满足该编码器的最低尺寸，因此探测统一用 640×360。目标 AMD GPU 的驱动初始化、解码与播放验收未取得。无生产入口或真实 ledger 写入。
 
-Windows 复用 FFmpeg 的 D3D11VA 解码与 `h264_amf`、`h264_qsv` 编码，沿用同一套合成帧探测与回退顺序，不新增依赖。D3D11VA 不指定 `-hwaccel_output_format`，解出的帧回到内存，能接任意编码器，只对 H.264、HEVC、VP9、AV1 开启，名单与 CUDA 相同。AMF 从 D3D11 设备派生上下文，只认 AMD 显卡；混合显卡机器的默认序号常是另一块卡，所以用 `-init_hw_device d3d11va=peach:N` 加 `hwupload` 按序号探测，派生失败时退回软件解码加 AMF。Media Foundation 的 `h264_mf` 在 NVIDIA 加 AMD 的实测机器上无论软硬解码都报 `MF_E_UNSUPPORTED_D3D_TYPE`，未接入。QSV 从 D3D11 派生的写法没有 Intel 显卡可验，只接软件解码加 QSV 编码，探测通过才使用。
+Windows 复用 FFmpeg 的 D3D11VA 解码与 `h264_amf`、`h264_qsv` 编码，沿用同一套合成帧探测与回退顺序，不新增依赖。D3D11VA 不指定 `-hwaccel_output_format`，解出的帧回到内存，能接任意编码器，只对 H.264、HEVC、VP9、AV1 开启，名单与 CUDA 相同。AMF 从 D3D11 设备派生上下文，只认 AMD 显卡；混合显卡机器的默认序号常是另一块卡，所以用 `-init_hw_device d3d11va=peach:N` 加 `hwupload` 按序号探测，派生失败时退回软件解码加 AMF。Media Foundation 的 `h264_mf` 在 NVIDIA 加 AMD 的实测机器上无论软硬解码都报 `MF_E_UNSUPPORTED_D3D_TYPE`，未接入。QSV 全硬件链沿用 Jellyfin 在 Windows 上的写法：`-init_hw_device d3d11va=…:,vendor=0x8086` 按厂商号选 Intel 卡，派生 QSV 设备，D3D11VA 解码输出 `d3d11` 帧，经 `hwmap=derive_device=qsv,vpp_qsv=format=nv12` 交给 `h264_qsv`，帧不回内存，10 位片源由 `vpp_qsv` 转 NV12；解码池加 `-extra_hw_frames 16`，否则 AV1 报 `Static surface pool size exceeded` 并丢帧。派生 QSV 设备在 Windows 服务与 SSH 所在的 Session 0 里报 `MFX session: -9`（同机 Jellyfin 的 FFmpeg 8.1.3 也一样），在登录用户的会话里正常，因此单独探测一次：通过才把全硬件链放在最前，其后是 D3D11VA 解码回内存加 QSV、软件解码加 QSV。2026-10-29 在 Intel UHD Graphics（8086:46d1，驱动 32.0.101.7088）的 Windows 10 上，用随包 FFmpeg 9.0.2 对 20 秒 1080p 合成片测进程 CPU 时间：10 位 HEVC 从 libx264 的 37.3 秒、软件解码加 QSV 的 11.6 秒、D3D11VA 解码回内存加 QSV 的 7.9 秒降到全硬件链 3.3 秒，耗时 4.0 秒；AV1、8 位 H.264、10 位 VP9 的全硬件链为 2.2–3.0 秒。四种片源的整片 MP4 与 6 秒 HLS 分片都输出完整帧数的 H.264 `yuv420p`。Peach 探测在登录会话里选中全硬件链，在 Session 0 里跳过它并用回退链完成转码。QSV 解码器（`hevc_qsv` 等）在同一会话里 10 位 HEVC 的 CPU 时间与全硬件链相当，但需要按编码挑解码器，未接入。
 
 随包 FFmpeg 编入 NVENC、AMF、QSV 与 D3D11VA，四条路径都不依赖 PATH 上的第三方构建。AMF 只需 GPUOpen 发布的 `AMF-headers` 头文件包，运行时由 AMD 驱动提供 `amfrt64.dll`；QSV 经 FFmpeg 的 `--enable-libvpl` 接入，libvpl 调度器用 MinGW 编成静态库，运行时由 Intel 驱动提供实现。两者都是 MIT 许可，固定版本和哈希写在 `scripts/ffmpeg-sources.json`，许可证随发行目录与对应源码包分发，整体仍按 GPL-3.0-or-later。交叉编译做法参照 [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) 的 `50-amf.sh` 与 `50-onevpl.sh`：libvpl 的 C++ 调度器静态链接时要带 `libstdc++`，Peach 在 CMake 里给它未定义的 `CXX_LIB` 赋值，让生成的 `vpl.pc` 自带这一项，不改写安装后的文件。2026-10-23 在 Ubuntu 24.04 容器里按发布流程的同一组软件包跑通 `build_ffmpeg_windows.sh`，产物列出 `h264_amf`、`hevc_amf`、`av1_amf` 与 `h264_qsv` 等编码器，`-hwaccels` 含 `cuda`、`dxva2`、`qsv`、`d3d11va`、`amf`，发行包校验通过。在 NVIDIA 独显加 AMD 核显的 Windows 机器上，随包构建的 `h264_amf` 与 `h264_nvenc` 都完成 640×360 合成帧编码，D3D11 序号 1 上传加 AMF 可用、序号 0 报 `No such device`；Peach 自动探测得到 NVENC、AMF（序号 1）与 D3D11VA。该机没有 Intel 显卡，`h264_qsv` 报 libvpl 找不到实现（`MFX_ERR_UNSUPPORTED`），探测按预期跳过；QSV 实际编码未取得。
 
@@ -503,9 +516,9 @@ Peach 播放器皮肤直接装饰 Video.js 10 的 light DOM：右侧控制组用
 
 启动取证复用 Python 3.14 标准库的 `sys.excepthook`、`threading.excepthook`、`sys.unraisablehook`、`logging.Handler`、`faulthandler` 和 `zipfile`（PSF 许可，无额外安装体积）。`error_reporting` 在配置与第三方依赖之前加载，`support_bundle` 仅收集选定日志和系统字段；Peach 保留脱敏、备用目录、本机权限与报告内容策略。已有诊断报告用于页面和运行期导出。临时目录与独立子进程覆盖无控制台、导入失败、线程异常、备用目录、配置损坏和脱敏。
 
-可选远程诊断复用官方 [sentry-sdk 2.72.0](https://github.com/getsentry/sentry-python/tree/2.72.0)（MIT，维护中，支持 Python 3.14）；固定版源码通过 `opensrc path pypi:sentry-sdk` 核对。SDK 负责后台 HTTP、TLS、Sentry 信封和服务端限流；Peach 负责本机选择、技术字段投影、同类错误聚合与每机每日上限。版本统计与错误诊断共用默认勾选的开关，关闭时不构造 SDK；SDK 全局自动集成、追踪、回放、日志、会话与指标采集均关闭。`HttpTransport._send_envelope` 的窄覆盖在真正发送前复查本机选择版本并移除本机传输元数据；它是固定版本的内部接口，升级必须通过真实 SDK 信封回归。无真实外发的内存接收端检查最终字节、停用后队列失效与断网不影响本机取证。新增依赖仅 `sentry-sdk`，复用已声明的 urllib3 / certifi；体积以发行构建为准。未采用自写 Sentry 协议或 Workers 收集后台，避免另行维护传输、去重和查看界面。没有真实 ledger 写入。
+可选远程诊断复用官方 [sentry-sdk 2.72.0](https://github.com/getsentry/sentry-python/tree/2.72.0)（MIT，维护中，支持 Python 3.14）；固定版源码通过 `opensrc path pypi:sentry-sdk` 核对。SDK 负责后台 HTTP、TLS、Sentry 信封和服务端限流；Peach 负责本机选择、技术字段投影、同类错误聚合与每机每日上限。版本统计与错误诊断共用默认勾选的开关，关闭时不构造 SDK；SDK 全局自动集成、追踪、回放、日志、会话与指标采集均关闭；版本统计与计数日志、会话汇总由 Peach 用 SDK 的 `Envelope`、`Item` 与 `PayloadRef` 组装，经同一传输发送（ADR-0132）。`HttpTransport._send_envelope` 的窄覆盖在真正发送前复查本机选择版本并移除本机传输元数据；它是固定版本的内部接口，升级必须通过真实 SDK 信封回归。无真实外发的内存接收端检查最终字节、停用后队列失效与断网不影响本机取证。新增依赖仅 `sentry-sdk`，复用已声明的 urllib3 / certifi；体积以发行构建为准。未采用自写 Sentry 协议或 Workers 收集后台，避免另行维护传输、去重和查看界面。没有真实 ledger 写入。
 
-故障频率复用已固定的 `filelock`、`fsutil.atomic_write_text` 和 SDK 事件标签，保留 Peach 的同意版本、技术投影、跨进程计数与每日批次策略。`diagnostic_frequency` 保存有界技术样本及待提交增量，首次、每小时和正常退出通过同一 SDK 提交；关闭会清除聚合。Sentry 默认事件数统计批次，不会将自定义次数标签自动求和；汇总按事件的 `occurrence_day` 与 `occurrence_count` 计算。`reporting_transport` 复用官方 `HttpTransport` 的 `_handle_response`、`_handle_request_error` 与队列丢弃回调，取得 HTTP 状态且不重复实现请求、TLS 或重试；固定内部接口以真实 SDK 和模拟 HTTP 回归。`reporting_delivery` 只保存本机有限回执；SDK 入队、HTTP 接收与接收端留存分别解释。用途、环境与公开构建号复用 Sentry 原生字段，测试在同一传输边界拦截外发。未开启 SDK metrics 或新增收集服务：独立指标通道会增加同意边界、额度与交付口径。计数只覆盖已筛选技术故障，发送及保留限制见 [诊断核验](DIAGNOSTICS.md)。没有新增 Python 依赖或真实 ledger 写入。
+故障频率复用已固定的 `filelock`、`fsutil.atomic_write_text` 和 SDK 事件标签，保留 Peach 的同意版本、技术投影、跨进程计数与每日批次策略。`diagnostic_frequency` 保存有界技术样本及待提交增量；每个诊断键只上传一次错误事件，之后的次数每 6 小时、跨日或正常退出时合并成带整数 `occurrence_count` 的计数日志，接收端日志查询可直接求和；关闭会清除聚合。`reporting_transport` 复用官方 `HttpTransport` 的 `_handle_response`、`_handle_request_error` 与队列丢弃回调，取得 HTTP 状态且不重复实现请求、TLS 或重试；固定内部接口以真实 SDK 和模拟 HTTP 回归。`reporting_delivery` 只保存本机有限回执；SDK 入队、HTTP 接收与接收端留存分别解释。用途、环境与公开构建号复用 Sentry 原生字段，测试在同一传输边界拦截外发。未开启 SDK metrics 或新增收集服务；计数改走日志而不是指标，是因为日志条目能带上与错误事件相同的诊断键和白名单标签。计数只覆盖已筛选技术故障，发送及保留限制见 [诊断核验](DIAGNOSTICS.md)。没有新增 Python 依赖或真实 ledger 写入。
 
 Windows 连接清理复用 [CPython 3.14.7 的 Proactor 对象协议](https://github.com/python/cpython/blob/v3.14.7/Lib/asyncio/proactor_events.py)（PSF 许可，无新增依赖）。精确识别纯标准库清理回调中的 `WinError 10054`，只补完 socket 关闭、服务端解除登记和关闭状态，不重复通知协议，不全局修改标准库类或替换事件循环。它使用 `_sock`、`_server._detach` 与 `_called_connection_lost` 私有接口，升级 Python 时须核验。真实 socket 和 `asyncio.Server` 配合合成故障验证资源释放；收尾自身失败保留原始异常链并上报。33 次回环实验未复现原始竞争时序，不据此认定客户端来源。协议类别只写本机日志；来源、任务、媒体和浏览器的远程筛选复用现有领域状态，见 [诊断核验](DIAGNOSTICS.md#远程错误筛选核验)。
 
@@ -661,7 +674,7 @@ MGS 专属发行先查自营商品目录，Prestige 番号复用 `metadata_route
 
 传统正封完整居中，比例留白复用同图派生档的模糊补底，新作与视频流卡片使用同一份取景规则。整幅大封使用卡片纯色底，竖版按主脸填满，横版完整放入容器；图片切换时清理残留背景属性。
 
-取景由 `poster-crop-v13` 管理。Blu-ray 来源标题、明确的版次标签与图片比例共同决定 0.85 正封比例，标题随正封框保留，重算人脸与正封框均读取同一版次；有效宽正封框在没有版次标题的卡片上也完整显示。VR 标记、IENEE、IENFE、SDHS 数字发行拼图，以及可信主脸跨过 DVD 正封先验边界的大封保留整幅画面，由 `cover_frame.layout=still` 传给卡片。两条满高接缝夹出居中正封且两侧纹理均低于正封四分之一时，只显示中间正封。大封在竖版大图按主脸居中填满，横版小图完整显示，均不使用模糊补边；JPEG 软边的书脊识别结合突出度、左忙右静的方向与正封侧基线。手工框保持用户取景。重试队列按最早尝试时间轮转，收起的合集沿用设置跳过；逐番号结果保存在 `feed-cover-attempts/`。资料已齐、只缺封面的新作另派 `feed-cover`（补新作封面）批次，只取图、不写账本，走独立后继通道；排在队里或正在跑的番号不再进下一批。复用现有 HTTP、Pillow、OpenCV 与文件锁，无新增依赖。
+取景由 `poster-crop-v13` 管理。Blu-ray 来源标题、明确的版次标签与图片比例共同决定 0.85 正封比例，标题随正封框保留，重算人脸与正封框均读取同一版次；有效宽正封框在没有版次标题的卡片上也完整显示。VR 标记、IENEE、IENFE、SDHS 数字发行拼图，以及可信主脸跨过 DVD 正封先验边界的大封保留整幅画面，由 `cover_frame.layout=still` 传给卡片。两条满高接缝夹出居中正封且两侧纹理均低于正封四分之一时，只显示中间正封。大封在竖版大图按主脸居中填满，横版小图完整显示，均不使用模糊补边；JPEG 软边的书脊识别结合突出度、左忙右静的方向与正封侧基线。手工框保持用户取景。重试队列按最早尝试时间轮转，收起的合集沿用设置跳过；逐番号结果保存在 `feed-cover-attempts/`。资料已齐、只缺封面的新作另派 `feed-cover`（新作封面采集）批次，只取图、不写账本，走独立后继通道；排在队里或正在跑的番号不再进下一批。复用现有 HTTP、Pillow、OpenCV 与文件锁，无新增依赖。
 
 馆藏与新作取图共用 `cover_artwork.metadata_snapshots` 和 `best_cover`，片商官网、发行方、R18 与 DMM 的官方候选均参与尺寸比较。馆藏采集将长边 1600px 作为高清重探界限，社区转存图可由官方封面替换；同类官方图按像素面积升级，FC2 保留商品图的来源保护。`scripts/audit_cover_artwork.py` 逐张核对尺寸、来源、版次与取景框，输出 CSV；`scripts/upgrade_audited_covers.py` 按已有官方快照逐番号重探，`--live` 经同一官方链在线补查，保存原件备份与结果检查点。两者只处理可重建图片和边车，不写 ledger。
 
@@ -994,6 +1007,12 @@ Python、npm 与 GitHub Actions 的版本由 `.github/dependabot.yml` 每周检�
 存量文字补修复用字段归属、来源身份核对、候选结算与 `UpgradeRepairs` 的备份、事务和回执。仅机器归属的损坏标量字段可按同番号正常来源恢复；人物规范名及人工判断保留复核。已登记完成的目录补修不随文字规则重放；旧任务范围和队列继续保留。待重采的资产使用独立文字规则身份，先前完成的升级任务不吞掉新补修，尚在运行或已由用户取消的任务保持原状态。
 
 播放生命周期复用 [PR190](https://github.com/peach-mitao/peach/pull/190) 的 `e41222e312443b5d0fc7be87d2f7eca9c1d61055`：共享分片按消费者计数，最后消费者离开才取消生成，并等待子进程回收；文件响应保留外层取消与运行错误。头像确认的图像和数据库工作共用工作线程，安装按实体加锁。当前 ASGI 响应头中间件、SMB 输入和图像预处理保留 Peach 主线实现；未采用该 PR 的界面、依赖和测试调度改动。
+
+修复头 MP4 的文件关闭复用标准库 `asyncio.to_thread` 与现有 `_wait_for_tasks`：关闭在工作线程执行，重复取消仍等待句柄清理，事件循环继续处理其他请求。故障注入用例在关闭尚未返回时发送另一响应，再重复取消原请求。此清理不等于取消 Windows 驱动中的读取；运行中的同步 I/O 需要原生取消机制，且驱动不保证支持，见 [Windows I/O 取消](https://learn.microsoft.com/en-us/windows/win32/fileio/canceling-pending-i-o-operations)。未新增依赖。
+
+并发排查分别核对事件循环、asyncio 默认执行器、AnyIO 工作线程、领域锁和 FFmpeg 子进程。[Starlette 的线程池说明](https://github.com/Kludex/starlette/blob/main/docs/threadpool.md)指出同步端点、文件响应与同步依赖共享 AnyIO 容量；HLS 计划使用 Peach 自有的两个工作线程。后台采集继续复用 `JobDeferred`、处理锁与检查点让路。当前没有跨所有后台任务、按物理磁盘调度播放优先级的统一机制；单项媒体读取子进程的超时也不覆盖 Range 响应中的文件读取。
+
+社区方案核对了 [Video.js VHS 的播放监视器](https://github.com/videojs/http-streaming/blob/main/src/playback-watcher.js)、[Chromium 缓冲策略](https://www.chromium.org/audio-video/)与 [FFmpeg 硬件加速](https://ffmpeg.org/ffmpeg.html#Advanced-Video-options)。VHS 的分片恢复不能证明原生 MP4 的挂起会恢复；Chromium 按缓冲水位主动停取和续取，页面换算速率不能当磁盘吞吐。当前继续使用浏览器原生解码与随包 FFmpeg 子进程，不增加重复解码链、FFI 或新解释器。新增实现须分别取得读取、线程等待、解码和恢复证据。
 
 匿名签名校验复用 [PR150](https://github.com/peach-mitao/peach/pull/150) 的唯一入口、时间戳表达式及字符串约束，适配已存在的动态变量解析接口。媒体响应复用 [PR131](https://github.com/peach-mitao/peach/pull/131) 的被动类型校验、CSP `sandbox` 和 `nosniff`；HLS 清单继续可读，旧活动文档缓存不命中。以上均使用现有标准库、Starlette 和 filelock，无新增依赖。
 

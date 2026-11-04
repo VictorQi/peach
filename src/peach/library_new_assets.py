@@ -18,6 +18,10 @@ def _read(db):
     try:
         ids = json.loads(path.read_text(encoding='utf-8'))
     except FileNotFoundError:
+        patched = path.with_name('incremental-media.json')
+        if patched.is_file():
+            data = json.loads(patched.read_text(encoding='utf-8'))
+            return {int(key) for key, value in data['items'].items() if value['status'] == 'pending'}
         legacy = path.with_name('library-processing.json')
         try:
             state = json.loads(legacy.read_text(encoding='utf-8'))
@@ -34,8 +38,18 @@ def _read(db):
     return set(ids)
 
 
+def _lock(path):
+    return FileLock(str(path)+'.lock')
+
+
 def pending(db):
-    return _active_videos(db, sorted(_read(db)))
+    # `remember` 持锁原子替换；Windows 上替换瞬间的读取会撞上共享冲突，读也等同一把锁。
+    path = _path(db)
+    if not path.parent.is_dir():
+        return []
+    with _lock(path):
+        wanted = sorted(_read(db))
+    return _active_videos(db, wanted)
 
 
 def _active_videos(db, wanted):
@@ -53,8 +67,59 @@ def _active_videos(db, wanted):
 def remember(db, ids=(), *, completed=()):
     path = _path(db)
     path.parent.mkdir(parents=True,exist_ok=True)
-    with FileLock(str(path)+'.lock'):
+    with _lock(path):
         previous = _read(db)
         updated = set(_active_videos(db, sorted(previous | set(ids)))) - set(completed)
-        if updated != previous or (updated and not path.exists()):
+        if updated != previous or not path.exists():
             atomic_write_text(path,json.dumps(sorted(updated)))
+
+
+def observe(db, asset_id, size, mtime_ns, *, new=False):
+    """目录事件按文件版本去重；首次遇到旧文件只建立基线。"""
+    observe_many(db, [(asset_id, size, mtime_ns, new)])
+
+
+def observe_many(db, observations):
+    """一个已提交的扫描批次只读取和保存一次版本文件。"""
+    path = _path(db).with_name('incremental-media.json')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with FileLock(str(path) + '.lock'):
+        try:
+            data = json.loads(path.read_text(encoding='utf-8'))
+        except FileNotFoundError:
+            data = {'seen': {}, 'items': {}}
+        if not isinstance(data.get('seen'), dict) or not isinstance(data.get('items'), dict):
+            raise ValueError('增量媒体队列格式无效，请检查状态文件')
+        pending_ids, changed = [], False
+        for asset_id, size, mtime_ns, new in observations:
+            key, version = str(asset_id), [size, mtime_ns]
+            previous = data['seen'].get(key)
+            if new or previous is not None and previous != version:
+                pending_ids.append(asset_id)
+            if previous != version:
+                data['seen'][key] = version
+                changed = True
+        if pending_ids:
+            remember(db, pending_ids)
+        if changed:
+            atomic_write_text(path, json.dumps(data, ensure_ascii=False))
+
+
+def snapshot(db, ids=None):
+    """冻结处理开始时的文件版本；未建立指纹的旧待处理项也保留身份。"""
+    path = _path(db).with_name('incremental-media.json')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with FileLock(str(path) + '.lock'):
+        seen = json.loads(path.read_text(encoding='utf-8')).get('seen', {}) if path.exists() else {}
+        return {asset_id: seen.get(str(asset_id)) for asset_id in (pending(db) if ids is None else ids)}
+
+
+def finish(db, versions, *, completed=None):
+    """仅确认已处理的版本，期间到达的同文件新版本继续等待处理。"""
+    path = _path(db).with_name('incremental-media.json')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with FileLock(str(path) + '.lock'):
+        seen = json.loads(path.read_text(encoding='utf-8')).get('seen', {}) if path.exists() else {}
+        wanted = set(versions if completed is None else completed)
+        remember(db, completed=[asset_id for asset_id, version in versions.items()
+                                if asset_id in wanted and seen.get(str(asset_id)) == version])

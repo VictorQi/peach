@@ -53,7 +53,7 @@ from .web_entity import (
 from .web_downloads import (q_downloads, w_download_cancel, w_download_postprocess,
                             w_download_submit)
 from .web_resource_search import q_resource_search
-from .web_jav_detail import q_jav_detail, q_jav_resources, q_jav_reviews
+from .web_jav_detail import q_jav_detail, q_jav_resources, q_jav_reviews, w_jav_cover
 from .web_jav_discovery import q_jav_discoveries
 from .web_feeds import (
     q_feed_check,
@@ -429,6 +429,7 @@ POST_HANDLERS = {
     "/api/thumbnail-jobs": w_thumbnail_jobs,
     "/api/scraping/settings": w_scraping_settings,
     "/api/scraping/cover": w_scraping_cover,
+    "/api/jav/cover": w_jav_cover,
     "/api/scraping/check": w_scraping_check,
     "/api/scraping/amane-bridge/check": w_scraping_amane_check,
     "/api/scraping/amane-bridge/rebuild": w_scraping_amane_rebuild,

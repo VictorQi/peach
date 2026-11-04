@@ -27,6 +27,17 @@ from support.amane import write_amane_metadata
 ROOT = Path(__file__).resolve().parents[1]
 
 
+class MakerRoutingTests(unittest.TestCase):
+    def test_unsupported_series_skips_child_only_for_the_reviewed_revision(self):
+        with patch.object(metadata_amane, 'pinned_revision', return_value=metadata_amane.MAKER_ROUTE_REVISION):
+            result = metadata_amane.unsupported_maker_report('NACT-041', ['makers'], 'jp')
+            self.assertEqual(result['sites']['makers']['status'], 'not_found')
+            self.assertIsNone(metadata_amane.unsupported_maker_report('SSIS-057', ['makers'], 'jp'))
+            self.assertIsNone(metadata_amane.unsupported_maker_report('NACT-041', ['makers', 'mgstage'], 'jp'))
+        with patch.object(metadata_amane, 'pinned_revision', return_value='f' * 40):
+            self.assertIsNone(metadata_amane.unsupported_maker_report('NACT-041', ['makers'], 'jp'))
+
+
 def completed(stdout, returncode=0, stderr=""):
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
 
@@ -139,6 +150,11 @@ class RebuildTests(unittest.TestCase):
                 failed = metadata_amane.rebuild(tools, runner=lambda *a, **k: completed("", 2, "boom"))
                 self.assertFalse(failed["ok"])
                 self.assertIn("boom", failed["error"])
+                # 长输出保留首行，末尾从整行截起，摘要不会从半个词开始。
+                stderr = "× Failed to fetch amane\n" + "".join(f"  line {index:03d} detail detail\n" for index in range(80))
+                long = metadata_amane.rebuild(tools, runner=lambda *a, **k: completed("", 1, stderr))["error"]
+                self.assertTrue(long.startswith("uv sync 失败（exit 1）：× Failed to fetch amane\n…\n  line "), long[:80])
+                self.assertTrue(long.endswith("line 079 detail detail"))
                 python = metadata_amane.bridge_python(tools)
 
                 def build(*args, **kwargs):
@@ -622,7 +638,7 @@ class BridgeQueryTests(unittest.TestCase):
             'print(json.dumps({"console": ctypes.windll.kernel32.GetConsoleWindow(), "sites": {}}))\n',
             encoding='utf-8')
         bridge = metadata_amane.AmaneBridge(Path(sys.executable), script)
-        result = bridge.query('ABW-220', ['makers'], proxy_options={'trust_env': False})
+        result = bridge.query('SSIS-057', ['makers'], proxy_options={'trust_env': False})
         self.assertEqual(result['console'], 0)
 
     def test_timeouts_and_garbage_output_become_provider_errors(self):
