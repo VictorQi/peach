@@ -55,7 +55,7 @@
 
 ## 文案
 
-中文措辞与语气按 `tech-doc-style-chinese` 和 `peach-web-ui` 的确认、Toast 规则；这里只补三条：
+中文措辞与语气按 `docs/WRITING.md` 和 `peach-web-ui` 的确认、Toast 规则；这里只补三条：
 
 - 开关的标签描述**开启**时的状态。坏例「不显示已看过」，好例「显示已看过」。
 - 链接文字说明去向，不写「点这里」「了解更多」；同屏两个同名链接要分开命名。
@@ -83,7 +83,7 @@
 | OKLCH 色阶、语义 token 命名体系 | Peach 用 `:root` 既有 token 加 `color-mix`，新 token 要先证明现有词汇不够 |
 | 主题只用一种切换机制 | Peach 同时写 `data-theme` 与 BoardUI 的 `.dark`，见 `frontend/src/appearance/theme.ts` |
 | 行高无单位、字距用 `em` | Geist 字体规格按像素给行高和字距 |
-| 每行 60–75 字符、英文大小写与 ICU 复数 | 针对拉丁文字；中文排版按 `tech-doc-style-chinese` |
+| 每行 60–75 字符、英文大小写与 ICU 复数 | 针对拉丁文字；中文排版按 `docs/WRITING.md` |
 | 提交按钮保持可点、提交时校验 | `peach-web-ui` 把原生 `disabled` 留给缺输入的状态 |
 | 拖动必须有单指针替代 | `peach-web-ui` 规定行内重排用拖动，不加上下移动按钮 |
 | 图片加 1px 半透明描边 | 会改动全站封面观感，要先过用户确认 |

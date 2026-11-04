@@ -1,6 +1,6 @@
 # 文档与界面文案
 
-Peach 使用 [seiso](https://github.com/scarletkc/seiso) 检查 Markdown 的职责、链接和规则例外。中文表达遵循 tech-doc-style-chinese；界面文字还需对照实际操作、错误状态和可用的恢复方式复核。
+Peach 使用 [seiso](https://github.com/scarletkc/seiso) 检查 Markdown 的职责、链接和规则例外。中文使用清楚、简洁的日常表达；界面文字还需对照实际操作、错误状态和可用的恢复方式复核，不依赖维护者的个人技能。
 
 ## 文档职责
 
