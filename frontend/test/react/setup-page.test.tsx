@@ -178,7 +178,7 @@ it('首启版本统计与错误诊断默认勾选，取消后共同关闭', asyn
     fields: { usage: '版本与系统', errors: '异常链与错误码' }, notice: '不发送媒体信息' };
   const { host, sent } = await open({ remote_reporting: reporting, access_enabled: false },
     { [SETUP_URL]: { status: 200, body: done() } });
-  const reportingSwitches = host.querySelectorAll<HTMLInputElement>('input[aria-label="发送版本统计与错误诊断（推荐）"]');
+  const reportingSwitches = host.querySelectorAll<HTMLInputElement>('input[aria-label="发送版本统计与错误诊断"]');
   expect(reportingSwitches).toHaveLength(1);
   expect(reportingSwitches[0]!.checked).toBe(true);
   await click(reportingSwitches[0]!);

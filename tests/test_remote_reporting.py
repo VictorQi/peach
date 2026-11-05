@@ -44,13 +44,18 @@ class RemoteReportingTests(unittest.TestCase):
             client.assert_not_called()
         self.assertFalse((path.parent / "remote-reporting-budget.json").exists())
 
-    def test_default_enables_both_channels_and_saved_disable_is_persistent(self):
+    def test_default_constructs_no_client_until_user_enables_both_channels(self):
         path = self.config.directory("state") / "remote-reporting.json"
         path.unlink()
         client = mock.Mock()
         with mock.patch.object(reporting, "_new_client", return_value=client):
-            self.assertTrue(reporting.snapshot()["usage"])
-            self.assertTrue(reporting.snapshot()["errors"])
+            self.assertFalse(reporting.snapshot()["usage"])
+            self.assertFalse(reporting.snapshot()["errors"])
+            reporting.usage()
+            reporting.capture("unhandled-main", ValueError("private"))
+            client.capture_event.assert_not_called()
+            client.transport.capture_envelope.assert_not_called()
+            reporting.save({"usage": True, "errors": True})
             reporting.usage()
             reporting.capture("unhandled-main", ValueError("private"))
             self.assertEqual(client.capture_event.call_count, 1)
@@ -92,7 +97,7 @@ class RemoteReportingTests(unittest.TestCase):
     def test_optional_setup_choices_preserve_saved_opt_out(self):
         self.assertEqual(reporting.parse_choices({}, partial=True), {"usage": False, "errors": False})
         (self.config.directory("state") / "remote-reporting.json").unlink()
-        self.assertEqual(reporting.parse_choices({}, partial=True), {"usage": True, "errors": True})
+        self.assertEqual(reporting.parse_choices({}, partial=True), {"usage": False, "errors": False})
 
     def test_dsn_only_accepts_hosted_public_https_endpoint(self):
         for value in (DSN, DSN.replace('.us.', '.'), DSN.replace('.us.', '.de.')):
@@ -576,9 +581,9 @@ class RemoteReportingTests(unittest.TestCase):
         send.assert_not_called()
 
     def test_sdk_wire_payload_has_no_local_context_or_consent_path(self):
+        reporting.save({"usage": True, "errors": True})
         from sentry_sdk.transport import HttpTransport
         sent = []
-        (self.config.directory("state") / "remote-reporting.json").unlink()
         with mock.patch.object(HttpTransport, "_send_envelope", side_effect=lambda envelope: sent.append(envelope.serialize())):
             reporting.capture("unhandled-main", ValueError("private title token=secret"))
             reporting._client.flush(timeout=2)

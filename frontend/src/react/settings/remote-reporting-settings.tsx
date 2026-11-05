@@ -18,8 +18,8 @@ export function ReportingChoices({ value, onChange, busy = false }: {
 }) {
   return <>
     <Rows>
-      <SettingsRow label="发送版本统计与错误诊断（推荐）" description="上传版本、系统信息、故障类型、代码位置与发生次数。">
-        <Switch aria-label="发送版本统计与错误诊断（推荐）" isSelected={value.usage && value.errors}
+      <SettingsRow label="发送版本统计与错误诊断" description="上传版本、系统信息、故障类型、代码位置与发生次数。">
+        <Switch aria-label="发送版本统计与错误诊断" isSelected={value.usage && value.errors}
           onChange={(enabled) => onChange({ ...value, usage: enabled, errors: enabled })} {...busyProps(busy)} />
       </SettingsRow>
     </Rows>

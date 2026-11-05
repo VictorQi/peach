@@ -2,7 +2,7 @@
 (function() {
 	try {
 		var e = typeof globalThis < "u" ? globalThis : typeof window < "u" ? window : typeof global < "u" ? global : typeof self < "u" ? self : {}, t = new e.Error().stack;
-		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "bbad0243-923c-48f5-9179-e51f2f1e367b", e._sentryDebugIdIdentifier = "sentry-dbid-bbad0243-923c-48f5-9179-e51f2f1e367b");
+		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "e0540613-5c50-4229-81a5-1d1a0f89affb", e._sentryDebugIdIdentifier = "sentry-dbid-e0540613-5c50-4229-81a5-1d1a0f89affb");
 	} catch {}
 })();
 var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescriptor, r = Object.getOwnPropertyNames, i = Object.getPrototypeOf, a = Object.prototype.hasOwnProperty, o = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e = null), t.exports), s = (e, i, o, s) => {
@@ -21865,10 +21865,10 @@ function ev(e = "") {
 // src/react/settings/remote-reporting-settings.tsx
 function tv({ value: e, onChange: t, busy: n = !1 }) {
 	return /* @__PURE__ */ (0, z.jsxs)(z.Fragment, { children: [/* @__PURE__ */ (0, z.jsx)(Um, { children: /* @__PURE__ */ (0, z.jsx)(Bm, {
-		label: "发送版本统计与错误诊断（推荐）",
+		label: "发送版本统计与错误诊断",
 		description: "上传版本、系统信息、故障类型、代码位置与发生次数。",
 		children: /* @__PURE__ */ (0, z.jsx)(uh, {
-			"aria-label": "发送版本统计与错误诊断（推荐）",
+			"aria-label": "发送版本统计与错误诊断",
 			isSelected: e.usage && e.errors,
 			onChange: (n) => t({
 				...e,
@@ -22913,4 +22913,4 @@ E();
 var mv = document.getElementById("peach-page"), hv = mv ? pv[mv.dataset.page ?? ""] : void 0;
 mv && hv && (0, M.createRoot)(mv).render(/* @__PURE__ */ (0, z.jsx)(hv, { data: { ...mv.dataset } }));
 
-//# debugId=bbad0243-923c-48f5-9179-e51f2f1e367b
+//# debugId=e0540613-5c50-4229-81a5-1d1a0f89affb
