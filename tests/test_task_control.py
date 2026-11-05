@@ -32,6 +32,25 @@ for _ in range(int(sys.argv[2])):
 
 
 class TaskControlTests(unittest.TestCase):
+    def test_page_snapshot_refreshes_control_commands_on_the_next_request(self):
+        parent = self.store.start('parent', trigger='manual')
+        child_id = self.store.enqueue_followups(
+            parent.id, [('child:1', 'child', '后继')])['queued'][0]
+        self.store.finish(parent.id, 'succeeded')
+        child = self.store.get(child_id)
+        original = task_control.projection_reader(self.store)
+        self.assertEqual(original(child)['state'], 'running')
+
+        task_control.request(self.store, parent.id, 'pause')
+        self.assertEqual(original(child)['state'], 'running')
+        self.assertEqual(task_control.requested(self.db, child.id), 'pause')
+        refreshed = task_control.projection_reader(self.store)
+        self.assertEqual(refreshed(child)['state'], 'paused')
+
+        task_control.request(self.store, parent.id, 'resume')
+        self.assertEqual(refreshed(child)['state'], 'paused')
+        self.assertEqual(task_control.projection_reader(self.store)(child)['state'], 'running')
+
     def test_paused_parent_reads_pending_followups_as_one_group(self):
         parent = self.store.start('parent', trigger='manual')
         self.store.enqueue_followups(

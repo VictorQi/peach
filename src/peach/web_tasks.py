@@ -118,8 +118,10 @@ def q_task(contract, run_id):
 def _payload_reader(contract):
     """同一轮的完成检查点可补充摘要，读取不回写任务记录。"""
     from .job_recovery import read
+    from .task_control import projection_reader
 
     saved = {}
+    project = projection_reader(contract.task_runs)
     with contract.task_runs.database.read_connection() as connection:
         active_ancestors = {row[0] for row in connection.execute(
             "WITH RECURSIVE ancestors(id) AS ("
@@ -135,9 +137,8 @@ def _payload_reader(contract):
 
     def payload(row):
         result = row.payload()
-        from .task_control import projection
         if row.active or row.id in active_ancestors:
-            control = projection(contract.task_runs, row)
+            control = project(row)
             if control is not None:
                 result['control'] = control
             resources = contract.task_resource_monitor.for_run(row)

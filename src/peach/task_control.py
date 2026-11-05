@@ -9,7 +9,7 @@ import sys
 import threading
 import time
 import uuid
-from functools import wraps
+from functools import cache, wraps
 from contextlib import contextmanager
 from contextvars import ContextVar
 
@@ -49,7 +49,12 @@ def _key(db, run_id):
 
 
 def intent(db, run_id, ancestors=()):
-    commands = [_read(_root(db) / f'{identity}.request.json')
+    directory = _root(db)
+    return _intent(run_id, ancestors, lambda name: _read(directory / name))
+
+
+def _intent(run_id, ancestors, read):
+    commands = [read(f'{identity}.request.json')
                 for identity in dict.fromkeys((run_id, *ancestors)) if identity is not None]
     cancelled = [command for command in commands if command.get('action') == 'cancel']
     if cancelled:
@@ -61,25 +66,42 @@ def requested(db, run_id, ancestors=()):
     return intent(db, run_id, ancestors).get('action', 'resume')
 
 
-def projection(store, run):
+def projection_reader(store):
+    """同一份页面快照共用控制文件读取，下一次请求重新取得命令。"""
+    directory = _root(store.database.db_path)
+
+    @cache
+    def read(name):
+        return _read(directory / name)
+
+    return lambda run: projection(store, run, read=read)
+
+
+def projection(store, run, *, read=None):
     if not store.enabled or run.host != store.host:
         return None
+    if read is None:
+        directory = _root(store.database.db_path)
+        read = lambda name: _read(directory / name)
     children = []
     if not run.active:
         children = store.active_descendants(run.id)
         if not children:
             return None
-    command = intent(store.database.db_path, run.id, (run.parent_run_id, run.root_run_id))
+    command = _intent(run.id, (run.parent_run_id, run.root_run_id), read)
     action = command.get('action', 'resume')
-    observed = _read(_root(store.database.db_path) / f'{run.id}.observed.json')
     if action == 'cancel':
         state, actions = 'cancelling', []
     elif action == 'pause':
-        acknowledged = observed.get('command') == command.get('id') and observed.get('state') == 'paused'
         if not run.active:
             acknowledged = bool(children) and all(
-                (projection(store, child) or {}).get('state') == 'paused' for child in children)
-        state = 'paused' if run.status == 'pending' or acknowledged else 'pausing'
+                (projection(store, child, read=read) or {}).get('state') == 'paused' for child in children)
+        elif run.status == 'pending':
+            acknowledged = True
+        else:
+            observed = read(f'{run.id}.observed.json')
+            acknowledged = observed.get('command') == command.get('id') and observed.get('state') == 'paused'
+        state = 'paused' if acknowledged else 'pausing'
         actions = ['resume', 'cancel']
     else:
         state, actions = 'running', ['pause', 'cancel']
