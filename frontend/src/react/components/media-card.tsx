@@ -115,6 +115,8 @@ export interface MediaCardProps {
   /** 这张卡代表整组分卷或版本（「合并分卷与版本」开着）。关着时一卷一张卡，卡面只写这一个文件的
    *  名字、时长与大小，不标整组卷数；打开时照旧按条目上的分组进分卷或版本队列。默认开。 */
   grouped?: boolean;
+  /** 主列表首张画面先取，其余沿用浏览器的延迟加载。 */
+  priority?: boolean;
 }
 
 /** 署名：头像和名字落到同一个身份上（`cardIdentity`）。共演只写第一位再给总人数。 */
@@ -214,7 +216,7 @@ function seekPreview(card: HTMLElement | null, delta: number) {
   video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + delta));
 }
 
-function VideoCard({ item, variant, layout, selected, selectMode, seekSeconds, helpers, actions, onOpen, grouped = true }: MediaCardProps) {
+function VideoCard({ item, variant, layout, selected, selectMode, seekSeconds, helpers, actions, onOpen, grouped = true, priority = false }: MediaCardProps) {
   useEntityNames();
   const card = useRef<HTMLElement | null>(null);
   const [written, setWritten] = useState<{ id: number; on: boolean } | null>(null);
@@ -245,8 +247,10 @@ function VideoCard({ item, variant, layout, selected, selectMode, seekSeconds, h
      不走官方封面，「JAV 默认封面」设置在这里不起作用：那张封面是整部作品的宣传图，多是横图，
      和这一卷竖屏视频不是同一个画面。没有帧图就是「无预览」。 */
   const frameOnly = ratio === PORTRAIT_RATIO && !!item.is_jav;
-  const artwork = frameOnly ? frameArtwork(item, false) : cardArtwork(item, size, false, layout.javImage);
-  const identity = frameOnly || size === 'small' ? artwork.html : cardArtwork(item, 'small', false, layout.javImage).html;
+  const rawArtwork = frameOnly ? frameArtwork(item, priority) : cardArtwork(item, size, priority, layout.javImage);
+  const artwork = priority ? { ...rawArtwork, html: rawArtwork.html.replace('<img ', '<img fetchpriority="high" ') } : rawArtwork;
+  const rawIdentity = frameOnly || size === 'small' ? rawArtwork.html : cardArtwork(item, 'small', priority, layout.javImage).html;
+  const identity = priority ? rawIdentity.replace('<img ', '<img fetchpriority="high" ') : rawIdentity;
   const rawName = parts?.title || item.name || '';
   const shownName = helpers.displayName(item, rawName).trim() || UNNAMED;
   const titleHtml = helpers.titleHtml(item, rawName).trim() || esc(UNNAMED);

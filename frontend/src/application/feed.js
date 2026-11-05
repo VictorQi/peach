@@ -66,7 +66,6 @@ export async function loadEntityShapes(){
     feedState.entityShapes=new Map((data.entities||[])
       .flatMap(entity=>[String(entity.id),...entity.names].map(name=>[`${entity.kind}/${foldName(name)}`,entity.parts])));
     if(typeof data.home?.feed==='boolean')rememberHomeFeed(data.home.feed);
-    if(isFeedNewPath(location.pathname))prepareHomeFeed($('#feedNew'));
   }
   return feedState.entityShapes;
 }
@@ -85,8 +84,8 @@ export function recalledHomeFeed(){
 export function prepareHomeFeed(host){
   // 一打开，宿主就归路由树：骨架只在打开之前铺，之后由画出来的那一行或空着说话。
   if(!host||managedTaken(host)||host.querySelector('[data-feed-id]'))return;
-  host.hidden=catalogState.homeHasFeed!==true;
-  if(catalogState.homeHasFeed!==true)return;
+  host.hidden=catalogState.homeHasFeed===false;
+  if(catalogState.homeHasFeed===false)return;
   host.setAttribute('aria-busy','true');
   if(!host.querySelector('.feednewskeleton'))host.innerHTML=feedState.feedNewSkeletonHtml();
 }
@@ -114,10 +113,11 @@ export function isFeedNewPath(path){return isCatalogPath(path)&&path!=='/junk-fi
 
 export function renderHomeFeed(){
   const host=$('#feedNew');
-  if(managedTaken(host)){host.hidden=catalogState.homeHasFeed!==true;return}
+  const display=catalogState.homeHasFeed!==false;
+  if(managedTaken(host)){host.hidden=!display;updateManagedRoute(host,{display});return}
   prepareHomeFeed(host);
   /* 这一行不随筛选变，判在不在场只看路径：换筛选换掉的是目录的代次，不该把它这一趟作废。 */
-  void openManagedRoute('feed-new',{host,revision:feedState.feedRevision,helpers:feedState.feedNewHelpers,actions:feedState.feedNewActions},
+  void openManagedRoute('feed-new',{host,display,revision:feedState.feedRevision,helpers:feedState.feedNewHelpers,actions:feedState.feedNewActions},
     {container:host,isCurrent:()=>isFeedNewPath(location.pathname)});
 }
 

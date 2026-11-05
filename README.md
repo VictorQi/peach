@@ -56,6 +56,7 @@ Background collection does not open or control a browser. Restricted content is 
 ## Download and use
 
 On the desktop, choose a video folder to start browsing. New libraries use local metadata by default; folders added to an existing library keep its settings.
+Daily browsing opens the catalog without waiting for optional source checks. Cataloged items remain visible when a source is offline, with this device's concealment, sort and layout preferences preserved.
 
 | Method | Get started |
 | --- | --- |

@@ -9,7 +9,7 @@
  * 内自动取下一页，点它等于手动取；失败在哨兵后面留一条可重试的 Note，之后只有手动才重试。 */
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useInfiniteQuery, type InfiniteData, type QueryKey } from '@tanstack/react-query';
-import { mixFace as mixArtwork, mixLabel, relayoutCovers, type Artwork } from '@peach/card-art';
+import { cardArtwork, frameArtwork, mixFace as mixArtwork, mixLabel, relayoutCovers, type Artwork } from '@peach/card-art';
 import { requestErrorMessage } from '@peach/legacy/core';
 import { LOAD_MORE_STATUS, loadingDotsHtml } from '@peach/legacy/ui';
 
@@ -154,10 +154,14 @@ function GridBody(props: CatalogGridProps) {
     if (next.isFetchNextPageError) throw next.error;
   }, [result.fetchNextPage]);
 
+  const firstPicture = tiles.find(tile => tile.kind === 'card'
+    && (cardRatio(tile.item, 'grid', layout) === 9 / 16 && tile.item.is_jav
+      ? frameArtwork(tile.item, false)
+      : cardArtwork(tile.item, layout.active && tile.item.is_jav ? layout.size : 'small', false, layout.javImage)).html);
   const card = (tile: Tile) => tile.kind === 'mix'
     ? <HomeMix key={`mix:${tile.seed.id}`} seed={tile.seed} layout={layout} helpers={helpers} actions={actions} />
     : (
-      <MediaCard key={tile.item.id} item={tile.item} grouped={props.groupCollapse !== false}
+      <MediaCard key={tile.item.id} item={tile.item} grouped={props.groupCollapse !== false} priority={tile === firstPicture}
         variant={trash && tile.item.medium && tile.item.medium !== 'video' ? 'resource' : 'grid'} layout={layout}
         selected={props.selected.has(tile.item.id)} selectMode={props.selectMode} seekSeconds={props.seekSeconds}
         helpers={helpers} actions={actions} onOpen={trash ? openResource : open} />

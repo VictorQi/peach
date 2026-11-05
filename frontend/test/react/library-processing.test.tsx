@@ -373,7 +373,7 @@ it('读不回来时留住已有进度，只在旁边说一句连接中断', asyn
 it('横幅从空闲发现后台任务，任务结束就收起、报一次完成，卸载之后不再敲库', async () => {
   vi.useFakeTimers();
   const toast = vi.fn();
-  const job = { at: { status: 'running', stage: '采集缺失资料', checked: 2, total: 5 } as LibraryProcessingData };
+  const job = { at: { status: 'running', job_id: 'one', stage: '采集缺失资料', checked: 2, total: 5 } as LibraryProcessingData };
   const served = await open({ status: 'idle' }, () => job.at);
   const mounted = await mountRoot(notice({ toast, mode: 'notice' }));
 
@@ -410,7 +410,7 @@ it('卡片被叫着盯任务时一直问，只在任务结束时报一次', asyn
   expect(toast).toHaveBeenCalledTimes(1);
 });
 
-it('刚结束的任务横幅第一次读到也报，同一个任务号只报一次', async () => {
+it('打开页面初读到近期完成结果也不弹出回执', async () => {
   vi.useFakeTimers();
   const toast = vi.fn();
   const job: LibraryProcessingData = {
@@ -423,9 +423,16 @@ it('刚结束的任务横幅第一次读到也报，同一个任务号只报一�
     await tick(10_000);
     await mounted.unmount();
   }
-  expect(toast).toHaveBeenCalledTimes(1);
-  expect(toast).toHaveBeenNthCalledWith(
-    1, '扫描与资料采集已完成：识别 3 个番号，取得 2 组作品资料，自动保存 0 条');
+  expect(toast).not.toHaveBeenCalled();
+});
+
+it('任务号变化时不把另一趟终态当作当前任务完成', async () => {
+  const toast = vi.fn();
+  await open({ status: 'running', job_id: 'one' });
+  await mount(notice({ toast, mode: 'notice' }));
+  await act(async () => queryClient.setQueryData(LIBRARY_PROCESSING_KEY,
+    { status: 'complete', job_id: 'other', completed_at: Date.now() / 1000 }));
+  expect(toast).not.toHaveBeenCalled();
 });
 
 it('两个容器读同一趟任务：一个周期只问一次，撤掉一个另一个照常', async () => {

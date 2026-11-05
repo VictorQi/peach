@@ -4,7 +4,7 @@ import { clearHomeFeed, installEntityShapeBootstrap, isFeedNewPath, loadEntitySh
 import { buildManageBar, closeStats, enterManagementSurface, loadSyncedSettings, mountManageHeader, mountSidebar, openManage, openSettings, paintListTitle, scheduleStickySurfaces, showHomeSurfaces, showManagementBody, syncHeaderActions } from './layout.js';
 import { disposeStage, mediaState, openItem, openJavMovie, openPlaylist, openQueue, openTok } from './media.js';
 import { currentBarsContext, entityState, openEntity, revealForIsland, routeEntityPage, showEntityMissing } from './entity.js';
-import { applyFilterStateInPlace, buildBars, catalogState, clearCatalogGrid, gridTaken, loadCatalog, onlineDefaultLoc, paintCatalogGrid, refreshFacetCounts, syncCatalogFilterScreen, toggleTag } from './catalog.js';
+import { applyFilterStateInPlace, buildBars, catalogState, clearCatalogGrid, gridTaken, loadCatalog, paintCatalogGrid, refreshFacetCounts, syncCatalogFilterScreen, toggleTag } from './catalog.js';
 import { openTasteSignal, routeReview } from './playlists.js';
 import { navigationState, requestOverlay, syncNavigation, syncRouteChrome } from './navigation.js';
 import { enterFollow, followState, openFollowDetail } from './follow.js';
@@ -156,8 +156,8 @@ compositionState.shellActions = {
 
   // 目录用。
   catalog:{
-    /* 地址上没写来源时的缺省：本地加 115，离线的那一处摘掉。 */
-    defaultLoc:()=>onlineDefaultLoc('local,115'),
+    /* 离线目录的已编目内容仍可浏览；播放时再报告媒体是否可用。 */
+    defaultLoc:()=>'local,115',
     /* 整页打开：筛选已由目录元素照地址写进 `state`。`retitle` 是首页 `?state=ads` 改写成垃圾文件地址的那一下：
        改写认领了，标题、侧栏与教程状态在这里补；`entering` 是从别处回到首页，顶部三层的缓存作废。
        回收站清掉搜索框，别的页把地址上的搜索词摆回框里。 */
@@ -199,14 +199,11 @@ loadRouter(compositionState.shellActions).catch(error=>console.error('客户端�
 mountManageHeader();
 mountBatchDock();
 buildManageBar();
-Promise.all([loadSourceStatus(),loadSyncedSettings(),loadingState.entityShapesReady])
-  .then(()=>{
-    if(!effects.isActive)return;
-    /* 顶部两排与筛选栏的两个聚合自带骨架、取回后自己落位，页面打开不等它们：作品列表与它们同时去取。 */
-    if(loadingState.wantsDiscoveryBars())buildBars().catch(error=>console.error('首页横条装载失败',error));
-    syncNavigation();wireAllDrag();
-    // 路由树里按匹配打开的页面等这一下才开始打开：壳的状态到这时才齐。
-    compositionState.routing=true;writeShell({pageOpens:1});syncRouteChrome();
-    scheduleStickySurfaces();
-  }).catch(error=>{if(effects.isActive)console.error('应用启动失败',error)});
+/* 本机遮挡、排序和版式已同步恢复。来源探测、跨设备偏好与人物资料不阻挡主内容。 */
+void loadSourceStatus();
+void loadSyncedSettings();
+if(loadingState.wantsDiscoveryBars())buildBars().catch(error=>console.error('首页横条装载失败',error));
+syncNavigation();wireAllDrag();
+compositionState.routing=true;writeShell({pageOpens:1});syncRouteChrome();
+scheduleStickySurfaces();
 }

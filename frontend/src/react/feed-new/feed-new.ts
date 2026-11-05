@@ -74,6 +74,8 @@ export const postFeedAction = (feedId: number, action: string): Promise<void> =>
  *  里面的 `.peach-react` 上，卡片 portal 回宿主本身，落在 Preflight 的范围外。 */
 export interface FeedNewProps {
   host: HTMLElement;
+  /** 未预留的新作行在下次进入目录时显示，避免晚到内容推移正在浏览的卡片。 */
+  display?: boolean;
   /** 合集开关改了就换一个代次，这一行照新的筛法重取。 */
   revision: number;
   helpers: {

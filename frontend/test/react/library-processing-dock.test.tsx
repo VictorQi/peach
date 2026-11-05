@@ -50,8 +50,10 @@ it('本次观察到的任务失败持续显示，关闭后保持收起', async (
   expect(sonner.custom).not.toHaveBeenCalled();
 });
 
-it('刚刚失败的短任务仍可显示', async () => {
+it('初读到的近期失败留在任务中心，主动展开才显示', async () => {
   await open({ status: 'failed', job_id: 'fresh', completed_at: Date.now() / 1000 - 10 });
+  expect(sonner.custom).not.toHaveBeenCalled();
+  await act(async () => setProcessingNoticeVisible('fresh', true));
   expect(sonner.custom).toHaveBeenCalled();
 });
 

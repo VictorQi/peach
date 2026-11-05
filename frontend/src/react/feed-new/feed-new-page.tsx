@@ -8,7 +8,7 @@ import { queryClient } from '../query';
 import { feedNewKey, feedNewOptions, postFeedAction, type FeedNewProps } from './feed-new';
 import { FeedNewRow } from './feed-new-row';
 
-export function FeedNewPage({ host, revision, helpers, actions }: FeedNewProps) {
+export function FeedNewPage({ host, display = true, revision, helpers, actions }: FeedNewProps) {
   const feed = useQuery(feedNewOptions(null, helpers.feedRowHtml));
   const seen = useRef(revision);
   useEffect(() => {
@@ -16,6 +16,6 @@ export function FeedNewPage({ host, revision, helpers, actions }: FeedNewProps) 
     seen.current = revision;
     void queryClient.invalidateQueries({ queryKey: feedNewKey(null) });
   }, [revision]);
-  return createPortal(<FeedNewRow feedNew={feed.data ?? null} host={host} wire={helpers.wireFeedRow}
+  return createPortal(<FeedNewRow deferred={!display} feedNew={feed.data ?? null} host={host} wire={helpers.wireFeedRow}
     act={postFeedAction} settled={actions.settled} />, host);
 }

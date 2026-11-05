@@ -89,6 +89,7 @@ TIMING_SENSITIVE_SUITES = frozenset({
     "e2e/design-cards.test.ts",     # 紧凑密度切换的即时样式
     "e2e/design-follow-alignment.test.ts",  # 等待标题与内容标题的替换
 })
+LIBRARY_WRITER_SUITES = frozenset({"e2e/library-import.test.ts"})
 
 
 def e2e_concurrency(override: str = "") -> int:
@@ -138,6 +139,8 @@ def e2e_pools(frontend: Path, concurrency: int, selected: tuple[str, ...] = (),
             raise AssertionError(f"浏览器用例不存在：{sorted(missing)}")
         files = tuple(path for path in files if path in selected)
     files = tuple(path for path in files if path != SETUP_SUITE)
+    writers = tuple(path for path in files if path in LIBRARY_WRITER_SUITES)
+    files = tuple(path for path in files if path not in writers)
     if concurrency == 1:
         design = tuple(path for path in files if path.startswith("e2e/design-"))
         routes = tuple(path for path in files if path == "e2e/smoke.test.ts")
@@ -149,7 +152,7 @@ def e2e_pools(frontend: Path, concurrency: int, selected: tuple[str, ...] = (),
         shared = tuple(sorted((path for path in files if path not in sensitive),
                               key=lambda path: (-seconds.get(path, E2E_DEFAULT_SECONDS), path)))
         pools = ((shared, concurrency), (sensitive, 1))
-    return tuple((group, lanes) for group, lanes in pools if group)
+    return tuple((group, lanes) for group, lanes in (*pools, (writers, 1)) if group)
 
 
 def e2e_log_name(path: str) -> str:
@@ -581,6 +584,14 @@ class MissingPrerequisiteTests(unittest.TestCase):
                                    "e2e/nested/feature.test.ts", "e2e/sidebar-motion.test.ts",
                                    "e2e/smoke.test.ts"), 1),))
 
+    def test_library_writes_run_alone_after_all_shared_library_checks(self):
+        for concurrency in (1, 4):
+            with self.subTest(concurrency=concurrency):
+                paths = (*self.PATHS, "e2e/library-import.test.ts")
+                pools = self.pools_for(concurrency, paths=paths)
+                self.assertEqual(pools[-1], (("e2e/library-import.test.ts",), 1))
+                self.assertCountEqual(tuple(path for group, _ in pools for path in group), paths)
+
     def test_large_groups_stay_in_one_pool_and_run_each_file_once(self):
         paths = (tuple(f"e2e/design-{index:02}.test.ts" for index in range(13))
                  + tuple(f"e2e/feature-{index:02}.test.ts" for index in range(25))
@@ -638,6 +649,7 @@ class MissingPrerequisiteTests(unittest.TestCase):
             case = WebE2ESmokeTests("test_every_route_holds_the_layout_and_runtime_invariants")
             case.origin, case.item, case.chrome, case.node = "http://fixture", 1, "chrome", "node"
             case.ffmpeg = "ffmpeg"
+            case.import_root, case.import_sample = Path("fixture-import"), Path("fixture-sample.mp4")
             files = ("e2e/first.test.ts", "e2e/second.test.ts", "e2e/third.test.ts", "e2e/fourth.test.ts")
             calls = []
 
