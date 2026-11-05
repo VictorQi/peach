@@ -862,7 +862,7 @@
     },
     {
       "id": "readme-javm",
-      "cadence": "quarterly",
+      "cadence": "manual",
       "name": "javm 说明",
       "url": "https://raw.githubusercontent.com/ddmoyu/javm/main/README.md",
       "snapshot": "docs/reference-snapshots/upstream/readme-javm.md",
@@ -873,7 +873,7 @@
         "ref": "refs/heads/main",
         "revision": "dd0e6b62b263258b6e78106c72017b3b470b4097"
       },
-      "role": "javm（MIT）只作行为证据：库健康计数（待办第 26 条）、字段级跨源融合与广告片识别。它写死的遥测地址与流媒体截流不照搬（第 63 条）。",
+      "role": "javm（MIT）只作行为证据：库健康计数（待办第 26 条）、字段级跨源融合与广告片识别。它写死的遥测地址与流媒体截流不照搬（第 63 条）。2026-11-05 公开仓库与文件 API 均返回 404，当前无代码消费者；保留历史快照，停止自动跟踪。",
       "consumers": []
     },
     {
@@ -1024,7 +1024,7 @@
     },
     {
       "id": "readme-atlas",
-      "cadence": "quarterly",
+      "cadence": "manual",
       "name": "Atlas 说明",
       "url": "https://raw.githubusercontent.com/Zoroaaa/Atlas/v3/README.md",
       "snapshot": "docs/reference-snapshots/upstream/readme-atlas.md",
@@ -1035,7 +1035,7 @@
         "ref": "refs/heads/v3",
         "revision": "b1a3b518d87edc8052502401e747f7ec276cab22"
       },
-      "role": "Atlas 的 `services/jav-utils.ts` `parseMagnets` 只解析 JavBus 一家，作待办第 43 条磁力取法的第二份证据；其余「磁力搜索」只是跳转链接。",
+      "role": "Atlas 的 `services/jav-utils.ts` `parseMagnets` 只解析 JavBus 一家，作待办第 43 条磁力取法的第二份证据；其余「磁力搜索」只是跳转链接。2026-11-05 原 v3 分支已无法读取；当前 main 的产品说明已重构，未据此替换旧协议证据。当前无代码消费者，保留历史快照，停止自动跟踪。",
       "consumers": []
     },
     {
