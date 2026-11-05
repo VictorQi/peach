@@ -2,21 +2,7 @@
 
 各节分别记录复核日期（Asia/Taipei）。本文件是人工复核笔记，不登记为可覆盖的上游快照；原文字节、哈希与 revision 见 [来源登记](../reference-sources.json)。
 
-## 运行与构建依赖
-
-2026-11-05 的维护批次固定 filelock 4.2.9、watchdog 7.1.0、soupsieve 4.0.1、typing-inspection 0.4.5 和 pycryptodome 4.3.0。文件发现使用自己的 `dispatch`，不使用 watchdog 的路径匹配器；仅属性变化不启动内容读取，新增、内容修改和移动仍按原队列处理。pydantic-core 继续为 2.50.2，因为当前 pydantic 2.14.2 精确要求该版本，不单独强升至 2.50.3；随 pydantic 放开兼容约束后再更新。
-
-前端清单和锁同步采用 TanStack Query 5.106.1、Motion 14.9.1、Tailwind 4.3.4、Vite 8.3.6、Vitest 5.1.0 及对应 lint 补丁，并重建分发文件。两份 npm 审计均未报告漏洞。路由组件的冷编译准备窗口保留有限上限，页面的等待、跳转和反馈断言保持原判据。
-
-构建基础采用 [uv 0.13.7](https://github.com/astral-sh/uv/releases/tag/0.13.7)、[setup-uv 10.3.3](https://github.com/astral-sh/setup-uv/releases/tag/v10.3.3)，Docker 使用 [Python 3.15.2](https://www.python.org/downloads/release/python-3152/)，Windows 候选使用 [Python 3.14.10](https://www.python.org/downloads/release/python-31410/)。两条 Python 分支均包含撤销受影响 CA 信任、归档链接与 Cookie 解析的官方安全修复。Windows 构建解释器放在隔离工具目录，不替换正在运行的共享解释器。
-
 ## amane 桥
-
-### 稳定版 v0.25.0 的桥接修复
-
-2026-11-05 复核官方 [v0.25.0](https://github.com/sqzw-x/amane/releases/tag/v0.25.0)，固定提交 `f6c1cc9f54bca0fa5381a26d4b2e259df7f58a0a`。相对 v0.22.1 的 51 个提交修复了桥实际消费的 AIRAV 字段归属与检索、AVSOX 空字段，并调整共享 HTTP 的拦截判定；本批采用稳定版，不追随 main。片商 `official.py` 的原始字节与旧固定版完全一致，SHA-256 为 `0aeeb0c15230e1a43eecf2504d9873d04c4dd43788f9150e8e27e8647f4181dc`，路由快捷判断随当前 revision 更新。
-
-Peach 继续只构造无 `BrowserClient` 的 `HttpClient`，挑战页返回来源失败，不使用渲染路径，也不消费上游账号、语义检索、服务端或聚合功能。上游新增的 numpy、ONNX、tokenizers 和 macOS CoreML 是其必需安装依赖，保留在完整锁中，不自行拆包或省略许可证；本次采用的理由是实际桥接站点修复，新增分发体积须在制品检查中核对。桥的 watchdog 遵循上游 `<7` 保持 6.0.0，应用自身更新至 7.1.0，两个环境继续隔离。
 
 ### 稳定版 v0.24.1 暂不采用
 

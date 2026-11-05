@@ -273,7 +273,10 @@ class RuntimePackagingTests(unittest.TestCase):
         (self.root / "manifest.json").write_text(json.dumps(facts), encoding="utf-8")
         return facts
 
-    def test_build_toolchain_is_exact_and_omits_existing_runtime_packages(self):
+    def test_locked_runtime_uses_the_existing_revision_and_build_toolchain(self):
+        facts = self.builder.locked_amane()
+        self.assertEqual(facts, {"revision": "fd9294fbe5b4aa88ce1df84d534f6816ad9460d5",
+                                 "version": "0.22.1"})
         requirements = self.builder.build_requirements()
         self.assertIn("pyinstaller==6.22.3", requirements)
         self.assertTrue(all("==" in item for item in requirements))

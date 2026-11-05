@@ -1,12 +1,12 @@
 (function() {
 	try {
 		var e = typeof globalThis < "u" ? globalThis : typeof window < "u" ? window : typeof global < "u" ? global : typeof self < "u" ? self : {}, t = new e.Error().stack;
-		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "f5c7c140-c09a-404d-a33c-4de69cab342c", e._sentryDebugIdIdentifier = "sentry-dbid-f5c7c140-c09a-404d-a33c-4de69cab342c");
+		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "bf58e55d-c7b8-47af-9c17-200b1573e873", e._sentryDebugIdIdentifier = "sentry-dbid-bf58e55d-c7b8-47af-9c17-200b1573e873");
 	} catch {}
 })();
 import { $fe21c36db05242bb$export$d7b12c4107be0d61 as e, ArtSlot as t, Button as n, ButtonLink as r, Chip as i, CloudDownloadDialog as a, DISCOVERY_SORTS as o, DOWNLOADS_KEY as s, DOWNLOADS_URL as c, E3 as l, EmptyFocusButton as u, EmptyState as d, FilterGlassRows as f, FilterIconButton as p, FilterPill as m, GlassPill as h, Help as g, Input as _, JAV_LAYOUTS as v, JAV_RECOMMENDATION_GRID as ee, JavHeader as y, LibraryShortcuts as te, M6 as b, Note as x, PHASES as S, Pagination as C, SEGMENT as w, SEGMENTED_TRACK as T, SegmentedRadioGroup as E, Segments as ne, SortKeys as re, SourceAvatar as ie, TaskProgress as ae, WANTS_KEY as oe, WantMagnets as D, Wt as se, __toESM as ce, addWant as le, apiGet as O, appSettingsStore as ue, avatarInner as k, busyProps as A, cachedMagnetStates as j, cardClass as M, cardRatio as de, coverUrl as fe, discoveryArtwork as pe, discoveryKey as me, discoveryScore as he, entityDisplayName as N, entityPath as ge, errorMessage as P, fetchDiscoveries as _e, fetchWants as F, gridLayout as ve, invalidateWants as I, javContentSkeleton as ye, javLayout as be, javTagSkeleton as xe, pageWindow as L, peachHistory$1 as R, qE as z, recommendationScore as Se, relayoutCovers as Ce, removeWants as B, require_jsx_runtime as V, require_react as H, resetWants as U, searchNote as W, shellNavigate as G, spriteGlyph as K, storeJavLayout as we, textLang as Te, useAction as q, useEntityNames as J, useQuery as Y, wantName as X, wireHorizontalScroller as Ee } from "./peach-app.js";
-import "./peach-app.source-list-BUNw-ejj.js";
 import { ErrorLine as De } from "./peach-app.source-view-DalWfDkm.js";
+import "./peach-app.source-list-ri5fRK2E.js";
 // src/react/jav/discovery-faces.tsx
 var Z = /* @__PURE__ */ ce(H(), 1), Q = V();
 function Oe({ item: e }) {
@@ -813,4 +813,4 @@ function Be({ readOnly: e, receipt: a, resource: s, query: c, navigate: u, clear
 }
 export { ze as JavPage };
 
-//# debugId=f5c7c140-c09a-404d-a33c-4de69cab342c
+//# debugId=bf58e55d-c7b8-47af-9c17-200b1573e873

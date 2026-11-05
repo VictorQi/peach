@@ -691,19 +691,6 @@ class LocalChannelTests(_ServiceCase):
         print(f'原生发现：空闲 {elapsed:.3f}s / CPU {used:.3f}s / 媒体探测0次；'
               f'20个新增文件登记 {time.monotonic()-started:.3f}s')
 
-    def test_attribute_changes_do_not_enqueue_content_but_content_changes_do(self):
-        from watchdog.events import FileAttribEvent, FileModifiedEvent
-
-        service = mock.Mock()
-        handler = push._LocalEventHandler(service)
-        handler.register('local', self.declared['local'][0], self.media)
-        target = self.media / 'changed.mp4'
-        target.write_bytes(b'media')
-        handler.dispatch(FileAttribEvent(str(target)))
-        service.submit.assert_not_called()
-        handler.dispatch(FileModifiedEvent(str(target)))
-        service.submit.assert_called_once_with('local', self.ledger('local', 'changed.mp4'))
-
     def test_a_file_landing_in_a_watched_root_reaches_the_ledger(self):
         service = self.service()
         service.save({"enabled": True, "watch_local": True, "cloud": False, "prefixes": []})
