@@ -300,6 +300,20 @@ class ContractWiringTests(unittest.TestCase):
 
 
 class TasksEndpointTests(unittest.TestCase):
+    def test_finished_followups_remain_complete_without_per_row_control_queries(self):
+        parent = self.store.start('parent', trigger='manual')
+        children = self.store.enqueue_followups(
+            parent.id, [(f'child:{i}', 'child', '后继') for i in range(64)])['queued']
+        for identity in children:
+            self.store.finish(identity, 'succeeded')
+        self.store.finish(parent.id, 'succeeded')
+        database = self.store.database
+        with unittest.mock.patch.object(database, 'read_connection', wraps=database.read_connection) as reads:
+            payload = web_tasks.q_tasks(self.contract, {})
+        self.assertEqual({row['id'] for row in payload['finished']}, {parent.id, *children})
+        self.assertTrue(all('control' not in row and 'resources' not in row for row in payload['finished']))
+        self.assertLess(reads.call_count, 20)
+
     def test_complete_summaries_do_not_load_the_recovery_detail_file(self):
         run = self.store.start('link-check', trigger='manual')
         summary = {'gone_count': 1, 'unclear_count': 2}

@@ -32,6 +32,18 @@ for _ in range(int(sys.argv[2])):
 
 
 class TaskControlTests(unittest.TestCase):
+    def test_paused_parent_reads_pending_followups_as_one_group(self):
+        parent = self.store.start('parent', trigger='manual')
+        self.store.enqueue_followups(
+            parent.id, [(f'child:{i}', 'child', '后继') for i in range(64)])
+        self.store.finish(parent.id, 'succeeded')
+        task_control.request(self.store, parent.id, 'pause')
+        database = self.store.database
+        with patch.object(database, 'read_connection', wraps=database.read_connection) as reads:
+            state = self.state(parent.id)
+        self.assertEqual(state['state'], 'paused')
+        self.assertLess(reads.call_count, 5)
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

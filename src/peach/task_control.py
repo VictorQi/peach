@@ -66,13 +66,7 @@ def projection(store, run):
         return None
     children = []
     if not run.active:
-        with store.database.read_connection() as connection:
-            rows = connection.execute(
-                'WITH RECURSIVE family(id) AS (SELECT id FROM task_run WHERE parent_run_id=? '
-                'UNION ALL SELECT t.id FROM task_run t JOIN family f ON t.parent_run_id=f.id) '
-                "SELECT id FROM task_run WHERE id IN (SELECT id FROM family) AND status IN ('pending','running')",
-                (run.id,)).fetchall()
-        children = [store.get(row[0]) for row in rows]
+        children = store.active_descendants(run.id)
         if not children:
             return None
     command = intent(store.database.db_path, run.id, (run.parent_run_id, run.root_run_id))

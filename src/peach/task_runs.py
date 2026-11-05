@@ -787,6 +787,16 @@ class TaskRunStore:
                 [*ids, *ids]).fetchall()
         return [_row(row) for row in rows]
 
+    def active_descendants(self, run_id: int) -> list[TaskRun]:
+        """一次读取这轮仍未结束的后继，避免为每个后继重新打开账本。"""
+        with self.database.read_connection() as connection:
+            rows = connection.execute(
+                'WITH RECURSIVE family(id) AS (SELECT id FROM task_run WHERE parent_run_id=? '
+                'UNION ALL SELECT t.id FROM task_run t JOIN family f ON t.parent_run_id=f.id) '
+                f"SELECT {_COLUMNS} FROM task_run WHERE id IN (SELECT id FROM family) "
+                "AND status IN ('pending','running')", (run_id,)).fetchall()
+        return [_row(row) for row in rows]
+
     def active_parents(self) -> list[TaskRun]:
         """自己已经结束、派出的后继还有在排或在跑的那几轮，新的在前。"""
         if not self.enabled:

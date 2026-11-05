@@ -120,6 +120,13 @@ def _payload_reader(contract):
     from .job_recovery import read
 
     saved = {}
+    with contract.task_runs.database.read_connection() as connection:
+        active_ancestors = {row[0] for row in connection.execute(
+            "WITH RECURSIVE ancestors(id) AS ("
+            "SELECT parent_run_id FROM task_run WHERE status IN ('pending','running') "
+            "AND parent_run_id IS NOT NULL UNION "
+            "SELECT t.parent_run_id FROM task_run t JOIN ancestors a ON t.id=a.id "
+            "WHERE t.parent_run_id IS NOT NULL) SELECT id FROM ancestors")}
     from .task_resources import Monitor
     if not hasattr(contract, 'task_resource_monitor'):
         with contract.cache_lock:
@@ -129,12 +136,13 @@ def _payload_reader(contract):
     def payload(row):
         result = row.payload()
         from .task_control import projection
-        control = projection(contract.task_runs, row)
-        if control is not None:
-            result['control'] = control
-        resources = contract.task_resource_monitor.for_run(row)
-        if resources is not None:
-            result['resources'] = resources
+        if row.active or row.id in active_ancestors:
+            control = projection(contract.task_runs, row)
+            if control is not None:
+                result['control'] = control
+            resources = contract.task_resource_monitor.for_run(row)
+            if resources is not None:
+                result['resources'] = resources
         if row.task_key not in RESULT_FIELDS or row.status not in ('succeeded', 'failed'):
             return result
         if all(field in row.result_summary for field in RESULT_FIELDS[row.task_key]):
