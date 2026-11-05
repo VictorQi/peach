@@ -17,8 +17,8 @@ import type {
 import type { ShellActions } from '../../src/react/router/shell-actions';
 import type { DiagnosticsProps } from '../../src/react/diagnostics/diagnostics-page';
 
-// 首次导入会编译路由表带进来的整棵页面子树，编译等待使用独立的有限窗口；之后每条用例重新装载只重跑模块。
-const REACT_IMPORT_TIMEOUT_MS = 30_000;
+// 首次导入会编译整棵页面子树，并与其他组件文件并发编译；此窗口只约束测试准备，不放宽页面行为断言。
+const REACT_IMPORT_TIMEOUT_MS = 60_000;
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

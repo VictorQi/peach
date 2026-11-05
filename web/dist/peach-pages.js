@@ -2,7 +2,7 @@
 (function() {
 	try {
 		var e = typeof globalThis < "u" ? globalThis : typeof window < "u" ? window : typeof global < "u" ? global : typeof self < "u" ? self : {}, t = new e.Error().stack;
-		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "e0540613-5c50-4229-81a5-1d1a0f89affb", e._sentryDebugIdIdentifier = "sentry-dbid-e0540613-5c50-4229-81a5-1d1a0f89affb");
+		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "a2f18c63-1092-4c39-9fab-34edf24b9126", e._sentryDebugIdIdentifier = "sentry-dbid-a2f18c63-1092-4c39-9fab-34edf24b9126");
 	} catch {}
 })();
 var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescriptor, r = Object.getOwnPropertyNames, i = Object.getPrototypeOf, a = Object.prototype.hasOwnProperty, o = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e = null), t.exports), s = (e, i, o, s) => {
@@ -13422,7 +13422,7 @@ function Y(e) {
 function Fo() {
 	let e = U(null);
 	if (e !== void 0) return No === 0 && typeof PointerEvent < "u" && e.addEventListener("pointerup", Y), No++, () => {
-		No--, !(No > 0) && typeof PointerEvent < "u" && e.removeEventListener("pointerup", Y);
+		No--, No > 0 || typeof PointerEvent < "u" && e.removeEventListener("pointerup", Y);
 	};
 }
 function Io(e) {
@@ -16213,7 +16213,7 @@ var nu = class e {
 		let t = this.getKey(e);
 		if (t == null) return;
 		let n = new Ql(this.state.selectedKeys === "all" ? this.getSelectAllKeys() : this.state.selectedKeys);
-		n.has(t) ? n.delete(t) : this.canSelectItem(t) && (n.add(t), n.anchorKey = t, n.currentKey = t), !(this.disallowEmptySelection && n.size === 0) && this.state.setSelectedKeys(n);
+		n.has(t) ? n.delete(t) : this.canSelectItem(t) && (n.add(t), n.anchorKey = t, n.currentKey = t), this.disallowEmptySelection && n.size === 0 || this.state.setSelectedKeys(n);
 	}
 	replaceSelection(e) {
 		if (this.selectionMode === "none") return;
@@ -20330,8 +20330,8 @@ var Eg = class extends fg {
 		let { element: t, name: n, keyframes: r, pseudoElement: i, allowFlatten: a = !1, finalKeyframe: o, onComplete: s } = e;
 		this.isPseudoElement = !!i, this.allowFlatten = a, this.options = e;
 		let c = Tg(e);
-		this.animation = Cg(t, n, r, c, i), c.autoplay === !1 && this.animation.pause(), this.animation.onfinish = () => {
-			if (this.finishedTime = this.time, !i) {
+		this.animation = Cg(t, n, r, c, i), c.autoplay === !1 && this.animation.pause(), this.animation.onfinish = this.onFinish = () => {
+			if (this.animation.onfinish = null, this.finishedTime = this.time, !i) {
 				let e = lg(r, this.options, o, this.speed);
 				this.updateMotionValue?.(e), hg(t, n, e), this.animation.cancel();
 			}
@@ -20339,21 +20339,22 @@ var Eg = class extends fg {
 		}, dg(this, e, c);
 	}
 	play() {
-		this.isStopped || (this.manualStartTime = null, this.animation.play(), this.state === "finished" && this.updateFinished());
+		this.isStopped || (this.manualStartTime = null, this.animation.onfinish = this.onFinish, this.animation.play(), this.state === "finished" && this.updateFinished());
 	}
 	pause() {
 		this.animation.pause();
 	}
 	complete() {
-		this.animation.finish?.();
+		this.isStopped || (this.animation.onfinish = this.onFinish), this.animation.finish?.();
 	}
 	cancel() {
+		this.animation.onfinish = null;
 		try {
 			this.animation.cancel();
 		} catch {}
 	}
 	stop() {
-		this.isStopped || (this.isStopped = !0, this.state !== "idle" && this.finishedTime === null && (this.updateMotionValue ? this.updateMotionValue() : this.commitStyles(), this.isPseudoElement || (this.animation.onfinish = null, this.cancel())));
+		this.isStopped || (this.isStopped = !0, this.state !== "idle" && this.finishedTime === null && (this.updateMotionValue ? this.updateMotionValue() : this.commitStyles(), this.isPseudoElement || this.cancel()));
 	}
 	commitStyles() {
 		let e = this.options?.element;
@@ -20390,7 +20391,7 @@ var Eg = class extends fg {
 		this.manualStartTime = this.animation.startTime = e;
 	}
 	attachTimeline({ timeline: e, onAttach: t, observe: n }) {
-		return this.allowFlatten && this.animation.effect?.updateTiming({ easing: "linear" }), this.animation.onfinish = null, e && vg() ? (this.animation.timeline = e, t?.(this.animation), Th) : n(this);
+		return this.allowFlatten && this.animation.effect?.updateTiming({ easing: "linear" }), this.animation.onfinish = this.onFinish = null, e && vg() ? (this.animation.timeline = e, t?.(this.animation), Th) : n(this);
 	}
 }, Dg = class {
 	constructor(e) {
@@ -22913,4 +22914,4 @@ E();
 var mv = document.getElementById("peach-page"), hv = mv ? pv[mv.dataset.page ?? ""] : void 0;
 mv && hv && (0, M.createRoot)(mv).render(/* @__PURE__ */ (0, z.jsx)(hv, { data: { ...mv.dataset } }));
 
-//# debugId=e0540613-5c50-4229-81a5-1d1a0f89affb
+//# debugId=a2f18c63-1092-4c39-9fab-34edf24b9126

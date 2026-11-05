@@ -1,13 +1,13 @@
 (function() {
 	try {
 		var e = typeof globalThis < "u" ? globalThis : typeof window < "u" ? window : typeof global < "u" ? global : typeof self < "u" ? self : {}, t = new e.Error().stack;
-		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "2cc05748-2a4c-4130-93b7-a6ff4beab2d8", e._sentryDebugIdIdentifier = "sentry-dbid-2cc05748-2a4c-4130-93b7-a6ff4beab2d8");
+		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "782721f8-476c-4a09-a4f4-5e8113c5a97f", e._sentryDebugIdIdentifier = "sentry-dbid-782721f8-476c-4a09-a4f4-5e8113c5a97f");
 	} catch {}
 })();
 import { ApiError as e, Button as t, ButtonLink as n, Chip as r, DIAGNOSTICS_KEY as i, Disclosure as a, EmptyState as o, Fact as s, FactList as c, Fieldset as l, FieldsetTitle as u, Input as d, LOC as f, LinkButton as p, Note as m, Section as h, SettingsCard as g, SettingsSectionLabel as _, Stack as v, TaskProgress as y, __toESM as b, apiGet as ee, apiSend as x, busyProps as S, configurationSection as C, cx as w, diagnosticHeaders as T, diagnosticsSkeleton as E, errorMessage as D, fetchDiagnostics as O, fmtDur as k, fmtSize as A, queryClient as j, require_jsx_runtime as M, require_react as N, settingsPath as P, tl as F, useAction as I, useQuery as L } from "./peach-app.js";
 import { ErrorExcerpt as R } from "./peach-app.error-excerpt-B8v2xEIP.js";
-import { DataTable as z } from "./peach-app.data-table-aWN3V7mT.js";
-import { SiteMark as B } from "./peach-app.site-mark-D_VlIyJz.js";
+import { SiteMark as z } from "./peach-app.site-mark-D_VlIyJz.js";
+import { DataTable as B } from "./peach-app.data-table-CifOPKxI.js";
 // src/react/diagnostics/health-list.tsx
 var V = /* @__PURE__ */ b(N(), 1), H = M(), U = (e) => e.title || e.name || e.code || `作品 #${e.id}`, W = (e) => [[
 	"作品",
@@ -121,7 +121,7 @@ function G({ group: e, openItem: n, receipt: r }) {
 				tone: "error",
 				children: i.error
 			}) : null,
-			/* @__PURE__ */ (0, H.jsx)(z, {
+			/* @__PURE__ */ (0, H.jsx)(B, {
 				label: e.label,
 				title: "作品清单",
 				unit: "部作品",
@@ -468,7 +468,7 @@ function ie(e) {
 								className: "flex flex-wrap items-center justify-between gap-2",
 								children: [/* @__PURE__ */ (0, H.jsxs)("h3", {
 									className: "flex min-w-0 items-center gap-2 text-body-medium text-text-primary",
-									children: [/* @__PURE__ */ (0, H.jsx)(B, { source: e.source }), e.label]
+									children: [/* @__PURE__ */ (0, H.jsx)(z, { source: e.source }), e.label]
 								}), /* @__PURE__ */ (0, H.jsx)(Q, { status: e.status })]
 							}),
 							/* @__PURE__ */ (0, H.jsx)(R, {
@@ -504,4 +504,4 @@ function ie(e) {
 }
 export { ie as DiagnosticsPage };
 
-//# debugId=2cc05748-2a4c-4130-93b7-a6ff4beab2d8
+//# debugId=782721f8-476c-4a09-a4f4-5e8113c5a97f
