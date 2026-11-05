@@ -241,8 +241,11 @@ def _announce_control(job, job_id, status):
 def _writer_active(config):
     from filelock import FileLock, Timeout
     from .library_processing import state_path
+    path = state_path(config)
+    if not path.parent.is_dir():
+        return False
     try:
-        with FileLock(str(state_path(config)) + '.lock', timeout=0):
+        with FileLock(str(path) + '.lock', timeout=0):
             return False
     except Timeout:
         return True
@@ -358,13 +361,16 @@ def _processing_request(contract, config, previous, body):
 
 def dispatch_incremental(contract):
     """目录监视登记的新影片在主任务空闲时交给统一处理入口。"""
-    from .library_new_assets import pending
+    from .library_new_assets import pending, available_for_dispatch
     from .job_recovery import read
     if _current(contract).get('status') in ACTIVE:
         return
     if read(contract.db_path, 'library-processing').get('status') == 'active':
         return
-    selected = pending(contract.db_path)
+    config = settings_file.active()
+    if _writer_active(config):
+        return
+    selected = available_for_dispatch(contract.db_path, pending(contract.db_path), config)
     if selected:
         w_library_processing(contract, {'asset_ids': selected, 'stage': 'collect', 'automatic': True})
 

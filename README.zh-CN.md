@@ -55,6 +55,8 @@
 
 ## 下载与使用
 
+桌面端选择视频文件夹即可开始浏览。新媒体库默认使用本地资料，添加到已有媒体库会保留它的设置。
+
 | 方式 | 入口 |
 | --- | --- |
 | Windows x64 | [安装版](https://github.com/peach-mitao/peach/releases/download/v0.50.0/Peach-0.50.0-windows-x64-setup.exe) · [免安装版](https://github.com/peach-mitao/peach/releases/download/v0.50.0/Peach-0.50.0-windows-x64.zip) |

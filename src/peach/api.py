@@ -603,6 +603,23 @@ def create_app(
     app.state.jav_browser = jav_browser
     app.state.mount_reachability = mount_reachability
     app.state.network_reachability = network_reachability
+    def activate_media_configuration(prepared, root_id):
+        from . import settings_file
+        from .media import normalized_path
+        from .media_identity import catalog
+        from .platform import translate_roots, location_mounts
+        settings_file.reset_cache()
+        declared = tuple(root for roots in prepared.locations.values() for root in roots)
+        selected = catalog(prepared)[1][root_id]['root']
+        allowed = tuple(normalized_path(root) for root in translate_roots((selected,)))
+        LOCATION_ROOT_DECLARATIONS.update(prepared.locations)
+        filesystem.allowed_roots = tuple(dict.fromkeys((*filesystem.allowed_roots, *allowed)))
+        database.media_roots = declared
+        mount_reachability.replace_roots(source_roots(prepared))
+        push_discovery.refresh_roots(prepared.locations, location_mounts(), selected=(selected,))
+        contract.upgrade_config = prepared
+        contract.cache_bust()
+    app.state.activate_media_configuration = activate_media_configuration
     from .background_issues import IssueLog
     app.state.background_issues = IssueLog()
     app.state.stream_sessions = StreamSessionRegistry()

@@ -38,7 +38,7 @@ from contextlib import closing
 from pathlib import Path
 from unittest import mock
 
-from peach import follow_assets, link_marks, scraping_access, settings_file, taste_history
+from peach import follow_assets, link_marks, media_configuration, media_identity, scraping_access, settings_file, taste_history
 from peach import platform as peach_platform
 from peach.config import FFMPEG_DIR
 from peach.ffmpeg import FFmpegResolver
@@ -225,10 +225,14 @@ class WebE2ESmokeTests(unittest.TestCase):
         cls.port = free_port()
         config = settings_file.PeachConfig(
             data, data / settings_file.SETTINGS_FILENAME, present=True, data_root_found=True,
-            locations={"local": (str(media),)},
             server=settings_file.ServerSettings(port=cls.port),
         )
+        sources = media_configuration.prepare_sources([{'location': 'local', 'path': str(media), 'cost': 'free'}],
+                                                       windows=os.name == 'nt', config=config)
+        config = media_identity.configure_sources(config, sources, windows=os.name == 'nt')
         settings_file.write(config)
+        cls.import_root = cls.root / 'import-media'
+        cls.import_sample = next(media.rglob('*.mp4'))
         generated = config.directory("generated")
         # 路由冒烟只验页面与站标端点的衔接；取图算法另有 mock 契约，不让这轮布局测试依赖外网。
         # 站标与来源图标两处缓存都预先填上同一张图：缓存为空时 `/site-mark` 与 `/source-icon`
@@ -254,8 +258,13 @@ class WebE2ESmokeTests(unittest.TestCase):
             cached.parent.mkdir(parents=True, exist_ok=True)
             cached.write_bytes(mark)
         seed_metadata_cache(media, config.directory('sources'))
-        result = process_library(config, cls.db, generated, generated / "covers",
-                                 provider_factory=refuse_network)
+        with mock.patch.dict(os.environ, PEACH_DATA_ROOT=str(data)):
+            settings_file.reset_cache()
+            try:
+                result = process_library(config, cls.db, generated, generated / "covers",
+                                         provider_factory=refuse_network)
+            finally:
+                settings_file.reset_cache()
         if result["status"] != "complete":
             raise AssertionError(f"演示库 process 没有完成：{result}")
         # 普通页面用已看过邀请的账本；首次邀请由教程专用用例独立验证。
@@ -269,7 +278,7 @@ class WebE2ESmokeTests(unittest.TestCase):
 
     @classmethod
     def _start_server(cls):
-        env = dict(os.environ, PEACH_DATA_ROOT=str(cls.data), PYTHONIOENCODING="utf-8")
+        env = dict(os.environ, PEACH_DATA_ROOT=str(cls.data), PYTHONIOENCODING="utf-8", PEACH_TRAY_MANAGED='1')
         cls.log = (cls.root / "serve.log").open("w", encoding="utf-8")
         cls.server = subprocess.Popen(
             [sys.executable, "-X", "utf8", "-m", "peach", "serve", "--host", "127.0.0.1",
@@ -338,7 +347,8 @@ class WebE2ESmokeTests(unittest.TestCase):
 
     def test_every_route_holds_the_layout_and_runtime_invariants(self):
         env = dict(os.environ, PEACH_E2E_ORIGIN=self.origin, PEACH_E2E_ITEM=str(self.item), PEACH_E2E_FFMPEG=self.ffmpeg,
-                   PEACH_E2E_CHROME=self.chrome, PEACH_E2E_NET_LOG_DIR=str(BROWSER_LOGS / "network"))
+                   PEACH_E2E_CHROME=self.chrome, PEACH_E2E_NET_LOG_DIR=str(BROWSER_LOGS / "network"),
+                   PEACH_E2E_IMPORT_ROOT=str(self.import_root), PEACH_E2E_IMPORT_SAMPLE=str(self.import_sample))
         BROWSER_LOGS.mkdir(parents=True, exist_ok=True)
         for pattern in ("batch-*.tap", "e2e-*.tap"):
             for stale in BROWSER_LOGS.glob(pattern):

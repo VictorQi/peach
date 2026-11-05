@@ -30,6 +30,7 @@ import { LibraryCompletionPrompt, missingPreviewIds } from '../library-processin
 import { useCatalogView } from './catalog-view';
 import { queryClient } from '../query';
 import { CatalogListPage } from './catalog-list-page';
+import { LibraryImportPanel } from './library-import-panel';
 
 export function CatalogGridPage(props: CatalogGridProps) {
   const view = useCatalogView();
@@ -113,6 +114,7 @@ function GridBody(props: CatalogGridProps) {
   }), [result.data, props.groupCollapse, props.mix, trash, layout.javImage]);
   const shown = tiles.reduce((count, tile) => count + (tile.kind === 'card' ? 1 : 0), 0);
   const total = Number(result.data?.pages[0]?.total || 0);
+  const libraryEmpty = !entity && !trash && !!result.data?.pages[0]?.libraryEmpty;
   const finiteWall = entity || finiteWallFilters(props.filters);
   const wallAvailable = !trash && !props.selectMode && !!actions.wallPlayer && !!actions.wallDetails;
   const wallItems = tiles.flatMap(tile => tile.kind === 'card' && wallHasCover(tile.item) ? [tile.item] : []);
@@ -162,6 +164,7 @@ function GridBody(props: CatalogGridProps) {
     );
 
   const content = () => {
+    if (libraryEmpty) return null;
     if (wallAvailable && props.wall) return <VideoWall
       key={finiteWall ? 'finite' : 'explore'}
       sessionKey={entity ? `entity:${props.entityKey || ''}` : `catalog:${catalogParams(props.filters || {}, !!props.excludeVertical)}`}
@@ -202,6 +205,7 @@ function GridBody(props: CatalogGridProps) {
 
   return (
     <div ref={body} data-media-body="" aria-busy={result.isFetching && !result.isFetchingNextPage}>
+      {!entity && !trash ? <LibraryImportPanel empty={libraryEmpty} onContent={() => void result.refetch()} /> : null}
       <LibraryCompletionPrompt assetIds={missing} />
       {props.wall ? content() : <SkeletonContent pending={result.isPending} skeletonHtml={props.skeletonHtml}>
         {content()}

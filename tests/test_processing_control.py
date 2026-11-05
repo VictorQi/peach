@@ -90,6 +90,40 @@ class ProcessingControlTests(unittest.TestCase):
             dispatch_incremental(contract)
             launch.assert_not_called()
 
+    def test_automatic_collection_does_not_preempt_a_scoped_background_reader(self):
+        from filelock import FileLock
+        from peach.library_new_assets import remember
+        from peach.library_processing import state_path
+        from peach.web_library_processing import dispatch_incremental
+        self.seed(2)
+        remember(self.db, [2])
+        state_path(self.config).parent.mkdir(parents=True, exist_ok=True)
+        with patch('peach.web_library_processing.settings_file.active', return_value=self.config), \
+                patch('peach.web_library_processing._current', return_value={}), \
+                patch('peach.job_recovery.read', return_value={}), \
+                patch('peach.web_library_processing.w_library_processing') as launch:
+            with FileLock(str(state_path(self.config)) + '.lock'):
+                dispatch_incremental(SimpleNamespace(db_path=self.db))
+            launch.assert_not_called()
+
+    def test_task_center_cancel_closes_only_its_requested_versions(self):
+        from peach.library_new_assets import observe, pending
+        from peach.task_control import request
+        from peach.task_runs import TaskRunStore
+        self.seed(3)
+        for asset_id in (1, 2, 3):
+            observe(self.db, asset_id, 100, 1000, new=True)
+        store = TaskRunStore(self.db, host='processing-test')
+        run = store.start('library-processing', trigger='manual')
+        store.suspend(run.id, paused_for_update=False)
+        job_recovery.save(self.db, 'library-processing', 'cancel-test', {'asset_ids': [2]}, run_id=run.id)
+        with patch('peach.settings_file.active', return_value=self.config):
+            request(store, run.id, 'cancel')
+        self.assertEqual(store.get(run.id).status, 'cancelled')
+        self.assertEqual(pending(self.db), [1, 3])
+        observe(self.db, 2, 100, 2000)
+        self.assertEqual(pending(self.db), [1, 2, 3])
+
     def test_patch_queue_import_keeps_only_pending_items_and_can_be_consumed(self):
         from peach.library_new_assets import _path, pending, remember
         self.seed(3)

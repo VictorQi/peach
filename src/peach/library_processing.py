@@ -46,6 +46,7 @@ from .fsutil import atomic_write_text
 from . import artifact_rules, upgrade_rules
 from .ffmpeg import FFmpegResolver
 from .jobs import DiskGuard, JobDeferred, JobPolicyError
+from .task_control import Cancelled
 from .media_probe import probe_unmeasured
 from .media_sources import cost_for
 from .media_processing_policy import metadata_only
@@ -2775,11 +2776,11 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
         remote = _RemoteSession(config, provider_factory, _MissCache(misses_path(config)),
                                 retrying=retrying, recheck_existing=recheck_existing, routes=routes)
         flush_candidates = lambda force=False: None
+        locations = config.locations if location == 'configured' else {location: config.locations[location]}
 
         try:
             guard = DiskGuard(config.data_root, 1)
             guard.check(force=True)
-            locations = config.locations if location == 'configured' else {location: config.locations[location]}
             sources = _scan_sources(config, db_path, locations=locations, asset_ids=scope_ids,
                                     stage=stage, guard=guard, update=update, issue=issue,
                                     scan_checkpoints=state['scan_checkpoints'],
@@ -2957,9 +2958,14 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
                 people=_people_allowed(config))
             finish_step('collect')
             _settle_collection_state(state, summary, rows, update)
-        except Exception:
+        except (Exception, Cancelled) as error:
+            if isinstance(error, Cancelled) or (control is not None and control.cancelled):
+                from .library_new_assets import cancel_scope
+                cancel_scope(db_path, (root for roots in locations.values() for root in roots), scope_ids)
             state.update(status='failed', outcome='interrupted', error='处理被中断。核对媒体目录后重试。', completed_at=time.time())
             state.update(interrupted_state(control))
+            if isinstance(error, Cancelled):
+                state.update(status='cancelled', outcome='cancelled', stage='已停止', error='')
             state['traffic'] = traffic.snapshot(finished=state.get('status') in ('failed', 'cancelled'))
             _save(path, state)
             raise

@@ -55,6 +55,8 @@ Background collection does not open or control a browser. Restricted content is 
 
 ## Download and use
 
+On the desktop, choose a video folder to start browsing. New libraries use local metadata by default; folders added to an existing library keep its settings.
+
 | Method | Get started |
 | --- | --- |
 | Windows x64 | [Installer](https://github.com/peach-mitao/peach/releases/download/v0.50.0/Peach-0.50.0-windows-x64-setup.exe) · [Portable](https://github.com/peach-mitao/peach/releases/download/v0.50.0/Peach-0.50.0-windows-x64.zip) |

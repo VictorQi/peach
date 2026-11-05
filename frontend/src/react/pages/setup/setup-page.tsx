@@ -11,6 +11,7 @@ import { SetupDoneView } from './setup-done';
 import { SetupForm } from './setup-form';
 import { SetupRestore } from './setup-restore';
 import { SetupShell } from './setup-scene';
+import { SetupQuickOpening, SetupQuickStart } from './setup-quick-start';
 
 type View =
   | { kind: 'loading' }
@@ -23,6 +24,7 @@ export function SetupPage() {
   const [view, setView] = useState<View>({ kind: 'loading' });
   const [attempt, setAttempt] = useState(0);
   const [restoring, setRestoring] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -37,11 +39,13 @@ export function SetupPage() {
     return () => controller.abort();
   }, [attempt]);
 
-  if (view.kind === 'done') return <SetupDoneView done={view.done} />;
+  if (view.kind === 'done') return advanced || restoring ? <SetupDoneView done={view.done} /> : <SetupQuickOpening done={view.done} />;
   const retry = () => {
     setView({ kind: 'loading' });
     setAttempt((count) => count + 1);
   };
+  if (view.kind === 'form' && !restoring && !advanced && !view.setup.docker) return <SetupQuickStart setup={view.setup}
+    onDone={done => setView({ kind: 'done', done })} onAdvanced={() => setAdvanced(true)} onRestore={() => setRestoring(true)} />;
   if (view.kind === 'form' && !restoring) return <SetupForm setup={view.setup}
     onRestore={() => setRestoring(true)} onDone={(done) => setView({ kind: 'done', done })} />;
   if (view.kind === 'form') return <SetupRestore onBack={() => setRestoring(false)}

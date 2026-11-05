@@ -284,6 +284,18 @@ class OfflineModeTests(unittest.TestCase):
 
 
 class MountReachabilityTests(unittest.TestCase):
+    def test_adding_roots_keeps_existing_probe_and_its_inflight_request(self):
+        from concurrent.futures import Future
+        from peach.mount_reachability import MountRoot
+        previous = self.monitor._states[self.root]
+        pending = previous.pending = Future()
+        another = self.root / 'new'
+        self.monitor.replace_roots([*self.monitor.roots, MountRoot('local', '本地磁盘', 'S:/new', another)])
+        self.assertIs(self.monitor._states[self.root], previous)
+        self.assertIs(self.monitor._states[self.root].pending, pending)
+        self.assertEqual(self.monitor._states[another].state, 'checking')
+        self.assertEqual(self.calls, [])
+
     def test_an_offline_root_does_not_disable_other_roots_of_the_same_source(self):
         from peach.mount_reachability import MountReachability, MountRoot
         monitor = MountReachability([

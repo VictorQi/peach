@@ -106,14 +106,14 @@ async function request<T>(url: string, init: RequestInit, fallback: string): Pro
 export const fetchQuestions = (signal?: AbortSignal) =>
   request<SetupQuestions>(SETUP_QUESTIONS_URL, { signal }, '没能读取设置题目');
 
-export const submitSetup = (submission: SetupSubmission) =>
-  request<SetupDone>(SETUP_URL, { method: 'POST', body: JSON.stringify(submission) }, '没能完成设置');
+export const submitSetup = (submission: SetupSubmission, signal?: AbortSignal) =>
+  request<SetupDone>(SETUP_URL, { method: 'POST', body: JSON.stringify(submission), signal }, '没能完成设置');
 
 export const restoreSetup = (dataRoot: string) =>
   request<SetupDone>(`${SETUP_URL}/restore`, { method: 'POST', body: JSON.stringify({ data_root: dataRoot }) }, '没能使用此数据目录');
 
-export const pickFolder = async (initial: string) =>
+export const pickFolder = async (initial: string, signal?: AbortSignal) =>
   (await request<{ path: string | null }>(PICK_FOLDER_URL,
-    { method: 'POST', body: JSON.stringify({ initial }) }, '没能打开文件夹对话框')).path;
+    { method: 'POST', body: JSON.stringify({ initial }), signal }, '没能打开文件夹对话框')).path;
 
 export const describeFailure = (cause: unknown) => (cause instanceof Error && cause.message) || '请求失败，请重试';

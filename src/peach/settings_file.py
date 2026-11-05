@@ -547,7 +547,7 @@ def error() -> SettingsFileError | None:
 
 
 def reset_cache() -> None:
-    """测试换过环境变量或文件之后调用。生产路径只在进程启动时读一次。"""
+    """显式配置热生效或隔离测试更换环境后刷新缓存。"""
     _load_once.cache_clear()
 
 

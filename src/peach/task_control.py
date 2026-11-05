@@ -133,6 +133,9 @@ def _request(store, run_id, action):
         if action != 'cancel' and requested(db, child.id, (child.parent_run_id, child.root_run_id)) == 'cancel':
             continue
         atomic_write_text(_root(db) / f'{identity}.request.json', json.dumps(command))
+        if action == 'cancel':
+            from .library_new_assets import cancel_task
+            cancel_task(db, child)
         if child.status == 'pending' and action == 'cancel':
             store.finish(identity, 'cancelled', summary={'cancelled_by_user': True})
             from .job_recovery import read, cancel

@@ -197,6 +197,7 @@ class WebContract:
         from . import sample_followup  # noqa: F401  登记番号样张采集后继
         from . import seed_followup  # noqa: F401  登记导入实体种子后继
         from . import studio_followup  # noqa: F401  登记厂牌官网与标识补全后继
+        from . import media_imports  # noqa: F401  登记主动添加文件夹的读取任务
         from .followups import FollowupRunner
         self.followups = FollowupRunner(self)
         self.follow_job = self._job("PeachFollowCheckJob", "follow-check")

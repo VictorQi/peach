@@ -500,7 +500,7 @@ class UpgradeRepairs:
         if self.scheduler.running:
             self.scheduler.shutdown(wait=True)
         if self.available:
-            self.contract.followups.stop(wait_for=(MEDIA_TASK,))
+            self.contract.followups.stop(wait_for=(MEDIA_TASK, 'library-import'))
 
 
 def _media_run(contract, key: str, handle) -> dict:

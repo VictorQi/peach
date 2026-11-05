@@ -1,7 +1,7 @@
 """保存扫描已登记、尚未交给资料处理的新影片范围。"""
 from contextlib import closing
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import sqlite3
 
 from filelock import FileLock
@@ -123,3 +123,58 @@ def finish(db, versions, *, completed=None):
         wanted = set(versions if completed is None else completed)
         remember(db, completed=[asset_id for asset_id, version in versions.items()
                                 if asset_id in wanted and seen.get(str(asset_id)) == version])
+
+
+def cancel_scope(db, roots, ids=None):
+    """撤回这一范围的待处理版本，不改媒体或成功结论；文件再次变化可产生新请求。"""
+    wanted = pending(db)
+    if ids is not None:
+        wanted = sorted(set(wanted).intersection(ids))
+    selected = _within_roots(db, wanted, roots)
+    if selected:
+        finish(db, snapshot(db, selected))
+
+
+def _within_roots(db, wanted, roots):
+    prefixes = tuple(PureWindowsPath(root) for root in roots)
+    selected = []
+    with closing(sqlite3.connect(Path(db).resolve().as_uri()+'?mode=ro', uri=True)) as connection:
+        for offset in range(0, len(wanted), 900):
+            batch = wanted[offset:offset+900]
+            selected.extend(row[0] for row in connection.execute(
+                'SELECT id,path FROM asset WHERE id IN ('+','.join('?'*len(batch))+')', batch)
+                if any(PureWindowsPath(row[1]).is_relative_to(root) for root in prefixes))
+    return selected
+
+
+def available_for_dispatch(db, wanted, config):
+    """已由目录读取认领的范围，包括排队和暂停时，不另派增量任务。"""
+    from .media_identity import catalog
+    with closing(sqlite3.connect(Path(db).resolve().as_uri()+'?mode=ro', uri=True)) as connection:
+        owned = [row[0].split(':', 1)[1] for row in connection.execute(
+            "SELECT followup_key FROM task_run WHERE task_key='library-import' "
+            "AND followup_key IS NOT NULL AND status IN ('pending','running')")]
+    roots = catalog(config)[1]
+    reserved = [roots[key]['root'] for key in owned if key in roots]
+    if not reserved:
+        return wanted
+    busy = set(_within_roots(db, wanted, reserved))
+    return [asset_id for asset_id in wanted if asset_id not in busy]
+
+
+def cancel_task(db, run):
+    """任务中心取消也关闭对应增量请求，不能另起一轮绕过取消。"""
+    if run.task_key not in ('library-processing', 'library-import'):
+        return
+    from . import media_identity, settings_file
+    config = settings_file.active()
+    if run.task_key == 'library-import':
+        root = media_identity.catalog(config)[1].get(run.followup_key.split(':', 1)[1])
+        if root:
+            cancel_scope(db, (root['root'],))
+    else:
+        from .job_recovery import read
+        saved = read(db, run.task_key)
+        if saved.get('run_id') == run.id:
+            cancel_scope(db, (root for roots in config.locations.values() for root in roots),
+                         saved.get('request', {}).get('asset_ids'))

@@ -1110,6 +1110,8 @@ def pick_folder(request: Request, body: dict[str, Any] = Body(default_factory=di
     """
     local_only(request)
     same_origin(request)
+    if os.environ.get('PEACH_HEADLESS_MANAGED') == '1':
+        raise HTTPException(501, '请填写 Peach 服务器上已挂载的文件夹路径')
     initial = body.get("initial")
     try:
         path = folder_picker.pick_folder(initial if isinstance(initial, str) and initial else None)
@@ -1118,6 +1120,55 @@ def pick_folder(request: Request, body: dict[str, Any] = Body(default_factory=di
     except folder_picker.PickerUnavailable as exc:
         raise HTTPException(501, str(exc)) from exc
     return {"path": path}
+
+
+def _media_import_status(request):
+    from . import media_imports
+    contract = request.app.state.web_contract
+    editable = local_client(request) and managed_configuration() and contract.task_runs.enabled
+    return media_imports.snapshot(contract, settings_file.active(), editable=editable,
+        native_picker=editable and os.environ.get('PEACH_HEADLESS_MANAGED') != '1',
+        sources=request.app.state.mount_reachability.sources() if editable else ())
+
+
+@router.get('/api/library-imports')
+def library_imports(request: Request, _args=Depends(require_auth)):
+    return _media_import_status(request)
+
+
+@router.post('/api/library-imports')
+def add_library_folder(request: Request, body: dict = Body(...), _args=Depends(require_auth)):
+    from . import media_imports
+    from .api import _installation_in_progress
+    local_only(request)
+    same_origin(request)
+    contract = request.app.state.web_contract
+    if not managed_configuration() or not contract.task_runs.enabled:
+        raise HTTPException(409, '请在可修改媒体库的 Peach 实例中添加文件夹')
+    try:
+        with _SAVE_LOCK:
+            if _installation_in_progress(request.app.state.settings.db_path):
+                raise ValueError('正在安装更新，请稍后添加')
+            config = settings_file.load_config()
+            if not config.present:
+                raise ValueError('请先完成首次设置')
+            if contract.db_path.resolve() != (config.directory('database') / 'ledger.db').resolve():
+                raise ValueError('当前媒体库与配置不一致，请先完成正在进行的设置变更')
+            if ('path' in body) == ('root_id' in body):
+                raise ValueError('请选择一个文件夹')
+            if 'path' in body:
+                prepared, root_id = media_imports.prepare(config, body['path'], library_id=body.get('library_id'))
+                media_imports.save(config, prepared)
+            else:
+                prepared, root_id = config, body['root_id']
+                from .media_identity import catalog
+                if not isinstance(root_id, str) or root_id not in catalog(config)[1]:
+                    raise ValueError('请选择已添加的文件夹')
+            request.app.state.activate_media_configuration(prepared, root_id)
+            media_imports.enqueue(contract, prepared, root_id)
+        return _media_import_status(request)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.post("/api/configuration")

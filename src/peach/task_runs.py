@@ -98,6 +98,8 @@ TASK_LABELS = {
     'diagnostic-export': '诊断导出',
     "upgrade-repairs": "资料更新",
     "upgrade-library": "影片资料更新",
+    "library-add": "添加文件夹",
+    "library-import": "读取文件夹",
     "organize": "按模板整理",
     "batch": "批量操作",
     "scrape-codes": "番号资料刮削",

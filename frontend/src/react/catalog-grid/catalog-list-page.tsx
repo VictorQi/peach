@@ -11,7 +11,6 @@ import { fmtDur, fmtSize, requestErrorMessage } from '@peach/legacy/core';
 import { Checkbox } from '@/components/base/checkbox/checkbox';
 import { Table, TableBody, TableCell, TableColumn, TableHeader, TableRow } from '@/components/base/table/table';
 import { ChevronSortDown } from '@/components/foundations/icons/chevrons';
-import { apiGet } from '../../api';
 import { ArtSlot } from '../components/art-slot';
 import { useLibraryTints } from '../components/library-tint';
 import { catalogListSkeletonCellHtml } from '../../catalog-content-skeleton';
@@ -23,7 +22,8 @@ import { DataTableFooter, DataTableSort } from '../components/table-controls';
 import { RetryNote } from '../components/grid-reveal';
 import { LibraryCompletionPrompt, missingPreviewIds } from '../library-processing/library-completion';
 import { completionRowRemembered, rememberCompletionRow } from '../library-processing/completion-row';
-import { catalogParams } from './catalog-grid';
+import { catalogParams, fetchCatalogPage } from './catalog-grid';
+import { LibraryImportPanel } from './library-import-panel';
 import type { CatalogGridProps, MediaItem, MediaPage } from './types';
 import { useCatalogTablePreferences } from './catalog-column-widths';
 import { CatalogRating, catalogTableDate } from './catalog-table-controls';
@@ -62,7 +62,7 @@ export function CatalogListPage(props: CatalogGridProps) {
   const result = useQuery({
     queryKey: ['catalog-grid', 'table', scope, params, props.revision, pagination, sorting],
     placeholderData: keepPreviousData,
-    queryFn: async ({ signal }): Promise<MediaPage> => {
+    queryFn: async ({ signal }): Promise<MediaPage & { libraryEmpty?: boolean }> => {
       const options = { limit: pagination.pageSize, sort: sort?.id, dir: sort ? sort.desc ? 'desc' : 'asc' : undefined };
       if (props.mode === 'entity') return props.fetchPage?.(offset, signal, options) || { items: [], total: 0 };
       const query = new URLSearchParams(params);
@@ -71,11 +71,12 @@ export function CatalogListPage(props: CatalogGridProps) {
       query.delete('count');
       if (options.sort) query.set('sort', options.sort);
       if (options.dir) query.set('dir', options.dir);
-      return apiGet<MediaPage>(`/api/items?${query}`, signal);
+      return fetchCatalogPage(query.toString(), offset, options.limit, props.filters?.state === 'trash', signal);
     },
   });
   const items = result.data?.items || [];
   const total = Number(result.data?.total || 0);
+  const libraryEmpty = props.mode === 'catalog' && props.filters?.state !== 'trash' && !!result.data?.libraryEmpty;
   const missing = props.filters?.state === 'trash' ? [] : missingPreviewIds(items, props.layout.javImage);
   const [completionReserved] = useState(completionRowRemembered);
   useEffect(() => { if (result.data && !result.isPlaceholderData) rememberCompletionRow(missing.length > 0) },
@@ -162,6 +163,9 @@ export function CatalogListPage(props: CatalogGridProps) {
     },
   });
   return <div data-catalog-view-mode="list" data-catalog-table="" aria-busy={result.isFetching || undefined} className="flex min-w-0 flex-col gap-4">
+    {props.mode === 'catalog' && props.filters?.state !== 'trash'
+      ? <LibraryImportPanel empty={libraryEmpty} onContent={() => void result.refetch()} /> : null}
+    <div hidden={libraryEmpty} className="flex min-w-0 flex-col gap-4">
     <div className="flex flex-wrap justify-end gap-2" role="toolbar" aria-label="作品列表工具栏">
       <div data-toolbar-actions="">
       <TableColumnControls preferences={preferences} />
@@ -210,6 +214,7 @@ export function CatalogListPage(props: CatalogGridProps) {
     </DataTableFrame>
     {result.data ? <DataTableFooter label="作品列表" total={total} pagination={pagination}
       onChange={next => table.setPagination(next)} unit="部作品" pageUnit="部" /> : null}
+    </div>
   </div>;
 }
 

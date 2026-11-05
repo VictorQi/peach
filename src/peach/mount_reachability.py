@@ -35,7 +35,7 @@ class MountRoot:
     library_id: str = ""
 
 
-def source_roots() -> list[MountRoot]:
+def source_roots(config=None) -> list[MountRoot]:
     """沿用数据库路径前缀与平台路径转换；构造检查对象时不访问挂载目录。"""
     from .config import LOCATION_ROOT_DECLARATIONS
     from .media_configuration import SOURCE_OPTIONS
@@ -44,13 +44,15 @@ def source_roots() -> list[MountRoot]:
 
     labels = dict(SOURCE_OPTIONS)
     roots = []
-    for location, declared_roots in LOCATION_ROOT_DECLARATIONS.items():
+    declarations = config.locations if config is not None else LOCATION_ROOT_DECLARATIONS
+    config = config or settings_file.active()
+    for location, declared_roots in declarations.items():
         for declared in declared_roots:
             from .smb_media import resolve
             resolved = resolve(declared) or translate_ledger_path(declared)
             roots.append(MountRoot(location, labels.get(location, location), declared,
                                    None if is_unmapped(resolved) else resolved,
-                                   **media_identity.ownership(settings_file.active(), declared)))
+                                   **media_identity.ownership(config, declared)))
     return roots
 
 
@@ -88,6 +90,13 @@ class MountReachability:
         thread = self._thread
         if thread is not None:
             thread.join(timeout=2)
+
+    def replace_roots(self, roots) -> None:
+        """加入目录立即参与探测，保留现有探测及尚未返回的文件系统调用。"""
+        with self._lock:
+            self.roots = tuple(roots)
+            self._states = {root.path: self._states.get(root.path, _Probe())
+                            for root in self.roots if root.path is not None}
 
     def _loop(self) -> None:
         while not self._stop.is_set():
