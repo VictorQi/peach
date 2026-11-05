@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from filelock import FileLock
 from peach.automatic_updates import AutomaticUpdates
+from peach import release_updates
 
 
 class AutomaticUpdateTests(unittest.TestCase):
@@ -29,6 +30,13 @@ class AutomaticUpdateTests(unittest.TestCase):
         with patch("peach.release_updates.check") as check:
             self.updates.tick()
             check.assert_not_called()
+
+    def test_cached_release_from_another_publisher_is_not_offered(self):
+        result = dict(release_updates.snapshot(), state='available', latest_version='9.0.0')
+        self.updates.remember(dict(result, publisher='peach-mitao/peach'))
+        self.assertNotIn('result', self.updates.snapshot())
+        self.updates.remember(result)
+        self.assertEqual(self.updates.snapshot()['result']['latest_version'], '9.0.0')
 
     def test_two_services_share_due_time_and_respect_file_lock(self):
         self.updates.save({"mode": "check", "interval_hours": 24})

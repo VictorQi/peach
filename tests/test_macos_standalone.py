@@ -278,7 +278,7 @@ class SparkleUpdateTests(TestCase):
             self.assertEqual(sparkle_update.info_plist_keys("arm64"), {})
         with mock.patch.object(sparkle_update, "PUBLIC_ED_KEY", "cHVibGlj"):
             keys = sparkle_update.info_plist_keys("x86_64")
-        self.assertEqual(keys["SUFeedURL"], "https://downloads.peach.video/sparkle/macos-x86_64.xml")
+            self.assertEqual(keys["SUFeedURL"], "https://github.com/VictorQi/peach/releases/latest/download/macos-x86_64.xml")
         self.assertEqual(keys["SUPublicEDKey"], "cHVibGlj")
         self.assertIs(keys["SUVerifyUpdateBeforeExtraction"], True)
         self.assertIs(keys["SUAllowsAutomaticUpdates"], False)

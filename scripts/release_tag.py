@@ -406,7 +406,7 @@ def main(argv=None) -> int:
     global GITLAB
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--repo", default="peach-mitao/peach")
+    parser.add_argument("--repo", default="VictorQi/peach")
     parser.add_argument("--gitlab-host", help="使用此 GitLab 主机发布，例如 gitgud.io；默认使用 GitHub")
     parser.add_argument("--reference-evidence", action="append", default=[], metavar="SOURCE=FILE",
                         help="为 --bump 明确提供本次参考正文，报告保留用户取证渠道")

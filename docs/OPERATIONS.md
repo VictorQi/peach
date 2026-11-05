@@ -10,7 +10,7 @@
 
 在 PowerShell 7（Windows）或 zsh（macOS）中依次执行：
 
-1. 克隆仓库：`git clone https://github.com/peach-mitao/peach.git peach-app`。
+1. 克隆仓库：`git clone https://github.com/VictorQi/peach.git peach-app`。
 2. 进入项目目录：`cd peach-app`。后续命令均在此目录执行。
 
 Windows 安装依赖：`uv sync --locked --python 3.14`。完成后启动托盘：`& .\.venv\Scripts\peach-tray.exe`。
@@ -103,6 +103,8 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.github.longmeidao.pea
 ```
 
 ### macOS 应用内更新（Sparkle）
+
+本 Fork 当前未配置自己的签名密钥与 feed，Sparkle 默认不启用；设置页检查本 Fork 的发行版，下载本机架构 DMG 后手动覆盖应用。下列签名部署说明保留为主动启用时的配置流程，不表示本 Fork 已具有上游的服务或密钥。发布与缓存边界见 [ADR-0137](adr/0137-fork-release-publisher.md)。
 
 应用随包带 [Sparkle 2](https://sparkle-project.org/) 框架（`Contents/Frameworks/Sparkle.framework`，版本与摘要固定在 `scripts/sparkle-macos.json`），取舍见 [ADR-0130](adr/0130-macos-sparkle-in-app-update.md)。`src/peach/sparkle_update.py` 的 `PUBLIC_ED_KEY` 决定是否启用：有值时构建写入 `SUPublicEDKey` 与更新源地址；清空后构建不写这些键，菜单栏「检查更新」改回版本检查与系统通知。
 
