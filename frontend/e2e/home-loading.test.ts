@@ -7,6 +7,23 @@ describe('首页加载结构',()=>{
  let browser:Browser;
  before(async()=>{browser=await launch()});
  after(async()=>{await browser?.close()});
+ it('显式性能取证区分首张卡片与封面解码，输出不含请求参数',{timeout:60000},async()=>{
+  const context=await browser.newContext({viewport:{width:1280,height:900}});
+  try{
+   const page=await context.newPage();
+   await page.goto(requiredEnv('PEACH_E2E_ORIGIN')+'/?measure=1',{waitUntil:'domcontentloaded'});
+   await page.waitForFunction(()=>{
+    const text=document.getElementById('peach-performance')?.textContent;
+    return text&&JSON.parse(text).firstCoverDecodedMs!==null;
+   });
+   const report=JSON.parse((await page.locator('#peach-performance').textContent())!);
+   assert.ok(report.firstCardReadyMs>=0);
+   assert.ok(report.firstCoverDecodedMs>=report.firstCardReadyMs);
+   assert.ok(report.visibleCards>0);
+   assert.ok(report.resources.some((entry:{path:string})=>entry.path==='/api/items'));
+   assert.ok(report.resources.every((entry:{path:string})=>!entry.path.includes('?')));
+  }finally{await context.close()}
+ });
  for(const viewport of VIEWPORTS)for(const hasFeed of [true,false]){
   it(`${viewport.name} 新作区 ${hasFeed?'有内容':'为空'}`,{timeout:60000},async()=>{
    const context=await browser.newContext({viewport:{width:viewport.width,height:viewport.height}});

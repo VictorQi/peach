@@ -228,17 +228,22 @@ describe('路由冒烟', () => {
     }
   }
 
-  /* 任务页与常驻的结果更新共用查询：离页卸掉任务页，结果更新继续低频读取。
+  /* 任务页与常驻结果更新分别查询：离页停止完整任务读取，结果更新继续低频读取。
      固定空态让轮询保持十秒间隔；回到任务页前撤掉拦截，再读取服务端真实任务。
      换页走 pushState + popstate：侧栏按钮、抽屉和浏览器后退最后走的都是这一条路。 */
   it('离开任务页卸载旧根，全局结果轮询持续，返回读取真实任务', { timeout: 120_000 }, async () => {
     const polls: number[] = [];
+    const fullPolls: number[] = [];
     const opened = await visit(browser, '/tasks', DESKTOP, async (page) => {
       await page.route('**/api/tasks', route => route.fulfill({ json: {
         available: true, running: [], skipped: [], finished: [], finished_has_more: false,
       } }));
+      await page.route('**/api/result-updates', route => route.fulfill({ json: {
+        busy: false, result_versions: {},
+      } }));
       page.on('request', (request) => {
-        if (new URL(request.url()).pathname === '/api/tasks') polls.push(performance.now());
+        if (new URL(request.url()).pathname === '/api/result-updates') polls.push(performance.now());
+        if (new URL(request.url()).pathname === '/api/tasks') fullPolls.push(performance.now());
       });
     });
     try {
@@ -247,7 +252,7 @@ describe('路由冒烟', () => {
           if (polls.length >= least) return;
           await opened.page.waitForTimeout(250);
         }
-        assert.ok(polls.length >= least, `${what}：只看到 ${polls.length} 次 /api/tasks，要 ${least} 次`);
+        assert.ok(polls.length >= least, `${what}：只看到 ${polls.length} 次结果刷新，要 ${least} 次`);
       };
       await expectBody(opened.page, '/tasks', tasksBody(opened.page));
       // 先取得首屏与下一次轮询，离页后才能核对共享查询的节律。
@@ -262,6 +267,7 @@ describe('路由冒烟', () => {
       await expectBody(opened.page, '/stats', [statsInventoryTab(opened.page)]);
       await settle(opened.page);
       const leftAt = polls.length;
+      const fullAt = fullPolls.length;
       // 统计页自己也是 React 档：管理区正文里应当只剩它那一棵根。
       assert.equal(await opened.page.locator('#stats .peach-react').count(), 1,
         '管理区正文里不是只剩统计页那一棵 React 根');
@@ -272,6 +278,7 @@ describe('路由冒烟', () => {
       // 两秒余量容纳导航与计时误差，也能拒绝活跃任务的两秒节律或并行的重复请求。
       await opened.page.waitForTimeout(12_000);
       const continued = polls.slice(leftAt);
+      assert.equal(fullPolls.length, fullAt, '离开任务页后不再组装完整任务列表');
       assert.ok(continued.length >= 1 && continued.length <= 2,
         `离开任务页后全局结果轮询应持续单路低频读取，十二秒内看到 ${continued.length} 次请求`);
       for (let index = leftAt; index < polls.length; index += 1) {

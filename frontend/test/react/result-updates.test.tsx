@@ -3,7 +3,7 @@ import { QueryClientProvider, notifyManager, useQuery } from '@tanstack/react-qu
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { createResultRefresher, ResultUpdates } from '../../src/react/result-updates';
-import { TASKS_KEY } from '../../src/react/activity/tasks';
+import { RESULT_UPDATES_KEY } from '../../src/react/activity/tasks';
 import { queryClient } from '../../src/react/query';
 import { mount, pending, settle } from './render';
 
@@ -20,9 +20,9 @@ it('未显示页面的后台预取继续读取，不阻塞当前页面的版本�
 });
 
 it('运行中的任务发布确认结果时更新列表，状态与凭据查询保持原值', async () => {
-  const data = { available: true, running: [{ id: 1, status: 'running' }], finished: [], skipped: [],
+  const data = { busy: true,
     result_versions: { follow: '1' } };
-  queryClient.setQueryData(TASKS_KEY, data);
+  queryClient.setQueryData(RESULT_UPDATES_KEY, data);
   queryClient.setQueryData(['follow-feed'], '首项');
   queryClient.setQueryData(['follow-manage', 'check'], 'running');
   queryClient.setQueryData(['follow-manage', 'credentials'], '凭据');
@@ -39,7 +39,7 @@ it('运行中的任务发布确认结果时更新列表，状态与凭据查询�
   expect(read).not.toHaveBeenCalled();
   await act(async () => {
     current = '首项、次项';
-    queryClient.setQueryData(TASKS_KEY, { ...data, result_versions: { follow: '2' } });
+    queryClient.setQueryData(RESULT_UPDATES_KEY, { ...data, result_versions: { follow: '2' } });
   });
   await settle();
   expect(host.textContent).toBe('首项、次项');
