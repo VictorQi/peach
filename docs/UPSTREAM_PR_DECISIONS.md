@@ -4,7 +4,7 @@ kind: reference
 
 # 未纳入上游 PR 评估
 
-核验日期：2026-11-06。上游 `peach-mitao/peach`，交付目标 `VictorQi/peach`。本表覆盖该次取得的 47 个开放 PR；状态是 Fork 的采纳判断，不代表上游合并状态。
+核验日期：2026-11-07。上游 `peach-mitao/peach`，交付目标 `VictorQi/peach`。本表覆盖该次取得的 47 个开放 PR；状态是 Fork 的采纳判断，不代表上游合并状态。
 
 快速阅读：先看「决定」，再看「依赖/冲突」和「重评或验收条件」。候选采用尚未交付；暂缓不表示永久拒绝。已等效只覆盖已核对的功能。当前批次状态与验证见 [同步总览](UPSTREAM_SYNC.md)。未注明源码已核对的项保留待深入审查，不据标题直接合并。
 
@@ -48,12 +48,12 @@ kind: reference
 | [#257](https://github.com/peach-mitao/peach/pull/257) 草稿 | feat(organize): 支持字幕语言与有字幕模板参数 | 暂缓 | 可选模板参数适合，但与首屏/依赖无直接联系 | 字幕身份和整理回滚 | 模板缺失字段、重名、路径边界验证 |
 | [#237](https://github.com/peach-mitao/peach/pull/237) | feat(network): 局域网监听改为 IPv4/IPv6 双栈，.local 同时解析 IPv6 地址 | 暂缓 | 双栈改变监听范围与连接入口 | 必须保留仅局域网IPv6限制及Windows证书 | 真实双栈设备和监听归属验证 |
 | [#235](https://github.com/peach-mitao/peach/pull/235) | feat(media): Windows QSV 解码、缩放与编码全程留在 Intel 显卡 | 已等效 | 本地历史3e3f4c3d已含同名QSV全GPU链 | 最终回归由主代理执行 | 仅核对后续PR新增差异 |
-| [#112](https://github.com/peach-mitao/peach/pull/112) | fix(catalog): 识别 MPG 文件与 KIRARI 番号 | 暂缓 | 番号/MPG识别是低风险正确性候选 | 需查当前规则是否已纳入 | 原始样本及反例回归与当前规则对照 |
-| [#121](https://github.com/peach-mitao/peach/pull/121) | fix(web): 生成 HTTP 服务的 CloudDrive2 通知配置 | 暂缓 | HTTP CloudDrive通知地址修复适合独立补丁 | 需核对当前settings advertised origin | HTTP/HTTPS默认端口与缺密钥回归 |
+| [#112](https://github.com/peach-mitao/peach/pull/112) | fix(catalog): 识别 MPG 文件与 KIRARI 番号 | 已等效 | 完整 diff 对照：本地 9c179925 已含 MPG 与 KIRARI 完整分卷编号识别，领域回归覆盖大小写与反例 | 保留后续自定义规则、输入清理和缓存，不覆盖为旧实现 | 出现可复现文件名误判时补现有领域回归 |
+| [#121](https://github.com/peach-mitao/peach/pull/121) | fix(web): 生成 HTTP 服务的 CloudDrive2 通知配置 | 已等效 | 本地 fa4b1626/b48e0dec 已按协议和端口生成地址，保留公布地址优先及缺密钥空配置 | 当前用 URL 构造器，不回退字符串拼接；已核对配置、文案与回归 | 真实 CloudDrive2 通知链未在本次验收；实际地址不符时重评 |
 | [#131](https://github.com/peach-mitao/peach/pull/131) | fix(security): 收紧媒体与公开资源边界并更新安全依赖 | 已等效 | 已查媒体类型过滤、CSP/固定公网连接、来源限流存在 | 不整包覆盖现有安全依赖与fork认证；剩余细节仍需diff | 依赖审计和端到端安全回归 |
-| [#150](https://github.com/peach-mitao/peach/pull/150) | fix(metadata): 适配公开资料接口签名变量重命名 | 暂缓 | 公开接口签名变量解耦合理，优先核对当前实现 | 不得执行远端JS；未知表达式失败关闭 | 当前签名实现、重命名/歧义回归核对 |
+| [#150](https://github.com/peach-mitao/peach/pull/150) | fix(metadata): 适配公开资料接口签名变量重命名 | 已等效 | 本地 bef67c29 已从请求头引用识别签名函数，支持重命名并拒绝歧义，解析和请求回归已核对 | 不执行远端 JS；保留更严格原始字符串长度限制及后续请求预算 | 可补固定时钟下完整摘要值回归；新协议需脱敏样本，未知格式仍拒绝 |
 | [#156](https://github.com/peach-mitao/peach/pull/156) | feat(player): 为触摸播放提供控制条和定位手势 | 暂缓 | 触摸手势独立交互改动 | 与现有播放器手势/滚动冲突 | 触屏与鼠标键盘实机验证 |
-| [#157](https://github.com/peach-mitao/peach/pull/157) | fix(media): 支持重建尾部 moov 的 MP4 头 | 暂缓 | 无损尾部moov重排值得保留，需查是否已等效 | 媒体边车版本、原文件不可改 | 块偏移/尾部盒子/真实解码回归 |
+| [#157](https://github.com/peach-mitao/peach/pull/157) | fix(media): 支持重建尾部 moov 的 MP4 头 | 已等效 | 本地 4e950fb2 已含尾部重排、偏移平移、suffix 与 Range 回归，额外保护扩展头及编辑列表歧义 | 保留单 mdat、索引预算和原文件不变保护；旧 PR 整块覆盖会丢失保护 | 允许布局误拒绝或 Range/时序异常时，用最小样本重评 |
 | [#158](https://github.com/peach-mitao/peach/pull/158) | fix(player): 优先原文件与无损封装，按需转码 | 暂缓 | 原文件与无损封装优先合理，但大媒体链改动 | ebmlite依赖、播放回退；全量有已知失败 | 源码等效核对及FFmpeg真实产物验证 |
 | [#173](https://github.com/peach-mitao/peach/pull/173) | fix(web): 详情接口返回 medium，外部播放器入口按介质显示 | 已等效 | 当前 web_catalog q_item SELECT 已含 a.medium | 只核对端点结果，不重复加字段 | 现有详情回归返回medium |
 | [#174](https://github.com/peach-mitao/peach/pull/174) | perf(media): 整片软件转码限制线程数，给播放留出 CPU | 暂缓 | 软件转码线程限额可改善交互资源竞争 | 需核对现有调速/任务档位，不能双重限额 | 并发播放与后台处理CPU预算验证 |
