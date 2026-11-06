@@ -74,26 +74,25 @@ def projection_reader(store):
     def read(name):
         return _read(directory / name)
 
-    return lambda run: projection(store, run, read=read)
+    return lambda run, **kwargs: projection(store, run, read=read, **kwargs)
 
 
-def projection(store, run, *, read=None):
+def projection(store, run, *, read=None, descendants_active=None):
     if not store.enabled or run.host != store.host:
         return None
     if read is None:
         directory = _root(store.database.db_path)
         read = lambda name: _read(directory / name)
-    children = []
-    if not run.active:
-        children = store.active_descendants(run.id)
-        if not children:
-            return None
+    if not run.active and not (store.active_descendants(run.id, limit=1)
+                               if descendants_active is None else descendants_active):
+        return None
     command = _intent(run.id, (run.parent_run_id, run.root_run_id), read)
     action = command.get('action', 'resume')
     if action == 'cancel':
         state, actions = 'cancelling', []
     elif action == 'pause':
         if not run.active:
+            children = store.active_descendants(run.id)
             acknowledged = bool(children) and all(
                 (projection(store, child, read=read) or {}).get('state') == 'paused' for child in children)
         elif run.status == 'pending':

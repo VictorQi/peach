@@ -28,6 +28,15 @@ RECENT_LIMIT = 20
 NO_TABLE = "数据库缺少任务记录表，请按运行文档检查备份后执行 peach migrate upgrade --yes"
 
 
+def q_result_updates(contract, _args):
+    """常驻刷新只读取结果版本和活动状态，不组装任务列表与资源统计。"""
+    try:
+        busy = any(contract.task_runs.query(status=status, limit=1) for status in ACTIVE_STATUSES)
+    except sqlite3.OperationalError:
+        busy = False
+    return {"ok": True, "result_versions": result_versions(contract), "busy": busy}
+
+
 def q_tasks(contract, args):
     try:
         return _tasks(contract, args)
@@ -122,13 +131,7 @@ def _payload_reader(contract):
 
     saved = {}
     project = projection_reader(contract.task_runs)
-    with contract.task_runs.database.read_connection() as connection:
-        active_ancestors = {row[0] for row in connection.execute(
-            "WITH RECURSIVE ancestors(id) AS ("
-            "SELECT parent_run_id FROM task_run WHERE status IN ('pending','running') "
-            "AND parent_run_id IS NOT NULL UNION "
-            "SELECT t.parent_run_id FROM task_run t JOIN ancestors a ON t.id=a.id "
-            "WHERE t.parent_run_id IS NOT NULL) SELECT id FROM ancestors")}
+    families = contract.task_runs.active_families()
     from .task_resources import Monitor
     if not hasattr(contract, 'task_resource_monitor'):
         with contract.cache_lock:
@@ -137,11 +140,12 @@ def _payload_reader(contract):
 
     def payload(row):
         result = row.payload()
-        if row.active or row.id in active_ancestors:
-            control = project(row)
+        if row.id in families:
+            family = [{'id': run_id, 'status': status} for run_id, status in families[row.id]]
+            control = project(row, descendants_active=any(member['id'] != row.id for member in family))
             if control is not None:
                 result['control'] = control
-            resources = contract.task_resource_monitor.for_run(row)
+            resources = contract.task_resource_monitor.for_run(row, family)
             if resources is not None:
                 result['resources'] = resources
         if row.task_key not in RESULT_FIELDS or row.status not in ('succeeded', 'failed'):

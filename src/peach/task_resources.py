@@ -283,13 +283,17 @@ class Monitor:
         if self.gpu is not None:
             self.gpu.close()
 
-    def for_run(self, run):
-        with self.store.database.read_connection() as connection:
-            family = connection.execute(
-                'WITH RECURSIVE family(id) AS (SELECT ? UNION ALL '
-                'SELECT t.id FROM task_run t JOIN family f ON t.parent_run_id=f.id) '
-                "SELECT id,status FROM task_run WHERE id IN (SELECT id FROM family) AND status IN ('pending','running')",
-                (run.id,)).fetchall()
+    def for_run(self, run, family=None):
+        """这一轮连同后代的资源占用。`family` 是 `TaskRunStore.active_families` 给这一轮的那份，
+        任务中心整页一次查齐时传进来；不传就当场查。"""
+        if family is None:
+            with self.store.database.read_connection() as connection:
+                family = connection.execute(
+                    'WITH RECURSIVE family(id) AS (SELECT ? UNION ALL '
+                    'SELECT t.id FROM task_run t JOIN family f ON t.parent_run_id=f.id) '
+                    "SELECT id,status FROM task_run WHERE id IN (SELECT id FROM family) AND status IN ('pending','running')",
+                    (run.id,)).fetchall()
+            family = [{'id': row[0], 'status': row[1]} for row in family]
         if not family:
             return None
         rows = self.snapshot()

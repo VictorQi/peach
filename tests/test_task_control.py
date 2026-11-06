@@ -32,6 +32,21 @@ for _ in range(int(sys.argv[2])):
 
 
 class TaskControlTests(unittest.TestCase):
+    def test_finished_parent_loads_all_children_only_to_acknowledge_pause(self):
+        parent = self.store.start('parent', trigger='manual')
+        queued = self.store.enqueue_followups(
+            parent.id, [(f'leaf:{n}', 'leaf', '后继') for n in range(50)])['queued']
+        self.store.finish(parent.id, 'succeeded')
+        run = self.store.get(parent.id)
+        with patch.object(self.store, 'active_descendants', wraps=self.store.active_descendants) as reads:
+            self.assertEqual(task_control.projection(self.store, run)['state'], 'running')
+            reads.assert_called_once_with(parent.id, limit=1)
+            task_control.request(self.store, parent.id, 'pause')
+            reads.reset_mock()
+            self.assertEqual(task_control.projection(self.store, run)['state'], 'paused')
+            self.assertEqual(reads.call_count, 2)
+            self.assertEqual(len(self.store.active_descendants(parent.id)), len(queued))
+
     def test_page_snapshot_refreshes_control_commands_on_the_next_request(self):
         parent = self.store.start('parent', trigger='manual')
         child_id = self.store.enqueue_followups(
