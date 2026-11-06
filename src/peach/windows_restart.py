@@ -311,11 +311,17 @@ def owned_service_pids(tray_process_id: int, service_executable: Path) -> tuple[
         return ()
     paths, parents = _process_paths_and_parents()
     service_key = _normal_path(service_executable)
-    return tuple(sorted(
+    owned = tuple(sorted(
         process_id for process_id, path in paths.items()
         if _normal_path(path) == service_key
         and _descends_from(process_id, tray_process_id, parents)
     ))
+    if _normal_path(paths.get(tray_process_id, "")) == service_key:
+        # 独立包的托盘、服务和 CLI 共用一个 EXE，只有 serve 子进程代表服务就绪。
+        commands = _command_lines(owned) if owned else {}
+        return tuple(pid for pid in owned
+                     if parse_windows_command_line(commands.get(pid))[1:2] == ["serve"])
+    return owned
 
 
 def venv_holders(
@@ -431,10 +437,11 @@ class _Launch:
     exit_code: int | None = None
     tray_pid: int | None = None
     service_pids: tuple[int, ...] = ()
+    expected_services: int = 2
 
     @property
     def ready(self) -> bool:
-        return self.exit_code is None and len(self.service_pids) >= 2
+        return self.exit_code is None and len(self.service_pids) >= self.expected_services
 
     def failure(self) -> str:
         if self.exit_code is not None:
@@ -453,8 +460,9 @@ def _await_new_tray(
     timeout: float,
     services: Callable[[int, Path], tuple[int, ...]],
     sleep: Callable[[float], None],
+    expected_services: int = 2,
 ) -> _Launch:
-    """等新托盘建出唯一窗口并拥有两个子服务；期限到了返回最后看到的样子。"""
+    """等新托盘建出唯一窗口并拥有该分发形态的子服务。"""
     deadline = time.monotonic() + timeout
     seen = _Launch()
     while time.monotonic() < deadline:
@@ -464,7 +472,8 @@ def _await_new_tray(
         if len(process_ids) == 1:
             tray_pid = next(iter(process_ids))
             seen = _Launch(tray_pid=tray_pid,
-                           service_pids=services(tray_pid, service_executable))
+                           service_pids=services(tray_pid, service_executable),
+                           expected_services=expected_services)
             if seen.ready:
                 return seen
         sleep(0.2)
@@ -531,6 +540,11 @@ def _finished(ok: bool, message: str, prepared: tuple[bool, str | None],
     return RestartResult(ok, message, preparation=note, **fields)
 
 
+def standalone_target(target: Path) -> bool:
+    """按目标安装目录识别独立包，不使用重启脚本自身的运行形态。"""
+    return (target.parent / "_internal" / "standalone.txt").is_file()
+
+
 def restart_tray(
     target: Path,
     *,
@@ -547,9 +561,11 @@ def restart_tray(
     sleep: Callable[[float], None] = time.sleep,
 ) -> RestartResult:
     target = target.resolve()
-    service_executable = target.parents[2] / ".venv" / "Scripts" / "peach.exe"
     if not target.is_file() or target.name.lower() != "peach.exe":
         return RestartResult(False, f"拒绝重启：入口不存在或不是 Peach.exe：{target}")
+    standalone = standalone_target(target)
+    service_executable = (target if standalone else
+                          target.parent.parent.parent / ".venv" / "Scripts" / "peach.exe")
     if not service_executable.is_file():
         return RestartResult(False, f"拒绝重启：服务入口不存在：{service_executable}")
 
@@ -586,10 +602,11 @@ def restart_tray(
     # 启动窗口里扣掉，否则带 --swap-from 的这条路比不带的更容易假超时。
     launch = _await_new_tray(
         start(target), lambda: find_windows(target), service_executable,
-        timeout=timeout, services=services, sleep=sleep)
+        timeout=timeout, services=services, sleep=sleep,
+        expected_services=1 if standalone else 2)
     if launch.ready:
         return _finished(
-            True, "托盘已正常重启并重新拥有 HTTP/HTTPS 子服务", prepared,
+            True, "托盘已正常重启并重新拥有服务进程", prepared,
             old_tray_pid=old_process_id, new_tray_pid=launch.tray_pid,
             service_pids=launch.service_pids, swapped_from=swapped_from,
             backup=backup_path,

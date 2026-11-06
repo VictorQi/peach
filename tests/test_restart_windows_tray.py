@@ -172,6 +172,47 @@ class RestartWindowsTrayTests(unittest.TestCase):
         self.assertEqual(result.new_tray_pid, 30)
         self.assertEqual(result.service_pids, (51, 52))
 
+    def test_standalone_restarts_without_a_venv_and_waits_for_its_single_service(self):
+        self.service.unlink()
+        marker = self.target.parent / "_internal" / "standalone.txt"
+        marker.parent.mkdir()
+        marker.touch()
+        windows = iter(((windows_restart.TrayWindow(10, 20),),
+                        (windows_restart.TrayWindow(30, 40),),
+                        (windows_restart.TrayWindow(30, 40),)))
+        launched = mock.Mock()
+        launched.poll.return_value = None
+        calls = []
+
+        def services(tray_pid, executable):
+            self.assertEqual(executable, self.target)
+            calls.append(tray_pid)
+            return (51,) if calls.count(30) == 2 else ()
+
+        result = windows_restart.restart_tray(
+            self.target, find_windows=lambda _target: next(windows),
+            stop_window=lambda handle: handle == 20, alive=lambda _pid: False,
+            start=lambda _target: launched, services=services, strays=lambda *_args: (),
+            sleep=lambda _seconds: None,
+        )
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(result.service_pids, (51,))
+        self.assertEqual(calls, [10, 30, 30])
+
+    def test_shared_standalone_executable_counts_only_owned_serve_processes(self):
+        paths = {pid: str(self.target) for pid in (10, 11, 12, 13, 14)}
+        parents = {11: 10, 12: 10, 13: 11, 14: 99}
+        commands = {11: f'"{self.target}" serve --port 8900',
+                    12: f'"{self.target}" migrate status',
+                    13: f'"{self.target}" process',
+                    14: f'"{self.target}" serve --port 8901'}
+        with (
+            mock.patch.object(windows_restart.os, "name", "nt"),
+            mock.patch.object(windows_restart, "_process_paths_and_parents", return_value=(paths, parents)),
+            mock.patch.object(windows_restart, "_command_lines", return_value=commands),
+        ):
+            self.assertEqual(windows_restart.owned_service_pids(10, self.target), (11,))
+
     def source_restart(self, **overrides):
         pythonw = self.service.parent / "pythonw.exe"
         pythonw.write_bytes(b"shim")
@@ -502,6 +543,21 @@ class RestartEntryTests(unittest.TestCase):
             self.assertEqual(entry.main(["--swap-from", "staged.exe"]), 0)
         self.assertEqual(restart.call_args.kwargs["swap_from"], Path("staged.exe"))
         self.assertEqual(json.loads(printed.getvalue())["backup"], "C:/dist/backup.exe")
+
+    def test_standalone_entry_does_not_prepare_the_source_venv(self):
+        entry = load_entry()
+        with (
+            mock.patch.object(entry, "standalone_target", return_value=True),
+            mock.patch.object(entry, "find_tray_windows",
+                              return_value=(windows_restart.TrayWindow(10, 20),)),
+            mock.patch.object(entry, "preparation") as prepare,
+            mock.patch.object(entry, "restart_tray",
+                              return_value=windows_restart.RestartResult(True, "ok")) as restart,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(entry.main([]), 0)
+        prepare.assert_not_called()
+        self.assertIsNone(restart.call_args.kwargs["prepare"])
 
     def test_without_a_packaged_tray_the_entry_falls_back_to_the_source_tray(self):
         entry = load_entry()
