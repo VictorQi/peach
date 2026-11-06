@@ -340,9 +340,8 @@ class SiteCooldownTests(unittest.TestCase):
 
     def test_an_avbase_challenge_served_with_200_pauses_the_whole_site(self):
         session, calls = self.session("avbase", lambda request: HttpResponse(200, {}, CHALLENGE_HTML, request.url))
-        with self.assertRaises(SourceFailure) as caught:
+        with self.assertRaisesRegex(SourcePaused, "来源需要验证"):
             SITE_SOURCES["avbase"]().query("ABW-358", session=session)
-        self.assertEqual(caught.exception.reason, FailureReason.CLOUDFLARE_CHALLENGE)
         until, blocks = cooldown_state(self.root, "avbase")
         self.assertEqual((round(until - time.time()), blocks), (FIRST_BLOCKED_PAUSE, 1))
         with self.assertRaises(SourcePaused):

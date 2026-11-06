@@ -4,30 +4,25 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import closing
-from pathlib import Path
 from unittest import mock
 
 from peach.web_contract import WebContract, dispatch_api_get, dispatch_api_post
 from peach.web_library_shortcuts import clean_href
 from peach import web_settings
+from support.ledger import fresh_ledger
 
 
 class LibraryShortcutsTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.path = Path(self.tmp.name).resolve() / "ledger.db"
+        self.path = fresh_ledger(self.tmp.name)
         with closing(sqlite3.connect(self.path)) as c, c:
             c.executescript("""
-                CREATE TABLE profile(id TEXT PRIMARY KEY,settings_json TEXT,updated_at TEXT);
-                INSERT INTO profile VALUES('local-default','{"sidebarOrder":["tags"]}','');
-                CREATE TABLE entity(id INTEGER PRIMARY KEY,kind TEXT,canonical_name TEXT);
-                INSERT INTO entity VALUES(1,'studio','厂牌'),(2,'series','系列'),(3,'tag','剧情');
-                CREATE TABLE entity_redirect(old_id INTEGER,target_id INTEGER);
-                CREATE TABLE entity_alias(entity_id INTEGER,alias TEXT);
-                INSERT INTO entity_alias VALUES(3,'故事');
-                CREATE TABLE asset(id INTEGER PRIMARY KEY,medium TEXT,disposal TEXT,size INTEGER,snapshot_path TEXT,name TEXT,path TEXT);
-                CREATE TABLE asset_entity(asset_id INTEGER,entity_id INTEGER,role TEXT);
+                UPDATE profile SET settings_json='{"sidebarOrder":["tags"]}' WHERE id='local-default';
+                INSERT INTO entity(id,kind,canonical_name,normalized_name,created_at,updated_at) VALUES
+                  (1,'studio','厂牌','厂牌','',''),(2,'series','系列','系列','',''),(3,'tag','剧情','剧情','','');
+                INSERT INTO entity_alias(entity_id,alias,normalized_alias,source) VALUES(3,'故事','故事','test');
             """)
         self.contract = WebContract(self.path)
 
@@ -41,7 +36,7 @@ class LibraryShortcutsTests(unittest.TestCase):
         for _ in range(2):
             self.write(action="favorite", entity_id=1, on=True)
         with closing(sqlite3.connect(self.path)) as c, c:
-            c.execute("UPDATE entity SET canonical_name='规范厂牌' WHERE id=1")
+            c.execute("UPDATE entity SET canonical_name='规范厂牌',normalized_name='规范厂牌' WHERE id=1")
         self.assertEqual([row['name'] for row in self.read()['favorites']], ['规范厂牌'])
         self.assertEqual(self.write(action="favorite", entity_id=1, on=False)['favorites'], [])
 
@@ -50,7 +45,7 @@ class LibraryShortcutsTests(unittest.TestCase):
         self.write(action="favorite", entity_id=2, on=True)
         with closing(sqlite3.connect(self.path)) as c, c:
             c.execute("DELETE FROM entity WHERE id=1")
-            c.execute("INSERT INTO entity_redirect VALUES(1,2)")
+            c.execute("INSERT INTO entity_redirect(old_id,target_id,source,merged_at) VALUES(1,2,'test','')")
         self.assertEqual([row['entity_id'] for row in self.read()['favorites']], [2])
         self.assertEqual(self.write(action="favorite", entity_id=1, on=False)['favorites'], [])
 
@@ -75,9 +70,9 @@ class LibraryShortcutsTests(unittest.TestCase):
 
     def test_favorites_include_entity_art_logos_and_available_representatives(self):
         with closing(sqlite3.connect(self.path)) as c, c:
-            c.execute("INSERT INTO asset(id,medium,disposal,size,snapshot_path) "
-                      "VALUES(10,'video',NULL,100,'sample.jpg')")
-            c.execute("INSERT INTO asset_entity VALUES(10,3,'tag')")
+            c.execute("INSERT INTO asset(id,location,path,medium,disposal,size,snapshot_path) "
+                      "VALUES(10,'local','main.mp4','video',NULL,100,'sample.jpg')")
+            c.execute("INSERT INTO asset_entity(asset_id,entity_id,role,source) VALUES(10,3,'tag','test')")
         with mock.patch.object(WebContract, 'has_logo', return_value=True), \
                 mock.patch.object(WebContract, 'logo_version', return_value='logo-v'), \
                 mock.patch.object(WebContract, 'has_avatar', return_value=True):
@@ -92,11 +87,13 @@ class LibraryShortcutsTests(unittest.TestCase):
 
     def test_favorite_representative_uses_the_main_feature(self):
         with closing(sqlite3.connect(self.path)) as c, c:
-            c.executemany("INSERT INTO asset(id,name,medium,size,snapshot_path) VALUES(?,?,'video',?,?)", [
-                (10, 'ABC-123.mp4', 100, 'main.jpg'),
-                (11, 'ABC-123-trailer.mp4', 1000, 'trailer.jpg'),
+            c.executemany("INSERT INTO asset(id,name,path,location,medium,size,snapshot_path) "
+                          "VALUES(?,?,?,'local','video',?,?)", [
+                (10, 'ABC-123.mp4', 'ABC-123.mp4', 100, 'main.jpg'),
+                (11, 'ABC-123-trailer.mp4', 'ABC-123-trailer.mp4', 1000, 'trailer.jpg'),
             ])
-            c.executemany("INSERT INTO asset_entity VALUES(?,3,'tag')", [(10,), (11,)])
+            c.executemany("INSERT INTO asset_entity(asset_id,entity_id,role,source) VALUES(?,3,'tag','test')",
+                          [(10,), (11,)])
         with mock.patch.object(WebContract, 'has_avatar', return_value=True):
             tag = self.write(action='favorite', entity_id=3, on=True)['favorites'][0]
         self.assertEqual(tag['image_url'], '/avatar?id=10')
@@ -105,12 +102,12 @@ class LibraryShortcutsTests(unittest.TestCase):
         from peach.web_catalog import entity_ref
         with closing(sqlite3.connect(self.path)) as c, c:
             c.executescript("""
-                INSERT INTO entity VALUES(4,'creator','创作者');
-                INSERT INTO entity VALUES(5,'creator','同名待确认');
-                CREATE TABLE follow_source(id INTEGER PRIMARY KEY,provider TEXT,ref TEXT,entity_id INTEGER,metadata_json TEXT);
-                INSERT INTO follow_source VALUES(1,'kemono','fanbox/123',4,'{}');
-                INSERT INTO follow_source VALUES(2,'pawchive','fanbox/123',4,'{}');
-                INSERT INTO follow_source VALUES(3,'f95zone','99',NULL,'{}');
+                INSERT INTO entity(id,kind,canonical_name,normalized_name,created_at,updated_at) VALUES
+                  (4,'creator','创作者','创作者','',''),(5,'creator','同名待确认','同名待确认','','');
+                INSERT INTO follow_source(id,provider,ref,entity_id,label,url,created_at,updated_at) VALUES
+                  (1,'kemono','fanbox/123',4,'Creator','https://example.test/1','',''),
+                  (2,'pawchive','fanbox/123',4,'Creator','https://example.test/2','',''),
+                  (3,'f95zone','99',NULL,'Unknown','https://example.test/3','','');
             """)
         creator = self.write(action='favorite', entity_id=4, on=True)['favorites'][0]
         self.assertEqual(creator['image_url'], '/follow-avatar?service=fanbox&id=123')
