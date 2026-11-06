@@ -2518,11 +2518,29 @@ def _save_discovery_aliases(store, author_name: str, aliases: list[str]) -> list
     return learned
 
 
+def _deferred_source_check_message(body, checked, provider, credential) -> str:
+    """首检未执行时，区分主动延后、并发占用与必需凭据尚未齐备。"""
+    if body.get("defer_check"):
+        return "已登记，等待检查更新"
+    if checked.get("busy"):
+        return "已登记，另一次检查正在进行，这条稍后再查"
+    guide = CREDENTIAL_GUIDE.get(provider, {})
+    if guide.get('requirement') == 'required':
+        if credential is None:
+            return "已登记，来源凭据尚未配置完整，暂未检查"
+        try:
+            credential.require(*guide.get('fields', ()))
+        except CredentialError:
+            return "已登记，来源凭据尚未配置完整，暂未检查"
+    return "已登记，等待检查更新"
+
+
 def w_follow_source(contract, body) -> dict:
     """粘一条来源链接就登记，并立刻检查一次。
 
     登记成功但首次检查失败不算失败：来源已经在列表里，错误显示在它那一行上——
-    rule34.xxx 缺 key 就是这种情况，把它整个回滚掉反而让人不知道发生了什么。
+    已配置的会话失效就是这种情况，把它整个回滚掉反而让人不知道发生了什么。
+    必需凭据尚不完整的来源只登记，等用户配置后再检查。
     """
     action = str(body.get("action") or "add")
     if action == "remove":
@@ -2571,15 +2589,12 @@ def w_follow_source(contract, body) -> dict:
     outcome = next((row for row in checked["results"]
                     if row["source"] == source_id), None)
     if outcome is None:
-        # 另一次检查占着锁（多半是自动任务刚好在跑），所以顺带的首次检查没做。
-        # 来源本身已经登记好了，回一个 `checked: null` 会让调用方分不清「查过了
-        # 什么都没有」和「根本没查」。这里明确说出来：已登记，稍后会检查。
+        # 没入队与检查占用都没有执行首检，不能把缺凭据说成另一轮正在检查。
         outcome = {
             "source": source_id, "provider": parsed.provider,
             "provider_label": PROVIDER_LABELS.get(parsed.provider, parsed.provider),
             "ref": parsed.ref, "label": label, "ok": True, "deferred": True,
-            "message": ("已登记，等待检查更新" if body.get("defer_check") else
-                        "已登记，另一次检查正在进行，这条稍后再查"),
+            "message": _deferred_source_check_message(body, checked, parsed.provider, credential),
         }
     return {"ok": True, "source": source_id, "provider": parsed.provider,
             "ref": parsed.ref, "label": label, "checked": outcome,
