@@ -27,7 +27,7 @@ classifiers = [
 ]
 dependencies = [
   "itsdangerous==2.2.0",
-  "filelock==4.2.6",
+  "filelock==4.2.9",
   "tldextract==5.4.0",
   "APScheduler==3.11.3",
   "beautifulsoup4==4.15.0",
@@ -46,9 +46,9 @@ dependencies = [
   "protobuf==7.36.2",
   "psutil==7.2.2",
   "pystray==0.19.5",
-  "pydantic==2.14.2",
+  "pydantic==2.14.3",
   "resvg-py==0.5.0",
-  "sentry-sdk==2.73.0",
+  "sentry-sdk==2.74.0",
   "socksio==1.0.0",
   "starlette==1.10.0",
   "torznab==0.2.1",
@@ -69,9 +69,9 @@ peach-tray = "peach.error_reporting:tray_main"
 
 [project.optional-dependencies]
 dev = [
-    "filelock==4.2.6",
+    "filelock==4.2.9",
     "httpx2==2.16.0",
-    "ruff==0.17.3",
+    "ruff==0.17.4",
     "seiso==0.4.0",
 ]
 build = [
