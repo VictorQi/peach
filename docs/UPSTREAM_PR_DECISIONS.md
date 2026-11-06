@@ -6,11 +6,11 @@ kind: reference
 
 核验日期：2026-11-07。上游 `peach-mitao/peach`，交付目标 `VictorQi/peach`。本表覆盖该次取得的 47 个开放 PR；状态是 Fork 的采纳判断，不代表上游合并状态。
 
-快速阅读：先看「决定」，再看「依赖/冲突」和「重评或验收条件」。候选采用尚未交付；暂缓不表示永久拒绝。已等效只覆盖已核对的功能。当前批次状态与验证见 [同步总览](UPSTREAM_SYNC.md)。未注明源码已核对的项保留待深入审查，不据标题直接合并。
+快速阅读：先看「决定」，再看「依赖/冲突」和「重评或验收条件」。已适配表示本批代码与本机验证范围，不代表远端已合并；暂缓不表示永久拒绝。已等效只覆盖已核对的功能。当前批次状态与验证见 [同步总览](UPSTREAM_SYNC.md)。未注明源码已核对的项保留待深入审查，不据标题直接合并。
 
 ## 开放 PR 评估
 
-“已等效”限理由中明确检查过的功能，仍须最终差异检查；“候选采用”尚未通过当前组合验证。
+“已等效”限理由中明确检查过的功能；部分适配的其余内容仍按各行重评条件处理。
 
 | PR | 标题 | 决定 | 理由 | 依赖/冲突 | 重评或验收条件 |
 | --- | --- | --- | --- | --- | --- |
@@ -18,13 +18,13 @@ kind: reference
 | [#459](https://github.com/peach-mitao/peach/pull/459) | feat(downloads): 为可恢复的搜索与后处理故障安排有限重试 | 暂缓 | 有界重试方向合理，但持久任务迁移和自动恢复范围需匹配 fork 停止意图 | 0051 迁移、用户脚本0.7.5；禁止不确定移动重交 | 验证取消/重启/次数耗尽、已接受任务不重复提交 |
 | [#443](https://github.com/peach-mitao/peach/pull/443) | feat(web): re-port the English UI onto v0.56.0 (Docker first-access setup UI) | 不采纳 | 英文优先重写覆盖中文 fork，正文承认前端测试债务 | 整页翻译、Docker首启；非当前语言目标 | 用户明确需要国际化且测试债务消除 |
 | [#442](https://github.com/peach-mitao/peach/pull/442) | perf(api): 契约读接口直接编码 JSON | 暂缓 | 源码核对：直接 json.dumps 不完全保留 FastAPI 特殊键及 _sa 字段处理 | 需按本地真实响应类型证明兼容与收益 | 响应字节/语义、错误码和特殊值回归通过 |
-| [#441](https://github.com/peach-mitao/peach/pull/441) | perf(web): 一个读请求只读一次账本版本表 | 已适配，待交付 | GET 请求内复用版本表，定向回归通过 | 保留本进程提交失效、嵌套作用域；非事务快照 | 最终 full 与实机验证 |
+| [#441](https://github.com/peach-mitao/peach/pull/441) | perf(web): 一个读请求只读一次账本版本表 | 已适配 | GET 请求内复用版本表，定向与正式组合回归通过 | 保留本进程提交失效、嵌套作用域；非事务快照 | 本批实机馆藏验证通过；后续保留跨请求失效回归 |
 | [#440](https://github.com/peach-mitao/peach/pull/440) | perf(processing): 处理任务读写候选表复用解析缓存 | 暂缓 | 原始 CSV 缓存与438未采用部分相互依赖 | 原补丁缓存容量与可变对象隔离尚未满足本地要求 | 有界内存、原子替换、外部覆写及写失败验证 |
-| [#439](https://github.com/peach-mitao/peach/pull/439) | perf(duplicates): 重复项分组声明依赖表并缓存 | 暂缓 | 依赖缓存可取，但当前 fork 重复项判据不同 | 上游都保留+后台旧值缓存与 fork SHA256 比较不兼容 | 先核对本地重复项契约，再移植纯缓存 |
-| [#438](https://github.com/peach-mitao/peach/pull/438) | perf(review): 复核队列缓存候选文件与候选 JSON 的解析结果 | 部分适配，待交付 | 仅采用作品与来源身份纯函数有界缓存 | 未采用 CSV 和可变 JSON 缓存；需深拷贝与文件失效策略 | 当前部分最终 full；其余补内存与并发边界再审 |
-| [#437](https://github.com/peach-mitao/peach/pull/437) | perf(tasks): 任务中心一次查齐活动任务族，不再逐条递归查询 | 已适配，待交付 | active_families 一次批查供 Monitor 复用；组合回归通过 | 保留 projection_reader 及实时暂停、取消核对 | 最终 full 与实机任务中心验证 |
-| [#436](https://github.com/peach-mitao/peach/pull/436) | perf(junk): 垃圾评分复用路径解析、按需判品牌名并声明缓存依赖表 | 已适配，待交付 | 路径解析复用、按需品牌判断及依赖表声明；107项组合回归通过 | 不引入后台旧值机制；异常也清理解析缓存 | 最终 full 与真实副本结果等价测量 |
-| [#435](https://github.com/peach-mitao/peach/pull/435) | perf(review): 复核队列整批查番号单遍扫表并复用名字解析 | 部分适配，待交付 | 批量番号单遍扫表保留旧SQL匹配及顺序，等价回归通过 | 未引入本地缺失的 memoized_resolution | 当前部分最终 full；实体缓存另审 |
+| [#439](https://github.com/peach-mitao/peach/pull/439) | perf(duplicates): 重复项分组声明依赖表并缓存 | 暂缓 | 依赖缓存可取，但须对齐当前番号、时长和已有摘要的候选分组口径 | 本地尚无 #127 的完整 SHA256 人工校验流程；上游保留状态与后台旧值机制须分开适配 | 先明确分组及失效依赖，再验证纯缓存结果等价 |
+| [#438](https://github.com/peach-mitao/peach/pull/438) | perf(review): 复核队列缓存候选文件与候选 JSON 的解析结果 | 部分适配 | 仅采用作品与来源身份纯函数有界缓存，正式组合回归通过 | 未采用 CSV 和可变 JSON 缓存；需深拷贝与文件失效策略 | 其余部分补内存与并发边界再审 |
+| [#437](https://github.com/peach-mitao/peach/pull/437) | perf(tasks): 任务中心一次查齐活动任务族，不再逐条递归查询 | 已适配 | active_families 一次批查供 Monitor 复用；正式组合回归通过 | 保留 projection_reader 及实时暂停、取消核对 | 实机任务中心加载且原暂停状态保留；后续保留任务族回归 |
+| [#436](https://github.com/peach-mitao/peach/pull/436) | perf(junk): 垃圾评分复用路径解析、按需判品牌名并声明缓存依赖表 | 已适配 | 路径解析复用、按需品牌判断及依赖表声明；定向与正式组合回归通过 | 不引入后台旧值机制；异常也清理解析缓存 | 真实副本响应摘要一致；后续保留依赖表失效检查 |
+| [#435](https://github.com/peach-mitao/peach/pull/435) | perf(review): 复核队列整批查番号单遍扫表并复用名字解析 | 部分适配 | 批量番号单遍扫表保留旧 SQL 匹配及顺序，等价与正式组合回归通过 | 未引入本地缺失的 memoized_resolution | 实体缓存仍需单独核对 |
 | [#428](https://github.com/peach-mitao/peach/pull/428) 草稿 | fix(player): 自动启用中文字幕并保留手动选择 | 暂缓 | 草稿；自动字幕改变默认，可保留手动优先 | 播放记忆身份、旧记录迁移语义 | 字幕选择/关闭恢复与跨播放器验证通过 |
 | [#416](https://github.com/peach-mitao/peach/pull/416) | feat(media): 优选清晰正脸与完整人物预览 | 暂缓 | 可选离线选图符合方向，增加模型和媒体预算 | 模型制品、许可证、预览缓存签名 | 模型准备及真实小样本效果、暂停/容量验证 |
 | [#241](https://github.com/peach-mitao/peach/pull/241) | feat(downloads): 支持本地 qBittorrent 下载 | 暂缓 | 新增本地下载 provider 不是现有故障依赖 | qB配置、路径映射；正文说Windows路径边界未支持 | Windows落地路径与已接受任务复用验证 |
@@ -36,13 +36,13 @@ kind: reference
 | [#322](https://github.com/peach-mitao/peach/pull/322) 草稿 | fix(catalog): 撞号前缀只在韩国 MIB 目录里算韩国 MIB | 暂缓 | 源码审查：YUJ无路径仍判韩国，有误挡基础查询风险 | 目录证据覆盖不足；草稿；多模块分类语义 | 无路径、重命名、不同库路径的身份判据明确 |
 | [#321](https://github.com/peach-mitao/peach/pull/321) | fix(web): 社区源对官方自动落库值的异议不占复核队列 | 不采纳 | 默认隐藏社区异议可能减少用户可见冲突，不据来源等级直接否决 | 覆盖 NFO requires_review，与人工控制原则冲突 | 保留可审查入口并明确维护者选择 |
 | [#310](https://github.com/peach-mitao/peach/pull/310) | fix(scraping): 后台采集不再创建窗口或抢占前台 | 不采纳 | 源码审查：仍启动无头浏览器；本地已经只保留主动账号连接 | 会回退 fork 无后台浏览器约束 | 改为HTTP降级且不启动浏览器 |
-| [#298](https://github.com/peach-mitao/peach/pull/298) | perf: 减少馆藏导航和人工复核的重复计算 | 部分适配，待交付 | 采用版次证据预筛，补字母结尾番号边界；真实副本响应摘要一致 | SQL匹配采用435；渐进分页和统计分离改变首批展示，复核缓存另需内存及对象隔离验证 | 本批真实冷启动验证；若仍有对应瓶颈，再成组纳入其余部分 |
-| [#127](https://github.com/peach-mitao/peach/pull/127) | feat(duplicates): 完整 SHA256 判重与逐文件人工处置 | 暂缓 | 完整哈希与逐文件处置方向安全，当前需核对已等效范围 | 真实全文件读取需明确动作；不能恢复采样判重 | 对照当前SHA256能力，仅补缺失测试/代码 |
+| [#298](https://github.com/peach-mitao/peach/pull/298) | perf: 减少馆藏导航和人工复核的重复计算 | 部分适配 | 采用版次证据预筛，补字母结尾番号边界；真实副本响应摘要一致，正式组合回归通过 | SQL 匹配采用 435；渐进分页和统计分离改变首批展示，复核缓存另需内存及对象隔离验证 | 冷首次加载已改善；若剩余耗时指向未采纳路径，再成组适配 |
+| [#127](https://github.com/peach-mitao/peach/pull/127) | feat(duplicates): 完整 SHA256 判重与逐文件人工处置 | 暂缓，适合独立适配 | 已核对新增完整哈希模块及本地页面，当前没有完整读取确认与逐文件选择，不能称已等效 | 需成组审任务注册、取消恢复、状态缓存和前端；不属于当前首屏查询热点 | 合成媒体覆盖读取中变化、取消、缓存失效和明确选中范围；不自动读取真实全库 |
 | [#134](https://github.com/peach-mitao/peach/pull/134) 草稿 | perf(processing): 逐档衔接就绪工作，减少整批阶段等待 | 暂缓 | 可选逐档衔接可能改善封面到达时间 | 依赖130，调度生命周期与 fork累计预算冲突高 | 暂停/取消/恢复不扩大范围且真实时间验证 |
 | [#130](https://github.com/peach-mitao/peach/pull/130) | feat(processing): 自选工作项目与有界并行补缺 | 暂缓 | 自选任务和双通道有用，但当前已有范围与生命周期修复 | 调度和恢复协议，必须保留 fork停止意图 | 细粒度差异和并发状态回归完成 |
 | [#282](https://github.com/peach-mitao/peach/pull/282) 草稿 | fix(processing): 避免大量视频选择触发 SQL 参数超限 | 已等效 | 当前 library_processing 三入口与 media_probe、processing_control、processing_traffic_plan 均使用 json_each | 四个运行模块对应补丁点已核对；测试由主代理统一执行 | 保留大批选择与空选择回归，不重复移植 |
 | [#279](https://github.com/peach-mitao/peach/pull/279) 草稿 | fix(processing): 损坏媒体问题不再使升级补全整体失败 | 已等效 | 当前 upgrade_repairs 已处理 partial 且要求无 paused_count | 原PR条件更宽，不覆盖本地更严格判断 | 保留现有partial/暂停回归 |
-| [#278](https://github.com/peach-mitao/peach/pull/278) | fix(web): 合并撞名的女优与厂牌档案 | 暂缓 | 用户确认的成对实体合并方向适合，但已有redirect相关能力 | 数据事务、备份及人工字段投影 | 对照已有合并入口并验证重定向/别名完整 |
+| [#278](https://github.com/peach-mitao/peach/pull/278) | fix(web): 合并撞名的女优与厂牌档案 | 暂缓，适合独立适配 | 已读全部非生成文件差异；本地仅有合并与重定向基础，撞名仍报错，没有该确认入口 | 保留本地人工字段所有权和跨类型墓碑读取增强；上游自报尚有浏览器失败 | 补取消、过期确认、备份失败、旧地址及图片资源边界验证，不能仅桩确认成功 |
 | [#277](https://github.com/peach-mitao/peach/pull/277) | feat(docker): 支持配置运行 UID/GID | 暂缓 | Docker UID/GID配置独立部署能力 | root准备及递归所有者迁移，影响实际数据权限 | 对应容器环境验证后单独采用 |
 | [#275](https://github.com/peach-mitao/peach/pull/275) 草稿 | feat(player): 右方向键长按临时二倍速 | 暂缓 | 草稿；短按从keydown改keyup，影响现有按键预期 | 临时倍速与失焦取消 | 播放器默认行为选择确认并通过实机验证 |
 | [#257](https://github.com/peach-mitao/peach/pull/257) 草稿 | feat(organize): 支持字幕语言与有字幕模板参数 | 暂缓 | 可选模板参数适合，但与首屏/依赖无直接联系 | 字幕身份和整理回滚 | 模板缺失字段、重名、路径边界验证 |
@@ -56,7 +56,7 @@ kind: reference
 | [#157](https://github.com/peach-mitao/peach/pull/157) | fix(media): 支持重建尾部 moov 的 MP4 头 | 已等效 | 本地 4e950fb2 已含尾部重排、偏移平移、suffix 与 Range 回归，额外保护扩展头及编辑列表歧义 | 保留单 mdat、索引预算和原文件不变保护；旧 PR 整块覆盖会丢失保护 | 允许布局误拒绝或 Range/时序异常时，用最小样本重评 |
 | [#158](https://github.com/peach-mitao/peach/pull/158) | fix(player): 优先原文件与无损封装，按需转码 | 暂缓 | 原文件与无损封装优先合理，但大媒体链改动 | ebmlite依赖、播放回退；全量有已知失败 | 源码等效核对及FFmpeg真实产物验证 |
 | [#173](https://github.com/peach-mitao/peach/pull/173) | fix(web): 详情接口返回 medium，外部播放器入口按介质显示 | 已等效 | 当前 web_catalog q_item SELECT 已含 a.medium | 只核对端点结果，不重复加字段 | 现有详情回归返回medium |
-| [#174](https://github.com/peach-mitao/peach/pull/174) | perf(media): 整片软件转码限制线程数，给播放留出 CPU | 暂缓 | 软件转码线程限额可改善交互资源竞争 | 需核对现有调速/任务档位，不能双重限额 | 并发播放与后台处理CPU预算验证 |
+| [#174](https://github.com/peach-mitao/peach/pull/174) | perf(media): 整片软件转码限制线程数，给播放留出 CPU | 暂缓原样采用 | 已读完整差异；当前整片软件转码没有该线程限额，HLS 的限额不等效 | 每编码器半核不覆盖解码、滤镜或默认两任务并发；当前冷查询采样热点是封面边车读取 | 若真实转码与浏览竞争，按硬解软编及纯软编分支验证总 CPU 预算和播放响应 |
 | [#175](https://github.com/peach-mitao/peach/pull/175) | fix(media): 编辑列表与 ctts 平移差半帧以内视为已补偿 | 已等效 | 当前 mp4repair _half_frame/tolerance 已存在 | 旧sidecar补修也已见 _legacy_timing | 保留存量和29.97fps回归 |
 | [#176](https://github.com/peach-mitao/peach/pull/176) | fix(media): 修复 ctts 时容忍个别解不出来的样本 | 暂缓 | 容忍损坏样本有数据推测风险，应严守有限阈值 | 缓存版本与157相互影响 | 缺失样本排序及超过阈值拒绝验证 |
 | [#188](https://github.com/peach-mitao/peach/pull/188) 草稿 | feat(library): 跨目录匹配本地封面并核验资料来源 | 暂缓 | 跨目录本地封面适合消费者方向，但草稿和匹配范围需逐项核对 | 不能猜测候选或覆盖人工封面；可能已有本地实现 | 同号冲突、图片身份、缓存优先级与当前树对照 |
