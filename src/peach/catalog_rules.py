@@ -73,6 +73,13 @@ def is_local_extra(name: str | None, path: str | None = None, *,
     return local_extra_type(name, path, library_roots=library_roots) is not None
 
 
+@lru_cache(maxsize=65536)
+def sql_is_local_extra(name: str | None, path: str | None, library_roots: tuple[str, ...]) -> bool:
+    """SQL 里按行调用的那一份：目录、统计与形状名单每次重算都对每条资产判一遍，几条查询累计
+    几十万次。判定只看这三样，结果按它们记住。"""
+    return is_local_extra(name, path, library_roots=library_roots)
+
+
 LENGTH_TAGS = {"短片-2分内", "中片-10分内", "长片-30分内", "超长片-30分上"}
 TECH_TAGS = {
     "1080P", "720P", "4K", "2K", "2160P", "480P", "低画质", "高帧率",
@@ -583,6 +590,7 @@ def western_release_identity(value: str | None) -> str:
     return ""
 
 
+@lru_cache(maxsize=65536)
 def normalise_code_key(code: str | None) -> str:
     """Normalize a release code into the stable cover-cache key.
 
@@ -732,7 +740,13 @@ def release_identity(code: str | None) -> str:
     认不出形态的值原样返回，只和自己相等：`20211103_JENNIFERMENDEZ` 这种关键词
     搜索结果不该和任何番号算成同一部。
     """
-    raw = _DMM_LABEL_PREFIX.sub("", str(code or "").upper().strip())
+    return _release_identity(str(code or "").upper().strip())
+
+
+#: 复核队列整页核对时同一批写法要比上万次；结果只取决于原文，按原文缓存。
+@lru_cache(maxsize=65536)
+def _release_identity(code: str) -> str:
+    raw = _DMM_LABEL_PREFIX.sub("", code)
     tokyo = tokyo_hot_code(raw)
     if tokyo:
         return tokyo
@@ -763,7 +777,7 @@ def release_identity(code: str | None) -> str:
         # HA 的这一组重制写法已有来源等价证据，其余尾字母均保留。
         if (prefix, letters, suffix) == ("49", "HA", "R"):
             suffix = ""
-        if (prefix, letters) in _RELEASE_PREFIX_ALIASES or str(code or "").upper().strip().startswith("H_"):
+        if (prefix, letters) in _RELEASE_PREFIX_ALIASES or code.startswith("H_"):
             prefix = ""
         return f"{prefix}{letters}-{code_serial(letters, number)}{suffix}"
     return value
@@ -1172,12 +1186,18 @@ def is_uncensored_release(name: str | None, code: str | None) -> bool:
     return is_uncensored_code(code) or bool(_UNCENSORED_SITE.search(str(name or "")))
 
 
+#: 先排除没有版次标记的名字，避免逐作品编译番号表达式。左侧不加边界，
+#: 保留番号本身以字母结尾、后面紧接 CH 等标记的情形；精确身份仍由原判据核验。
+_EDITION_EVIDENCE = re.compile(
+    r"(?:CH|C|SUB|UC|UN|U|UNCEN(?:SORED)?|无码|無碼|中字|中文字幕)(?=$|[^A-Z0-9])", re.I)
+
+
 def jav_edition_badges(name: str | None, code: str | None,
                        tags: tuple[str, ...] | list[str] = ()) -> list[str]:
     """Project filename/tag evidence into compact edition badges beside the code."""
     text = _MEDIA_EXTENSION.sub("", str(name or ""))
     tag_set = {str(tag).strip().casefold() for tag in tags if str(tag).strip()}
-    code_pattern = _jav_code_pattern(code)
+    code_pattern = _jav_code_pattern(code) if _EDITION_EVIDENCE.search(text) else ''
     after_code = (
         re.search(
             rf"(?:^|[^A-Z0-9]){code_pattern}((?:{_GLUED_EDITION})?(?:[^A-Z0-9].*)?)$",

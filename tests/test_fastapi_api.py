@@ -4054,6 +4054,7 @@ class UnconfiguredMachineTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(app.state.web_contract.downloads._thread)
 
     async def test_shutdown_joins_the_active_aggregate_before_releasing_the_ledger(self):
+        from peach.api import WARM_AGGREGATES
         parent = self.settings.db_path.parent
         parent.mkdir(parents=True)
         database = fresh_ledger(parent)
@@ -4081,7 +4082,7 @@ class UnconfiguredMachineTests(unittest.IsolatedAsyncioTestCase):
                 release.set()
                 await shutdown
                 self.assertTrue(closed.is_set())
-                self.assertEqual(calls, ["/api/taste"])
+                self.assertEqual(calls, [WARM_AGGREGATES[0][0]])
             finally:
                 release.set()
                 if shutdown is not None:

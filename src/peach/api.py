@@ -200,8 +200,9 @@ def _restore_task_center(contract) -> None:
 
 #: 开机在后台先算一遍的聚合：口味、复核、垃圾复核、关注的全部条目与筛选项各要几秒到
 #: 十几秒，都按账本版本号缓存（`WebContract.cached_until_changed`），算好一次就一直用到
-#: 账本或文件真的变了。
-WARM_AGGREGATES = (("/api/taste", {"window": "all"}), ("/api/review", {}), ("/api/ads", {}),
+#: 账本或文件真的变了。馆藏排在可选聚合之前，首屏请求复用同一份分组快照。
+WARM_AGGREGATES = (("/api/items", {"limit": "60"}), ("/api/entity/shapes", {}),
+                   ("/api/taste", {"window": "all"}), ("/api/review", {}), ("/api/ads", {}),
                    ("/api/follow", {}))
 
 

@@ -36,7 +36,7 @@ LIMIT = 30
 
 #: 键是 `<仓库相对路径>:<限定名>`，值是当前的分支数，只能往下改。
 BASELINE: dict[str, int] = {
-    "src/peach/junk.py:scored_candidates": 54,
+    "src/peach/junk.py:_scored_candidates": 53,
     "scripts/localize_performer_names.py:collect": 63,
     "src/peach/web_resource_sync.py:_resource_orphan_plan": 50,
     "src/peach/web_review.py:_review_rows": 40,
@@ -65,12 +65,15 @@ BASELINE: dict[str, int] = {
 #: 判过就该这么长的函数：`(分支数, 为什么拆开更差)`。键与 `BASELINE` 同形、不重叠。
 ACCEPTED: dict[str, tuple[int, str]] = {
     "src/peach/api.py:create_app": (
-        40, "应用工厂：按启动顺序构造数据库、各项后台服务（含可选分享）与路由并接成一个 app，每个可注入的"
-            "依赖各带一个缺省；挂载探测按配置状态启动。拆开会把同一条构造顺序分散到几处"),
+        43, "应用工厂：按启动顺序构造数据库、各项后台服务（含可选分享）与路由并接成一个 app，每个可注入的"
+            "依赖各带一个缺省；配置状态控制挂载探测和延迟恢复，停机等待预热释放连接。拆开会割裂成对的生命周期"),
     "src/peach/library_processing.py:process_library": (
-        47, "顺序流水线：垃圾检查、媒体属性、本地资料、本地预览、联网采集、写候选、收尾共用一份进度状态"
+        53, "顺序流水线：垃圾检查、媒体属性、本地资料、本地预览、联网采集、写候选、收尾共用一份进度状态"
             "与问题记录；来源扫描、资产查询与外部会话分别归 `_scan_sources`、"
-            "`_collection_rows`、`_RemoteSession`，剩下的是任务编排、逐项目资料处理与指定范围的存量重新核查"),
+            "`_collection_rows`、`_RemoteSession`，剩下的是任务编排、取消检查点、增量范围和存量核查，拆开会分散停止与续跑状态"),
+    "src/peach/standalone_update.py:apply": (
+        30, "安装事务：同一任务令牌贯穿写入端预检、等待退出、资料备份、目录替换、就绪核验与失败回滚；"
+            "moved、installed 和 writer 一起决定回滚边界，拆散会隐藏程序目录与账本的配对恢复条件"),
     "src/peach/jav_cover_fetch.py:run": (
         50, "批处理的主循环：每个番号依次量本机尺寸、择优、比较、落盘、记日志，统计、日志行"
             "和出错后换新的连接池在整轮里共用，逐段拆开只是把这几样来回传"),

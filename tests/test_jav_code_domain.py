@@ -29,6 +29,9 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
+
+from peach import catalog_rules
 
 from peach.catalog_rules import (
     CODE_BODY_STOPWORDS,
@@ -1147,6 +1150,28 @@ class ScrapedIdentityAuditTests(unittest.TestCase):
                 rows = list(csv.DictReader(handle))
         self.assertEqual([(row["tier"], row["asset_code"], row["asset_ids"]) for row in rows],
                          [(identity.MISMATCH, "WX17", "1 2")])
+
+
+class EditionEvidenceTests(unittest.TestCase):
+    def test_unmarked_name_does_not_compile_a_per_release_expression(self):
+        with mock.patch.object(catalog_rules, '_jav_code_pattern',
+                               side_effect=AssertionError('无版次标记不需构造番号表达式')):
+            self.assertEqual(catalog_rules.jav_edition_badges('ABW-123.mp4', 'ABW-123'), [])
+            self.assertEqual(catalog_rules.jav_edition_badges('ABW-123.mp4', 'ABW-123', ['中字']), ['中字'])
+            self.assertEqual(catalog_rules.jav_edition_badges('HEYZO-1234.mp4', 'HEYZO-1234'), ['无码'])
+
+    def test_suffix_markers_keep_identity_and_letter_suffix_boundaries(self):
+        cases = [('ABW-123CH.mp4', 'ABW-123', ['中字']),
+                 ('ABW-123ACH.mp4', 'ABW-123A', ['中字']),
+                 ('ABW-123AUC.mp4', 'ABW-123A', ['无码']),
+                 ('ABW-123-UN.mp4', 'ABW-123', ['无码']),
+                 ('ABW-123-中文字幕.mp4', 'ABW-123', ['中字']),
+                 ('ABW-123-AI去码.mp4', 'ABW-123', ['无码破解']),
+                 ('ABW-123-C.mp4', 'ABW-999', []),
+                 ('ABW-123-SUBTITLE.mp4', 'ABW-123', [])]
+        for name, code, expected in cases:
+            with self.subTest(name=name, code=code):
+                self.assertEqual(catalog_rules.jav_edition_badges(name, code), expected)
 
 
 if __name__ == "__main__":

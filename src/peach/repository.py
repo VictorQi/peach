@@ -6,7 +6,7 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
-from .catalog_rules import is_jav_code, is_local_extra, normalise_code_key
+from .catalog_rules import is_jav_code, normalise_code_key, sql_is_local_extra
 from .entities import normalize_entity_name
 from .regions import infer_region
 
@@ -33,7 +33,7 @@ class LedgerDatabase:
         connection.create_function("is_jav_code", 1, is_jav_code, deterministic=True)
         roots = self.media_roots
         connection.create_function("peach_is_local_extra", 2,
-            lambda name, path: is_local_extra(name, path, library_roots=roots), deterministic=True)
+            lambda name, path: sql_is_local_extra(name, path, roots), deterministic=True)
         connection.create_function(
             "normalise_code_key", 1, normalise_code_key, deterministic=True)
         # 产地推断要和 Python 侧同一份实现。SQL 里重写一遍前缀名单的话，账本筛出来的

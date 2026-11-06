@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
-from peach import taste_history, taste_preferences, web_follow, web_state, web_stats
+from peach import taste_history, taste_preferences, web_batch, web_follow, web_state, web_stats
 from peach.follow_sources import FollowCandidate, SourceFetch
 from peach.follow_store import FollowStore
 from peach.previews import entity_image_key, logo_key
@@ -37,6 +37,33 @@ def insert_asset(db_path: Path, asset_id: int) -> None:
 
 
 class LedgerRevisionTests(unittest.TestCase):
+    def test_startup_warms_catalog_before_optional_aggregates(self):
+        import asyncio
+        from peach import api
+        paths = []
+        def dispatch(contract, path, args):
+            paths.append(path)
+            if path == '/api/items':
+                dispatch_api_get(contract, path, args)
+        insert_asset(self.db_path, 1)
+        with mock.patch.object(api.web_contract, 'dispatch_api_get', side_effect=dispatch):
+            asyncio.run(api._warm_ledger_aggregates(True, self.contract, asyncio.Event()))
+        self.assertEqual(paths[0], '/api/items')
+        self.assertIn('catalog-group-rows', self.contract.cache)
+
+    def test_filename_cache_reuses_work_and_respects_library_roots(self):
+        from peach import catalog_rules
+        catalog_rules.sql_is_local_extra.cache_clear()
+        self.addCleanup(catalog_rules.sql_is_local_extra.cache_clear)
+        with mock.patch.object(catalog_rules, 'is_local_extra',
+                               wraps=catalog_rules.is_local_extra) as classify:
+            args = ('movie.mp4', 'R:/samples/movie.mp4', ())
+            self.assertTrue(catalog_rules.sql_is_local_extra(*args))
+            self.assertTrue(catalog_rules.sql_is_local_extra(*args))
+            self.assertEqual(classify.call_count, 1)
+            self.assertFalse(catalog_rules.sql_is_local_extra(*args[:2], ('R:/samples',)))
+            self.assertEqual(classify.call_count, 2)
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
@@ -80,6 +107,39 @@ class LedgerRevisionTests(unittest.TestCase):
         self.contract.task_runs.progress(run.id, current=5, total=10, throttle=0)
         self.contract.task_runs.heartbeat(run.id, throttle=0)
         self.assertEqual(self.contract.cached_until_changed("review", self.compute), 1)
+
+    def test_request_reuses_revisions_until_a_local_commit(self):
+        with mock.patch.object(self.contract.database, "connect",
+                               wraps=self.contract.database.connect) as connect:
+            with web_state.revision_snapshot():
+                before = self.contract.ledger_revision()
+                self.assertEqual(self.contract.ledger_revision(("asset", "asset")), 0)
+                self.assertEqual(connect.call_count, 1)
+                with self.contract.write_transaction() as connection:
+                    connection.execute(
+                        "INSERT INTO asset(id,location,path,name,medium,size) VALUES(?,?,?,?,?,?)",
+                        (90, "local", "R:/media/90.mp4", "90.mp4", "video", 1))
+                self.assertGreater(self.contract.ledger_revision(), before)
+                self.assertEqual(self.contract.ledger_revision(("asset",)), 1)
+
+    def test_external_commit_is_visible_in_the_next_request(self):
+        with web_state.revision_snapshot():
+            before = self.contract.ledger_revision()
+            insert_asset(self.db_path, 91)
+            self.assertEqual(self.contract.ledger_revision(), before)
+        with web_state.revision_snapshot():
+            self.assertGreater(self.contract.ledger_revision(), before)
+
+    def test_nested_revision_scope_restores_outer_scope_after_error(self):
+        with web_state.revision_snapshot():
+            before = self.contract.ledger_revision()
+            insert_asset(self.db_path, 92)
+            with self.assertRaisesRegex(ValueError, "request failed"):
+                with web_state.revision_snapshot():
+                    self.assertGreater(self.contract.ledger_revision(), before)
+                    raise ValueError("request failed")
+            self.assertEqual(self.contract.ledger_revision(), before)
+        self.assertGreater(self.contract.ledger_revision(), before)
 
     def test_catalog_cache_survives_download_progress_and_commit_notifications(self):
         from peach.downloads import DownloadStore, DownloadTask, POSTPROCESS_RUNNING
@@ -376,6 +436,7 @@ class DeclaredTablesTests(unittest.TestCase):
             self._get("/api/index", kind=kind)
         self._get("/api/stats")
         self._get("/api/folders")
+        self._get("/api/ads", limit="10")
         with closing(sqlite3.connect(self.db_path)) as connection:
             source_id, item_id = (str(connection.execute(f"SELECT min(id) FROM {table}").fetchone()[0])
                                   for table in ("follow_source", "follow_item"))
@@ -399,7 +460,8 @@ class DeclaredTablesTests(unittest.TestCase):
             "STATS_TABLES": web_stats.STATS_TABLES,
             "FOLLOW_GROUP_TABLES": web_follow.FOLLOW_GROUP_TABLES,
             "TASTE_TABLES": web_stats.TASTE_TABLES,
-            "PROFILE_TABLES": taste_preferences.PROFILE_TABLES}
+            "PROFILE_TABLES": taste_preferences.PROFILE_TABLES,
+            "JUNK_SCORE_TABLES": web_batch.JUNK_SCORE_TABLES}
         names = {tuple(tables): name for name, tables in declarations.items()}
         leaks: dict[str, set[str]] = {}
         for label, declared, reads in self.reads.frames:

@@ -72,6 +72,56 @@ _MULTI_VALUE_ROLES = {"performers": "performer", "tags": "tag"}
 
 #: `_codes_matching` 一条查询里最多带几个宽查键；SQLite 表达式树深度上限是 1000。
 _LIKE_CHUNK = 200
+#: 宽查键多于这个数时，`_codes_matching` 把资产表只读一遍，在 Python 里按同一判据筛。
+#: 逐段查询每段都扫整表、每行再比一段的 LIKE：真实馆藏（1.8 万视频、复核队列 3 千多个番号）
+#: 上一次整队列刷新要扫十几遍、做几千万次 LIKE。单条候选只带一两个键，仍走 SQL。
+_BULK_CODE_KEYS = 16
+_ASCII_UPPER = str.maketrans("abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+
+def _sql_upper(text: str) -> str:
+    """SQLite 内置 `upper()` 只转 ASCII 字母，Python 的 `str.upper` 还会转其他文字。"""
+    return text.translate(_ASCII_UPPER)
+
+
+def _like_contains(key: str):
+    """`upper(code) LIKE '%'||key||'%'` 的 Python 判据：`_` 配任一字符，`%` 配任意一串。"""
+    if "_" not in key and "%" not in key:
+        return lambda text: key in text
+    pattern = re.compile("".join(
+        "." if char == "_" else ".*" if char == "%" else re.escape(char) for char in key), re.S)
+    return lambda text: pattern.search(text) is not None
+
+
+def _codes_matching_scan(connection, wanted: list[str], exact: set[str], keys: list[str],
+                         columns: str) -> list:
+    """`_codes_matching` 的整表单遍版：每行收下与否、收下的先后，都与逐段查询相同。
+
+    逐段查询里一行要过两道：SQL 的粗筛（精确写法或该段任一宽查键作子串），再按归一化
+    键落在该段。这里先算归一化键排除绝大多数行，只对剩下的行复核它那一段的粗筛。
+    """
+    sql_exact = {_sql_upper(code) for code in wanted}
+    chunk_of = {key: index // _LIKE_CHUNK for index, key in enumerate(keys)}
+    chunk_tests = [[_like_contains(_sql_upper(key)) for key in keys[start:start + _LIKE_CHUNK]]
+                   for start in range(0, max(len(keys), 1), _LIKE_CHUNK)]
+
+    def passes(text: str, chunk: int) -> bool:
+        return (_sql_upper(text.strip(" ")) in sql_exact
+                or any(test(_sql_upper(text)) for test in chunk_tests[chunk]))
+
+    found = []
+    for row in connection.execute(
+            f"SELECT {columns} FROM asset WHERE medium='video' AND disposal IS NULL "
+            f"AND code IS NOT NULL ORDER BY id"):
+        text = str(row["code"])
+        key = normalise_code_key(text)
+        chunk = chunk_of.get(key)
+        if chunk is None and not key and text.strip().upper() in exact:
+            chunk = 0
+        if chunk is not None and passes(text, chunk):
+            found.append((chunk, row))
+    # 逐段查询按段先后、段内按 id 排；同段内这里本来就是 id 序。
+    return [row for _chunk, row in sorted(found, key=lambda item: item[0])]
 
 
 def _codes_matching(connection, codes: list[str], columns: str) -> list:
@@ -96,6 +146,8 @@ def _codes_matching(connection, codes: list[str], columns: str) -> list:
         return []
     exact = {code.upper() for code in wanted}
     keys = sorted({normalise_code_key(code) for code in wanted} - {""})
+    if len(keys) > _BULK_CODE_KEYS:
+        return _codes_matching_scan(connection, wanted, exact, keys, columns)
     marks = ",".join(["upper(?)"] * len(wanted))
     found = []
     # 每一行只在它的归一化键所在那一段收下，精确写法每段都查，也不会重复收。

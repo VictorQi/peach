@@ -1511,6 +1511,7 @@ class WebDataTests(unittest.TestCase):
         self.assertEqual(set(rm_web.GET_HANDLERS), {
             "/api/tag-management",
             "/api/tasks",
+            "/api/result-updates",
             "/api/library-processing",
             "/api/library-processing/issues",
             "/api/media-processing",

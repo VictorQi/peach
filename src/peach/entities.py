@@ -812,9 +812,10 @@ def resolve_entity(connection: Connection, kind: str, name: str):
     别名撞名返回 None 而不是随便挑一个：指错实体会把作品挂到另一个人名下，
     那是要人工复核才能发现的错误。
     """
+    key = normalize_entity_name(name or "")
     canonical = connection.execute(
-        "SELECT e.* FROM entity e WHERE e.kind=? AND e.canonical_name=? LIMIT 1",
-        (kind, name),
+        "SELECT e.* FROM entity e WHERE e.kind=? AND e.normalized_name=? AND e.canonical_name=? LIMIT 1",
+        (kind, key, name),
     ).fetchone()
     if canonical:
         return canonical
@@ -823,7 +824,7 @@ def resolve_entity(connection: Connection, kind: str, name: str):
         return connection.execute('SELECT * FROM entity WHERE id=?', (next(iter(ids)),)).fetchone() if len(ids) == 1 else None
     aliases = connection.execute(
         "SELECT DISTINCT e.* FROM entity e JOIN entity_alias a ON a.entity_id=e.id "
-        "WHERE e.kind=? AND a.alias=? ORDER BY e.id LIMIT 2",
-        (kind, name),
+        "WHERE e.kind=? AND a.normalized_alias=? AND a.alias=? ORDER BY e.id LIMIT 2",
+        (kind, key, name),
     ).fetchall()
     return aliases[0] if len(aliases) == 1 else None

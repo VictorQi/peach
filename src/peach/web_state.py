@@ -18,6 +18,8 @@ import os
 import sqlite3
 import threading
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 from collections import OrderedDict
 from collections.abc import Mapping
@@ -74,6 +76,18 @@ SETTLE_TTL = 1.0
 
 #: `cached()` 的聚合缓存最多留这么多个键，最久没用的先淘汰。
 CACHE_KEYS = 192
+
+_REVISION_SNAPSHOT: ContextVar[dict | None] = ContextVar("peach_revision_snapshot", default=None)
+
+
+@contextmanager
+def revision_snapshot():
+    """同一读请求复用版本表；请求结束或本进程提交后重新读取。"""
+    token = _REVISION_SNAPSHOT.set({})
+    try:
+        yield
+    finally:
+        _REVISION_SNAPSHOT.reset(token)
 
 
 def path_version(path: Path) -> int | None:
@@ -314,13 +328,24 @@ class WebContract:
         0038（或根本没有库）时返回 None。
         `tables` 非空时只累计这些表的版本。
         """
-        try:
-            with self.read_connection() as connection:
-                clause = " WHERE tbl IN (" + ','.join('?' for _ in tables) + ")" if tables else ''
-                row = connection.execute("SELECT total(n) FROM ledger_revision" + clause, tables).fetchone()
-        except sqlite3.Error:
+        snapshot = _REVISION_SNAPSHOT.get()
+        generation = self.cache_generation
+        if (snapshot is not None and snapshot.get("contract") is self
+                and snapshot.get("generation") == generation):
+            revisions = snapshot["revisions"]
+        else:
+            try:
+                with self.read_connection() as connection:
+                    revisions = {str(table): int(count) for table, count in connection.execute(
+                        "SELECT tbl, total(n) FROM ledger_revision GROUP BY tbl")}
+            except sqlite3.Error:
+                revisions = None
+            if snapshot is not None:
+                snapshot.update(contract=self, generation=generation, revisions=revisions)
+        if revisions is None:
             return None
-        return int(row[0])
+        return (sum(revisions.get(table, 0) for table in set(tables))
+                if tables else sum(revisions.values()))
 
     def cached_until_changed(self, key: str, fn, *inputs, tables=()):
         """只读账本聚合的缓存：账本版本号与 `inputs` 都没变就一直命中，不按时间过期。
