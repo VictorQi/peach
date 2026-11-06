@@ -227,6 +227,7 @@ describe('播放墙的浏览与详情', () => {
       releaseModule(); await page.locator('[data-wall-skeleton]').first().waitFor();
       assert.equal(await page.locator('header.top').isVisible(), false);
       releaseItems(); await page.locator('[data-wall-empty]').waitFor();
+      assert.equal(await page.locator('[data-wall-empty]').getByRole('link', { name:'添加媒体', exact:true }).isVisible(), true);
       assert.equal(await page.evaluate(() => (window as unknown as { wallBoot:{ home:number } }).wallBoot.home), 0);
       await page.getByRole('button', { name:'退出播放墙' }).click();
       await page.locator('header.top').waitFor({ state:'visible' });

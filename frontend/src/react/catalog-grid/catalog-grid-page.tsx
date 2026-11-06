@@ -168,7 +168,6 @@ function GridBody(props: CatalogGridProps) {
     );
 
   const content = () => {
-    if (libraryEmpty) return null;
     if (wallAvailable && props.wall) return <VideoWall
       key={finiteWall ? 'finite' : 'explore'}
       sessionKey={entity ? `entity:${props.entityKey || ''}` : `catalog:${catalogParams(props.filters || {}, !!props.excludeVertical)}`}
@@ -181,6 +180,7 @@ function GridBody(props: CatalogGridProps) {
         catalogEmpty: props.emptyHtml?.({ trash, libraryEmpty: !!result.data.pages[0]?.libraryEmpty }),
       }) : ''}
       loadMore={loadNext} actions={actions} helpers={helpers} javImage={layout.javImage} />;
+    if (libraryEmpty) return null;
     if (result.isPending) return null;
     if (!result.data) {
       return <RetryNote message={requestErrorMessage(result.error)} onRetry={() => void result.refetch()} />;

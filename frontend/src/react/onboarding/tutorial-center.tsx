@@ -141,7 +141,7 @@ export function TutorialCenter({ actions }: { actions: ShellActions }) {
       const opener = document.activeElement as HTMLElement;
       await writes.current;
       if (!mounted.current) return;
-      stop(); returnFocus.current = opener;
+      returnFocus.current = opener; stop();
       setNotice(''); setQuery('');
       setOpen(true);
       const loaded = await refresh();

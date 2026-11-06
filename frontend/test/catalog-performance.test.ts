@@ -23,4 +23,7 @@ it('资源取证仅保留同源固定路径及数字，剔除作品和凭据参�
     startMs: 100, durationMs: 250, ttfbMs: 110, transferBytes: 300, decodedBytes: 400 });
   expect(resourceMeasurement({ ...entry, name: 'https://example.com/cover?token=secret' }, 'http://localhost')).toBeNull();
   expect(resourceMeasurement({ ...entry, name: 'http://localhost/private-title.mp4' }, 'http://localhost')).toBeNull();
+  for (const path of ['/dist/peach-app.js', '/dist/peach-app.css']) {
+    expect(resourceMeasurement({ ...entry, name: `http://localhost${path}?v=build` }, 'http://localhost')?.path).toBe(path);
+  }
 });

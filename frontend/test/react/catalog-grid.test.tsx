@@ -52,15 +52,22 @@ describe('目录取数', () => {
     expect(new URLSearchParams(catalogParams({ q: '竖屏' }, false)).has('exclude_vertical')).toBe(false);
   });
 
-  it('一页取「每批条数」那么多，往后的页不数总数', async () => {
-    const fetcher = vi.fn(async (_url: string) => ({ ok: true, status: 200, json: async () => ({ items: [item(1)], has_more: true }) }));
+  it('网格续页省略总数，分页表格仍取得完整总数', async () => {
+    const fetcher = vi.fn(async (url: string) => ({ ok: true, status: 200, json: async () => ({
+      items: [item(1)], has_more: true,
+      total: new URL(url, 'http://peach.test').searchParams.get('count') === '0' ? null : 144,
+    }) }));
     vi.stubGlobal('fetch', fetcher);
     await fetchCatalogPage('sort=seed', 0, 48, false, new AbortController().signal);
     await fetchCatalogPage('sort=seed', 48, 48, false, new AbortController().signal);
+    const counted = await fetchCatalogPage('sort=seed&count=0', 48, 48, false, new AbortController().signal, true);
     const first = new URL(fetcher.mock.calls[0]![0], 'http://peach.test').searchParams;
     const second = new URL(fetcher.mock.calls[1]![0], 'http://peach.test').searchParams;
+    const table = new URL(fetcher.mock.calls[2]![0], 'http://peach.test').searchParams;
     expect([first.get('limit'), first.get('offset'), first.has('count')]).toEqual(['48', '0', false]);
     expect([second.get('limit'), second.get('offset'), second.get('count')]).toEqual(['48', '48', '0']);
+    expect([table.get('limit'), table.get('offset'), table.has('count')]).toEqual(['48', '48', false]);
+    expect(counted.total).toBe(144);
   });
 
   it('第一页为空时再问一次整个馆藏是不是空的，回收站不问', async () => {

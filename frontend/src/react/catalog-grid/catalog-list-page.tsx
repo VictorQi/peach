@@ -71,7 +71,7 @@ export function CatalogListPage(props: CatalogGridProps) {
       query.delete('count');
       if (options.sort) query.set('sort', options.sort);
       if (options.dir) query.set('dir', options.dir);
-      return fetchCatalogPage(query.toString(), offset, options.limit, props.filters?.state === 'trash', signal);
+      return fetchCatalogPage(query.toString(), offset, options.limit, props.filters?.state === 'trash', signal, true);
     },
   });
   const items = result.data?.items || [];

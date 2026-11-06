@@ -5,7 +5,7 @@ import { $, api, esc, foldName, icon, isCatalogPath } from '../core';
 import { javTitleHtml } from '../core/jav-title';
 import { COVER_FRONT_RATIO } from './../appearance/layout';
 import { catalogState } from './catalog.js';
-import { managedTaken, openManagedRoute, updateManagedRoute } from './../history/managed';
+import { managedEntry, managedTaken, openManagedRoute, releaseManagedRoute, updateManagedRoute } from './../history/managed';
 import { loadingDotsHtml, noteHtml, stopAutoScroll, wireAutoScroll } from '../ui-kit';
 import { preferencesState, wireDrag } from './preferences.js';
 import { pushEntityPage } from './entity.js';
@@ -116,15 +116,21 @@ export function renderHomeFeed(){
   const display=catalogState.homeHasFeed!==false;
   if(managedTaken(host)){host.hidden=!display;updateManagedRoute(host,{display});return}
   prepareHomeFeed(host);
-  /* 这一行不随筛选变，判在不在场只看路径：换筛选换掉的是目录的代次，不该把它这一趟作废。 */
+  /* 普通筛选保留本轮新作；文件夹视图不展示它，离开后在途结果不能重新接管宿主。 */
   void openManagedRoute('feed-new',{host,display,revision:feedState.feedRevision,helpers:feedState.feedNewHelpers,actions:feedState.feedNewActions},
-    {container:host,isCurrent:()=>isFeedNewPath(location.pathname)});
+    {container:host,isCurrent:()=>isFeedNewPath(location.pathname)&&new URLSearchParams(location.search).get('browse')!=='folders'});
 }
 
 export function clearHomeFeed(){
   const host=$('#feedNew');
   host.querySelectorAll('.feednewrow').forEach(stopAutoScroll);
   host.hidden=true;
+  // 已画出的行由 React 按 display 收起并保留缓存，晚到的数据也不能重新撑开它。
+  if(managedEntry(host)){updateManagedRoute(host,{display:false});return}
+  // 首屏尚在预取时只撤销在途登记；壳留下的骨架还没有交给 React。
+  releaseManagedRoute(host);
+  host.removeAttribute('aria-busy');
+  host.replaceChildren();
 }
 
 export function refreshFeedRows(){

@@ -94,6 +94,55 @@ describe('等待反馈与文件夹模式', () => {
       } finally { await opened.close() }
     });
 
+    it(`${viewport.name} 首页新作仍在等待时进入文件夹，晚到内容不重开新作行，返回首页仍可查看`, { timeout: 60_000 }, async () => {
+      let release = () => {};
+      const held = new Promise<void>(resolve => { release = resolve });
+      let asked = () => {};
+      const requested = new Promise<void>(resolve => { asked = resolve });
+      const opened = await visit(browser, '/', viewport, async page => {
+        await page.addInitScript(() => localStorage.setItem('peach.home-feed.v1', '1'));
+        await page.route('**/api/entity/shapes', async route => {
+          const response = await route.fetch();
+          const data = await response.json();
+          await route.fulfill({ response, json: { ...data, home: { ...data.home, feed: true } } });
+        });
+        await page.route('**/api/feeds/discoveries?*', async route => {
+          asked();
+          await held;
+          await route.fulfill({ json: { ok: true, more: false, items: [
+            { id: 90001, code: 'EXM-001', title: '等待中的新作', has_cover: false },
+          ] } }).catch(() => undefined);
+        });
+      });
+      try {
+        const { page } = opened;
+        const feed = page.locator('#feedNew');
+        await feed.locator('[data-skeleton]').waitFor();
+        await requested;
+        const toggle = page.getByRole('button', { name: '文件夹模式', exact: true });
+        await toggle.click();
+        await page.waitForURL(url => url.searchParams.get('browse') === 'folders');
+        await page.locator('#catalogFolderHeader').waitFor();
+        // 新作请求仍被挂起，文件夹已经可用，不保留无主的等待态。
+        await settle(page);
+        assert.equal(await feed.isHidden(), true);
+        assert.equal(await feed.getAttribute('aria-busy'), null);
+        assert.equal(await feed.locator('[data-skeleton]').count(), 0);
+        const response = page.waitForResponse(reply => new URL(reply.url()).pathname === '/api/feeds/discoveries');
+        release();
+        await (await response).finished();
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        await settle(page);
+        assert.equal(await feed.isHidden(), true, '晚到的新作不能重新显示在文件夹模式里');
+        assert.equal(await feed.locator('[data-feed-id]:visible').count(), 0);
+        await toggle.click();
+        await page.waitForURL(url => !url.searchParams.has('browse'));
+        await feed.locator('[data-feed-id="90001"]').waitFor();
+        await settle(page);
+        assert.deepEqual(opened.problems, []);
+      } finally { release(); await opened.close() }
+    });
+
     it(`${viewport.name} 文件夹滚动条内缩且各滚动位置均在面板内`, async () => {
       const opened = await visit(browser, '/?browse=folders', viewport, async page => {
         const roots = Array.from({ length: 50 }, (_, i) => ({ id: `root-${i}`, name: `媒体目录 ${i}`,

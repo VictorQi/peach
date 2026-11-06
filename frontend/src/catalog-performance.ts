@@ -1,7 +1,7 @@
 /** 显式 ?measure=1 的本机取证：只在页面 DOM 中保留数字，不联网或持久保存。 */
 const PATHS = new Set(['/api/items', '/api/entity/shapes', '/api/settings', '/api/sources',
   '/api/facets', '/api/tops', '/api/index', '/api/tasks', '/api/result-updates',
-  '/cover', '/poster', '/thumb', '/entity-image', '/avatar', '/peach-app.js', '/peach-app.css']);
+  '/cover', '/poster', '/thumb', '/entity-image', '/avatar', '/dist/peach-app.js', '/dist/peach-app.css']);
 const rounded = (value: number) => Math.round(value * 100) / 100;
 
 export function resourceMeasurement(entry: PerformanceResourceTiming, origin: string) {

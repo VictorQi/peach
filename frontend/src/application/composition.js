@@ -44,7 +44,7 @@ if(location.pathname==='/'){
   if(!query.has('state')&&query.get('jav')!=='1')$('#catalogPageHeading').hidden=false;
 }
 /* 新作那一行按本机记着的结论随首屏一起铺骨架，卡片与列表两种显示方式都一样。 */
-if(isFeedNewPath(decodeURIComponent(location.pathname)))prepareHomeFeed($('#feedNew'));
+if(isFeedNewPath(decodeURIComponent(location.pathname))&&new URLSearchParams(location.search).get('browse')!=='folders')prepareHomeFeed($('#feedNew'));
 mountSidebar();
 compositionState.shellActions = {
   openSettings:section=>openSettings(section,true),

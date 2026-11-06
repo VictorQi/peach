@@ -38,14 +38,16 @@ export function catalogParams(filters: Readonly<Record<string, string>>, exclude
 export const catalogKey = (params: string, revision: number): QueryKey => ['catalog-grid', 'catalog', params, revision];
 export const entityKey = (key: string, revision: number): QueryKey => ['catalog-grid', 'entity', key, revision];
 
-/** 目录的一页。第一页为空、又不是回收站时，再问一次整个馆藏有没有东西。 */
+/** 目录的一页。网格续页省略总数，分页表格显式保留；首批空结果另查馆藏空态。 */
 export async function fetchCatalogPage(
   params: string, offset: number, batch: number, trash: boolean, signal: AbortSignal,
+  includeTotal = offset === 0,
 ): Promise<GridPage> {
   const query = new URLSearchParams(params);
   query.set('limit', String(batch));
   query.set('offset', String(offset));
-  if (offset) query.set('count', '0');
+  if (includeTotal) query.delete('count');
+  else query.set('count', '0');
   const page = await apiGet<MediaPage>(`/api/items?${query}`, signal);
   const result: GridPage = { ...page, items: page.items || [], offset };
   if (!offset && !result.items.length && !trash) {
