@@ -435,20 +435,15 @@ class WebContract:
         return path if path.is_file() and not has_javdb_source(path) else None
 
     def cover_index(self) -> dict[str, dict]:
-        """封面目录扫一遍的索引：casefold(归一番号) → 两份取景提示加封面版本。
+        """一次 scandir 收集封面路径与版本，来源和取景边车按当前页面需要读取。
 
-        值的形状是 `{"frame": 人脸中心或 None, "poster": 正封框或 None, "version": 修改时间}`。
-        两份边车各描述一件事，一次目录扫描一起收齐：`.face.json` 说脸在哪，
-        `.poster.json` 说正封那一块在哪。版本见 `cover_version`。
+        键是 casefold(归一番号)，值包含路径、修改时间及按需填入的 artwork 投影。
+        首屏只显示部分馆藏，不能为一张卡片先读取整个目录的数千份边车。
+        `/cover` 端点仍走 `cover_path()` 直读，取图不受索引影响。
 
-        卡片列表逐行问「有封面吗」「取景是多少」，一页 60 行就是 120+ 次 stat 加
-        读文件；封面目录一次 scandir 就覆盖全部番号。`/cover` 端点仍走 `cover_path()`
-        直读，取图不受索引影响。
-
-        索引只认封面目录的修改时间，不随账本提交失效，也不按时间过期：重建要读两千多份
-        边车，约一秒。封面与边车的写入方（`cover_artwork.install_cover`、
-        `jav_poster_crop.write_sidecar`）都先写临时文件再换名，新增、替换、删除都会改
-        目录时间。目录不存在时退回 `CACHE_TTL`。刚写过的目录见 `_directory_index`。
+        索引只认目录修改时间，不随账本提交失效。封面和边车均由写入方先写临时文件再
+        换名，新增、替换、删除会改目录时间，让按需投影一并失效。
+        目录不存在或仍在写入时的短时效见 `_directory_index`。
         """
         return self._directory_index("cover-index", self.cover_root, self._scan_cover_root,
                                      ttl=math.inf)
@@ -473,21 +468,15 @@ class WebContract:
                            version=(version, settling))
 
     def _scan_cover_root(self) -> dict[str, dict]:
-        """一次目录扫描同时收集封面存在性和两份 sidecar。目录不存在就是空索引。"""
+        """只扫描目录项，不打开未展示封面的来源、取景或裁剪文件。"""
         scanned: dict[str, dict] = {}
         try:
             with os.scandir(self.cover_root) as entries:
                 for entry in entries:
-                    if not entry.name.endswith(".jpg"):
+                    if not entry.name.endswith(".jpg") or not entry.is_file():
                         continue
-                    from .cover_artwork import has_javdb_source
-                    if has_javdb_source(Path(entry.path)):
-                        continue
-                    stem = entry.path[:-len(".jpg")]
                     scanned[entry.name[:-len(".jpg")].casefold()] = {
-                        "frame": self._cover_focus(stem + ".face.json"),
-                        "poster": self._poster_box(
-                            stem + jav_poster_crop.SIDECAR_SUFFIX),
+                        "path": entry.path,
                         "version": f"{entry.stat().st_mtime_ns:x}",
                     }
         except OSError:
@@ -528,10 +517,9 @@ class WebContract:
             return None
 
     def has_cover(self, code: str | None) -> bool:
-        key = normalise_code_key(code)
         # 索引的键是 casefold 过的：`is_file()` 在 Windows 与 macOS 的默认文件系统上
         # 大小写不敏感，改走索引不能顺手把这层容错丢了。
-        return bool(key) and key.casefold() in self.cover_index()
+        return self._cover_entry(code) is not None
 
     def cover_version(self, code: str | None) -> str:
         """这个番号封面的版本，页面拼进 `/cover` 的 `v=`；没有封面是空串。
@@ -713,7 +701,23 @@ class WebContract:
 
     def _cover_entry(self, code: str | None) -> dict | None:
         key = normalise_code_key(code)
-        return self.cover_index().get(key.casefold()) if key else None
+        entry = self.cover_index().get(key.casefold()) if key else None
+        if entry is None:
+            return None
+        with self.cache_lock:
+            if "artwork" in entry:
+                return entry["artwork"]
+        from .cover_artwork import has_javdb_source
+        path = Path(entry["path"])
+        stem = str(path.with_suffix(""))
+        artwork = None if has_javdb_source(path) else {
+            "frame": self._cover_focus(stem + ".face.json"),
+            "poster": self._poster_box(stem + jav_poster_crop.SIDECAR_SUFFIX),
+            "version": entry["version"],
+        }
+        # 文件读取留在锁外；目录变更后的新索引不会接收旧索引的迟到结果。
+        with self.cache_lock:
+            return entry.setdefault("artwork", artwork)
 
     def avatar_focus(self, kind: str, entity_id) -> dict | None:
         """实体图的取景提示：人脸中心换算成的 object-position，加上脸框的像素尺寸。

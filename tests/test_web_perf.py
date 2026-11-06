@@ -429,6 +429,37 @@ class CoverIndexTests(unittest.TestCase):
         self.assertTrue(self.contract.has_cover("ABC-003"))
         self.assertIsNone(self.contract.cover_frame("ABC-003"))
 
+    def test_first_card_reads_only_its_artwork_even_with_a_large_cover_directory(self):
+        from peach.cover_artwork import has_javdb_source
+
+        for number in range(1, 101):
+            (self.covers / f"ABC-{number:03}.jpg").write_bytes(b"jpg")
+            (self.covers / f"ABC-{number:03}.face.json").write_text(
+                json.dumps({"face": {"cy": 0.42}}), encoding="utf-8")
+        with (
+            patch("peach.cover_artwork.has_javdb_source", wraps=has_javdb_source) as sources,
+            patch.object(self.contract, "_cover_focus", wraps=self.contract._cover_focus) as faces,
+            patch.object(self.contract, "_poster_box", wraps=self.contract._poster_box) as posters,
+        ):
+            self.assertTrue(self.contract.has_cover("ABC-001"))
+            self.assertEqual(self.contract.cover_frame("ABC-001"), {"cy": 0.42})
+            self.assertIsNone(self.contract.poster_box("ABC-001"))
+            self.assertTrue(self.contract.cover_version("ABC-001"))
+            self.assertFalse(self.contract.has_cover("ZZZ-001"))
+            self.assertEqual([sources.call_count, faces.call_count, posters.call_count], [1, 1, 1])
+            self.assertEqual(sources.call_args.args[0], self.covers / "ABC-001.jpg")
+            self.assertTrue(self.contract.has_cover("ABC-002"))
+            self.assertEqual([sources.call_count, faces.call_count, posters.call_count], [2, 2, 2])
+
+    def test_lazy_artwork_still_excludes_disallowed_cover_sources(self):
+        (self.covers / "ABC-001.jpg").write_bytes(b"jpg")
+        (self.covers / "ABC-001.scraping.json").write_text(
+            json.dumps({"source": "javdb"}), encoding="utf-8")
+        self.assertFalse(self.contract.has_cover("ABC-001"))
+        self.assertIsNone(self.contract.cover_frame("ABC-001"))
+        self.assertIsNone(self.contract.poster_box("ABC-001"))
+        self.assertEqual(self.contract.cover_version("ABC-001"), "")
+
     def test_a_missing_cover_directory_is_an_empty_index_not_an_error(self):
         contract = WebContract(self.root / "ledger.db", cover_root=self.root / "absent")
         self.assertFalse(contract.has_cover("ABC-001"))
