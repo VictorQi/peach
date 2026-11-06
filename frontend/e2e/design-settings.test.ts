@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Browser, Page } from 'playwright-core';
 import { openFollowFeed } from './follow-fixture.ts';
+import { prepareKnownHomeFeed } from './home-feed-fixture.ts';
 import { requiredEnv, settle, visit, VIEWPORTS } from './harness.ts';
 import { openHome, openPanel, ORDER, PANEL, stubServer } from './settings-fixture.ts';
 import {
@@ -149,7 +150,7 @@ describe('设计决定：设置、口味、统计与筛选玻璃', () => {
      画出来（字段以 `src/peach/web_feeds.py` 为准）。夹具关了动效，自动滚动不起步，
      所以这里亲手滚它，发出的是同一种 scroll。 */
   it('390px 下侧栏两枚弹层不随别处那一排横滚收起，整页滚动才收', { timeout: 60_000 }, async () => {
-    const opened = await visit(browser, '/', MOBILE);
+    const opened = await visit(browser, '/', MOBILE, prepareKnownHomeFeed);
     try {
       const items = Array.from({ length: 12 }, (_, index) => ({
         id: index + 1, code: `DEMO-${String(index + 1).padStart(3, '0')}`, title: `演示新作 ${index + 1}`,

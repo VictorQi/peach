@@ -49,13 +49,13 @@ export async function launch(): Promise<Browser> {
   const args: string[] = [];
   if (process.platform === 'win32') {
     // 仅隔离 E2E：Chromium 572515601 的回环随机端口缺陷会返回 WSAENOBUFS 10055。
-    // 重复 --disable-features 会覆盖默认值；保留锁定 Playwright 1.64.1 的全部条目。
+    // 重复 --disable-features 会覆盖默认值；保留锁定 Playwright 1.65.0 的全部条目。
     // browser-launch.test.ts 从真实 Chrome 对照默认参数，依赖升级时检查此表漂移。
     const disabled = [
-      'AvoidUnnecessaryBeforeUnloadCheckSync', 'DestroyProfileOnBrowserClose', 'DialMediaRouteProvider',
-      'GlobalMediaControls', 'HttpsUpgrades', 'LensOverlay', 'MediaRouter', 'PaintHolding',
-      'ThirdPartyStoragePartitioning', 'BlockOriginHeaderModificationOnRedirect',
-      'AvoidCorsURLLoaderRestartOnRedirect', 'Translate', 'AutoDeElevate', 'OptimizationHints',
+      'AvoidUnnecessaryBeforeUnloadCheckSync', 'DestroyProfileOnBrowserClose',
+      'HttpsFirstBalancedModeAutoEnable', 'HttpsUpgrades', 'LensOverlay', 'MediaRouter', 'PaintHolding',
+      'PreconnectToSearch', 'ThirdPartyStoragePartitioning',
+      'AvoidCorsURLLoaderRestartOnRedirect', 'OptimizationHints',
       'NetworkTimeServiceQuerying', 'AimEnabled', 'msForceBrowserSignIn', 'msEdgeUpdateLaunchServicesPreferredVersion',
       'TcpPortRandomizationWin',
     ];

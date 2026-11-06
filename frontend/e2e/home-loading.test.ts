@@ -11,11 +11,30 @@ describe('首页加载结构',()=>{
   const context=await browser.newContext({viewport:{width:1280,height:900}});
   try{
    const page=await context.newPage();
-   await page.goto(requiredEnv('PEACH_E2E_ORIGIN')+'/?measure=1',{waitUntil:'domcontentloaded'});
-   await page.waitForFunction(()=>{
-    const text=document.getElementById('peach-performance')?.textContent;
-    return text&&JSON.parse(text).firstCoverDecodedMs!==null;
-   });
+   // 演示库有一部刻意无图的未整理视频；固定已有条目的顺序，首卡才有可解码的本地封面。
+   await page.goto(requiredEnv('PEACH_E2E_ORIGIN')+'/?measure=1&sort=seed&seed=1',{waitUntil:'domcontentloaded'});
+   try{
+    await page.waitForFunction(()=>{
+     const text=document.getElementById('peach-performance')?.textContent;
+     return text&&JSON.parse(text).firstCoverDecodedMs!==null;
+    });
+   }catch(error){
+    const diagnostic=await page.evaluate(()=>({
+     report:JSON.parse(document.getElementById('peach-performance')?.textContent||'null'),
+     viewport:{width:innerWidth,height:innerHeight},
+     cards:[...document.querySelectorAll<HTMLElement>('#grid [data-media-card]')].slice(0,6).map(card=>({
+      rect:card.getBoundingClientRect().toJSON(),visibility:getComputedStyle(card).visibility,
+      titleReady:!!card.querySelector('[data-media-title]')?.textContent?.trim(),
+      openDisabled:card.querySelector<HTMLButtonElement>('[data-media-open]')?.disabled,
+      images:[...card.querySelectorAll<HTMLImageElement>('[data-media-pic] img')].map(img=>({
+       hasCurrentSource:!!img.currentSrc,
+       complete:img.complete,naturalWidth:img.naturalWidth,naturalHeight:img.naturalHeight,
+       loading:img.loading,connected:img.isConnected,
+      })),
+     })),
+    })).catch(()=>null);
+    throw new Error(`首卡封面解码未完成：${JSON.stringify(diagnostic)}`,{cause:error});
+   }
    const report=JSON.parse((await page.locator('#peach-performance').textContent())!);
    assert.ok(report.firstCardReadyMs>=0);
    assert.ok(report.firstCoverDecodedMs>=report.firstCardReadyMs);

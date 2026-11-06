@@ -56,6 +56,10 @@ describe('扫描与采集控制', () => {
         { id: 'preview', label: '生成预览与封面', status: 'pending' }] };
     // 小窗挂在舞台里：进一次详情，那块节点才在。
     const opened = await visit(browser, `/assets/${itemId}`, viewport, async page => {
+      // 初读到的失败不自动弹窗；此布局用例保留用户此前主动展开该任务的选择。
+      await page.addInitScript(() => {
+        sessionStorage.setItem('peach.library-processing.visibility', 'shown:crowded-preview');
+      });
       await page.route('**/api/library-processing{,?*}', route => route.fulfill({ json: state }));
     });
     const { page } = opened;

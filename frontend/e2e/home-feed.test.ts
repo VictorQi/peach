@@ -9,6 +9,7 @@ import type { Browser, Page } from 'playwright-core';
 
 import { expectBody, launch, settle, visit, VIEWPORTS, type Visit } from './harness.ts';
 import { openPanel, stubServer, type Server } from './settings-fixture.ts';
+import { prepareKnownHomeFeed } from './home-feed-fixture.ts';
 
 const DESKTOP = VIEWPORTS.find((viewport) => !viewport.mobile)!;
 
@@ -22,7 +23,7 @@ interface Feed { reads: string[]; writes: Record<string, unknown>[]; items: numb
 
 /** 发现列表与两颗键的写接口各给一份桩；首页挂上桩之后重载一次，从第一趟取数起就接住。 */
 async function openHome(browser: Browser): Promise<Visit & { feed: Feed; server: Server }> {
-  const opened = await visit(browser, '/', DESKTOP);
+  const opened = await visit(browser, '/', DESKTOP, prepareKnownHomeFeed);
   const { page } = opened;
   const feed: Feed = { reads: [], writes: [], items: [1, 2] };
   await page.route(/\/api\/feeds\/discoveries\?/, (route) => {

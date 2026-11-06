@@ -20,6 +20,7 @@ import type { Browser, Locator, Page } from 'playwright-core';
 
 import { configurationBody, expectBody, layout, launch, requiredEnv, settle, unmanagedScrollers, visit, VIEWPORTS } from './harness.ts';
 import { mockJavDetail } from './jav-detail-fixture.ts';
+import { prepareKnownHomeFeed } from './home-feed-fixture.ts';
 
 interface Route {
   path: string;
@@ -303,7 +304,7 @@ describe('路由冒烟', () => {
   /* 首页那一行新作只属于目录页：从首页进统计页要收起保留，取数还没回来就离开的那一轮
      也不许回头把它画到管理区上。演示库没有订阅，新作由拦截的接口给一条。 */
   it('离开首页之后新作那一行收起，晚到的取数也不画回来', { timeout: 60_000 }, async () => {
-    const opened = await visit(browser, '/stats', DESKTOP);
+    const opened = await visit(browser, '/stats', DESKTOP, prepareKnownHomeFeed);
     try {
       let hold: Promise<void> | null = null;
       let served = 0;
@@ -372,7 +373,7 @@ describe('路由冒烟', () => {
   /* 还没装进本机的新作只有来源给的封套地址，没有边车。贴右缘的话 0.75 的卡片比正封宽，
      左边带进一条书脊；按正封先验比例 0.704 从右缘量回去才只剩正封。 */
   it('远程封套按正封先验比例切，不带进书脊', { timeout: 60_000 }, async () => {
-    const opened = await visit(browser, '/stats', DESKTOP);
+    const opened = await visit(browser, '/stats', DESKTOP, prepareKnownHomeFeed);
     try {
       await expectBody(opened.page, '/stats', [statsInventoryTab(opened.page)]);
       const remote = 'https://covers.example.test/sleeve.svg';
@@ -404,7 +405,7 @@ describe('路由冒烟', () => {
   /* 最近一轮取封面断在连接上、这一行又还有没封面的卡时，行上方挂一条 Note 指去采集页。
      一排「无封面」自己说不清是官方没出还是线路不通。 */
   it('封面连不上图片主机时新作那一行上方指去配连接方式', { timeout: 60_000 }, async () => {
-    const opened = await visit(browser, '/stats', DESKTOP);
+    const opened = await visit(browser, '/stats', DESKTOP, prepareKnownHomeFeed);
     try {
       await opened.page.route(/\/api\/feeds\/discoveries\?/, (route) => route.fulfill({ json: {
         ok: true, more: false, cover_network: 3, items: [{
