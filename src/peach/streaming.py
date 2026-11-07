@@ -183,6 +183,52 @@ class BufferedFileResponse(FileResponse):
 
     chunk_size = 1 << 20
 
+    async def _send_chunks(self, send: Send, start: int, end: int) -> None:
+        """首块至多 64 KiB，随后顺序读取并保留至多一个预读块。"""
+        pending = None
+        async with self._open_file() as file:
+            await file.seek(start)
+            try:
+                if start < end:
+                    pending = asyncio.create_task(file.read(min(self.chunk_size, 64 * 1024, end - start)))
+                while pending is not None:
+                    chunk = await pending
+                    pending = None
+                    start += len(chunk)
+                    more = bool(chunk) and start < end
+                    if more:
+                        pending = asyncio.create_task(file.read(min(self.chunk_size, end - start)))
+                    await send({'type': 'http.response.body', 'body': chunk, 'more_body': more})
+                if start == end == 0:
+                    await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
+            finally:
+                if pending is not None:
+                    pending.cancel()
+                    await asyncio.gather(pending, return_exceptions=True)
+
+    async def _handle_simple(self, send: Send, send_header_only: bool, send_pathsend: bool) -> None:
+        await send({'type': 'http.response.start', 'status': self.status_code, 'headers': self.raw_headers})
+        if send_header_only:
+            await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
+        elif send_pathsend:
+            await send({'type': 'http.response.pathsend', 'path': str(self.path)})
+        else:
+            await self._send_chunks(send, 0, int(self.headers['content-length']))
+
+    async def _handle_single_range(
+        self, send: Send, start: int, end: int, file_size: int, send_header_only: bool,
+    ) -> None:
+        from starlette.datastructures import MutableHeaders
+
+        headers = MutableHeaders(raw=list(self.raw_headers))
+        headers['content-range'] = f'bytes {start}-{end - 1}/{file_size}'
+        headers['content-length'] = str(end - start)
+        await send({'type': 'http.response.start', 'status': 206, 'headers': headers.raw})
+        if send_header_only:
+            await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
+        else:
+            await self._send_chunks(send, start, end)
+
     def _is_cancelled(self) -> bool:
         return False
 
@@ -370,4 +416,7 @@ class SplicedMp4Response(Response):
                 yield chunk
                 remaining -= len(chunk)
         finally:
-            handle.close()
+            # 关闭也可能等移动盘或 SMB；清理期间仍让事件循环服务其他请求。
+            close = asyncio.create_task(asyncio.to_thread(handle.close))
+            await _wait_for_tasks(close)
+            close.result()

@@ -57,13 +57,13 @@ describe('页面等待态的结构', () => {
       const held = new Promise<void>(resolve => { release = resolve });
       try {
         const page = await context.newPage();
+        const shape = { id: 90001, kind: 'performer', names: ['演示艺人'], parts: ['costars', 'facts', ...(jav ? ['jav'] : [])] };
         await page.route('**/performers/90001', async route => {
           const response = await route.fetch({ url: requiredEnv('PEACH_E2E_ORIGIN') + '/' });
-          await route.fulfill({ response });
+          await route.fulfill({ response, body: (await response.text()).replace('</head>',
+            `<script type="application/json" id="peach-entity-shape">${JSON.stringify(shape)}</script></head>`) });
         });
-        await page.route('**/api/entity/shapes', route => route.fulfill({ json: { ok: true, entities: [
-          { id: 90001, kind: 'performer', names: ['演示艺人'], parts: ['costars', 'facts', ...(jav ? ['jav'] : [])] },
-        ] } }));
+        await page.route('**/api/entity/shapes', route => route.fulfill({ json: { ok: true, entities: [shape] } }));
         await page.route(/\/api\/entity\?/, async route => { await held; await route.fulfill({ json: { error: '未取得' } }) });
         await page.goto(requiredEnv('PEACH_E2E_ORIGIN') + '/performers/90001', { waitUntil: 'load' });
         const root = page.locator('[data-skeleton="entity/performer"]');

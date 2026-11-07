@@ -324,7 +324,7 @@ const maintenance = () => {
   const idle = `<span class="self-start">${chip('6em')}</span>`;
   /* 数据上传与卸载两块服务端总会给；没有记录时也画上，只是不画随状态出现的提示。 */
   const given = (value: unknown) => shape ? on(value) : true;
-  const reporting = given(shape?.reporting) ? row('发送版本统计与错误诊断（推荐）', '上传版本、系统信息、故障类型、代码位置与发生次数。') + (on(shape?.reportingIdle) ? stack(idle, true) : '') : '';
+  const reporting = given(shape?.reporting) ? row('发送版本统计与错误诊断', '上传版本、系统信息、故障类型、代码位置与发生次数。') + (on(shape?.reportingIdle) ? stack(idle, true) : '') : '';
   const sharing = given(shape?.sharing) ? `<div class="border-t border-separator-border">${row('上传馆藏与口味明细', on(shape?.sharingNotice) ? text('12em') : '')}${on(shape?.sharingIdle) ? stack(idle, true) : ''}${footer(button('预览上传内容', 'secondary'))}</div>` : '';
   return section('检查更新', facts(releaseFacts) + (releaseNotes ? stack(help(text('50%')).repeat(releaseNotes), true) : ''),
     button('检查更新'), { aside: chip('4em'), status: text('5em') })

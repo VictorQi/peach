@@ -23,6 +23,19 @@ function mounted() {
 }
 
 describe('Video.js 10 播放会话', () => {
+  it('保存的音量与静音同时恢复到视频和媒体适配器', () => {
+    localStorage.setItem('peach.player.volume.v1', JSON.stringify({ volume: .25, muted: true }));
+    const { video, player, media } = mounted();
+    try {
+      expect(video.volume).toBe(.25); expect(video.muted).toBe(true);
+      expect((media as unknown as HTMLMediaElement).volume).toBe(.25);
+      expect((media as unknown as HTMLMediaElement).muted).toBe(true);
+      video.volume = .4; video.muted = false;
+      video.dispatchEvent(new Event('volumechange'));
+      expect(JSON.parse(localStorage.getItem('peach.player.volume.v1')!)).toEqual({ volume: .4, muted: false });
+    } finally { player.dispose(); localStorage.removeItem('peach.player.volume.v1') }
+  });
+
   it('普通 HTTP 的随机源为无 ID 的视频创建独立播放器', () => {
     vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) });
     const first = mounted().player;

@@ -1,17 +1,30 @@
 # Peach 智能体工作契约
 
 本文件是 Codex 与 Claude 共用的项目约定入口；项目与运行方式见 `README.md`。分层与清退见 `docs/adr/0015-agent-context-layering.md`，不要默认追加规则。
-公开文档与技能正文使用中文，技术标识保留英文；写作按用户级 `tech-doc-style-chinese` 和 `docs/WRITING.md`。回复简洁，结尾包含「我做了什么」「你需要做什么」。
+公开文档与技能正文使用中文，技术标识保留英文；写作按 `docs/WRITING.md`。回复简洁，结尾包含「我做了什么」「你需要做什么」。
+
+## 产品行为底线
+
+- 本 Fork 面向不同技术背景的普通消费者，以易用、可预期和用户控制为先；既有实现与上游偏好须按本节复核，详细判据见 `docs/adr/0134-consumer-control-and-privacy.md`。
+- 首次空页面提供可立即执行的核心动作，尽量在当前位置完成并显示结果；已有内容的用户直接浏览，首屏不等待可选统计、采集或帮助状态。不能用教程、设置跳转或更长的骨架等待替代这两种体验。
+- 基础功能不依赖用户理解 Cookie、Token 或后台实现；高级能力由用户按需配置，缺少凭据就跳过受限部分，失败留在对应来源或任务中，不弹窗索要、不反复催促。
+- 教程与功能介绍由用户主动打开；不得阻断正常使用、抢焦点，或在升级、刷新和返回页面时反复出现。升级信息与操作留在设置页，不常驻顶部催更。
+- 后台采集、升级补修和重试不得启动或操纵浏览器、切换其他应用或抢占桌面；需要交互的连接操作只能从用户主动操作的明确入口发起。
+- 授权按用途、数据、对象和持续范围成立；清楚说明用途的主动配置可覆盖后续同范围操作，不重复索要确认，也不得扩展为读取其他账号、浏览记录或外发数据的许可。
+- 默认最小处理与最小外发；可选联网、遥测和隐私数据使用须有明确选择及便捷关闭方式。升级和后台恢复不得扩大用户已启用的能力与范围。
+- 后台工作有可见状态、范围和停止入口；完成提示说明仍在运行的后续工作。暂停、取消和关闭选项须覆盖子任务及重启恢复，不把困难转嫁给用户。
+- 优先使用现有设置、原位状态和任务中心；只有用户主动操作且确需当场决定重要后果时才使用确认弹层，不用弹窗弥补不合理默认行为。
 
 ## 授权与保护
 
+- 只推进用户目标及其必要修复、验证和交付；发现周边问题登记到后续，不自动加入当前任务。发版不隐含全面依赖升级、跨平台发行或流程重构，依赖与平台范围按 `docs/TESTING.md`。
 - 在授权范围内完成修改、必要验证和失败修复，保留用户改动。真实 ledger 写入、不可逆删除、生产入口切换、凭据与私钥操作，须在同一轮取得明确授权。
 - 保留真实媒体、ledger 行、行为历史、凭据、网络与防火墙状态及无关长跑任务。测试使用临时数据库和临时媒体。
 - ledger 的 `asset.path` 保持 Windows 形态，由 `src/peach/platform.py` 读取转换；不得改写成 POSIX 路径或从 macOS 写 `asset.path`。
 - 代码判据确定、能按来源整批撤回的断言按 ADR-0052 落库；LLM 输出、打分、冲突与多候选只产生候选，不得自行标为 `approved`。真实写入执行 `peach-ledger-write`。
 - 编辑前核对 `git status`。代码任务使用 `scripts/agent_worktree.py create` 的隔离工作树，主检出负责集成；先读 `peach-worktree`。
 - 代码改动经 PR 交付，维护者自身也适用；issue 范围与交付流程见 `peach-issue-delivery`。
-- 服务、端口或重启操作先核对监听与进程归属。已提交且测试通过的适用代码用 `restart_windows_tray.py` 重启并核验；手动或 CLI 发起的主任务仍在跑时先问，其余任务均能续跑时直接重启。
+- 服务、端口或重启操作先核对监听与进程归属。已提交且测试通过的适用代码用 `scripts/restart_windows_tray.py` 重启并核验；手动或 CLI 发起的主任务仍在跑时先问，其余任务均能续跑时直接重启。
 - `agent_worktree.py prune --apply` 可回收入口判定安全的工作树；只按 PID 清理本任务创建的进程，保护活动工作树、忽略文件与其他任务。
 
 ## 术语
@@ -36,7 +49,7 @@
 | 长跑批处理、刮削、磁盘、流量、限流与续跑 | `.claude/skills/peach-batch-jobs/SKILL.md` |
 | JAV 封面获取、重探、来源比较与取景产物 | `.claude/skills/peach-jav-cover-workflow/SKILL.md` |
 | 模仿或对齐外部产品的界面与行为 | `.claude/skills/peach-reference-evidence/SKILL.md` |
-| 界面、文案、控件或预览；同时完整读取 `~/.codex/skills/peach-ui-consistency/SKILL.md` | `.claude/skills/peach-web-ui/SKILL.md` |
+| 界面、文案、控件或预览 | `.claude/skills/peach-web-ui/SKILL.md` |
 | macOS、路径、挂载、双机交接或 Git 状态异常 | `.claude/skills/peach-cross-platform/SKILL.md` |
 | shell 命令、多行内容、路径与临时目录 | `.claude/skills/peach-shell-commands/SKILL.md` |
 | 智能体规则、技能、入口与预算维护 | `.claude/skills/peach-context-rules/SKILL.md` |

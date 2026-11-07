@@ -28,6 +28,15 @@ RECENT_LIMIT = 20
 NO_TABLE = "数据库缺少任务记录表，请按运行文档检查备份后执行 peach migrate upgrade --yes"
 
 
+def q_result_updates(contract, _args):
+    """常驻刷新只读取结果版本和活动状态，不组装任务列表与资源统计。"""
+    try:
+        busy = any(contract.task_runs.query(status=status, limit=1) for status in ACTIVE_STATUSES)
+    except sqlite3.OperationalError:
+        busy = False
+    return {"ok": True, "result_versions": result_versions(contract), "busy": busy}
+
+
 def q_tasks(contract, args):
     try:
         return _tasks(contract, args)
@@ -118,8 +127,11 @@ def q_task(contract, run_id):
 def _payload_reader(contract):
     """同一轮的完成检查点可补充摘要，读取不回写任务记录。"""
     from .job_recovery import read
+    from .task_control import projection_reader
 
     saved = {}
+    project = projection_reader(contract.task_runs)
+    families = contract.task_runs.active_families()
     from .task_resources import Monitor
     if not hasattr(contract, 'task_resource_monitor'):
         with contract.cache_lock:
@@ -128,13 +140,14 @@ def _payload_reader(contract):
 
     def payload(row):
         result = row.payload()
-        from .task_control import projection
-        control = projection(contract.task_runs, row)
-        if control is not None:
-            result['control'] = control
-        resources = contract.task_resource_monitor.for_run(row)
-        if resources is not None:
-            result['resources'] = resources
+        if row.id in families:
+            family = [{'id': run_id, 'status': status} for run_id, status in families[row.id]]
+            control = project(row, descendants_active=any(member['id'] != row.id for member in family))
+            if control is not None:
+                result['control'] = control
+            resources = contract.task_resource_monitor.for_run(row, family)
+            if resources is not None:
+                result['resources'] = resources
         if row.task_key not in RESULT_FIELDS or row.status not in ('succeeded', 'failed'):
             return result
         if all(field in row.result_summary for field in RESULT_FIELDS[row.task_key]):

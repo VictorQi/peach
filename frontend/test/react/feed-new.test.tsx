@@ -148,6 +148,22 @@ function Harness(initial: FeedNewProps) {
 }
 
 describe('换代次', () => {
+  it('未预留的新作行只记录结果，下次进页启用时使用已取得内容', async () => {
+    const fetcher = serve([1]);
+    const given = props({ display: false });
+    await prefetchFeedNew(given);
+    await mountRoot(<Harness {...given} />);
+    await settle();
+    expect(given.host.hidden).toBe(true);
+    expect(given.host.querySelector('[data-feed-id]')).toBeNull();
+    expect(given.actions.settled).toHaveBeenLastCalledWith(true);
+    expect(given.helpers.wireFeedRow).not.toHaveBeenCalled();
+    await act(async () => push({ display: true }));
+    await settle();
+    expect(given.host.hidden).toBe(false);
+    expect(given.host.querySelector('[data-feed-id]')).not.toBeNull();
+    expect(reads(fetcher)).toHaveLength(1);
+  });
   it('壳推来新的代次就重取；代次不变的补丁不发请求', async () => {
     const fetcher = serve([1], [1, 3]);
     const given = props();

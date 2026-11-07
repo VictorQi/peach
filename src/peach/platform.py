@@ -110,6 +110,10 @@ def resolve_location(
     return location, tail
 
 
+#: Win32 会把掉线映射成 PermissionError 或 FileNotFoundError，先按设备与网络错误码识别。
+_UNREACHABLE_WINERRORS = frozenset({21, 51, 53, 55, 59, 64, 67, 1167, 1222, 1231})
+
+
 def root_status(root: Path) -> str:
     """以目录首条读取判断挂载状态；空目录可读也算在线。"""
     try:
@@ -119,13 +123,15 @@ def root_status(root: Path) -> str:
             return 'ok'
         with os.scandir(root) as entries:
             next(iter(entries), None)
-    except PermissionError:
-        return "permission_denied"
-    except FileNotFoundError:
-        return "missing"
-    except NotADirectoryError:
-        return "not_directory"
-    except OSError:
+    except OSError as error:
+        if getattr(error, "winerror", None) in _UNREACHABLE_WINERRORS:
+            return "unavailable"
+        if isinstance(error, PermissionError):
+            return "permission_denied"
+        if isinstance(error, FileNotFoundError):
+            return "missing"
+        if isinstance(error, NotADirectoryError):
+            return "not_directory"
         return "unavailable"
     return "ok"
 

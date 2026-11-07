@@ -38,7 +38,7 @@ from contextlib import closing
 from pathlib import Path
 from unittest import mock
 
-from peach import follow_assets, link_marks, scraping_access, settings_file, taste_history
+from peach import follow_assets, link_marks, media_configuration, media_identity, scraping_access, settings_file, taste_history
 from peach import platform as peach_platform
 from peach.config import FFMPEG_DIR
 from peach.ffmpeg import FFmpegResolver
@@ -89,6 +89,7 @@ TIMING_SENSITIVE_SUITES = frozenset({
     "e2e/design-cards.test.ts",     # 紧凑密度切换的即时样式
     "e2e/design-follow-alignment.test.ts",  # 等待标题与内容标题的替换
 })
+LIBRARY_WRITER_SUITES = frozenset({"e2e/library-import.test.ts"})
 
 
 def e2e_concurrency(override: str = "") -> int:
@@ -138,6 +139,8 @@ def e2e_pools(frontend: Path, concurrency: int, selected: tuple[str, ...] = (),
             raise AssertionError(f"浏览器用例不存在：{sorted(missing)}")
         files = tuple(path for path in files if path in selected)
     files = tuple(path for path in files if path != SETUP_SUITE)
+    writers = tuple(path for path in files if path in LIBRARY_WRITER_SUITES)
+    files = tuple(path for path in files if path not in writers)
     if concurrency == 1:
         design = tuple(path for path in files if path.startswith("e2e/design-"))
         routes = tuple(path for path in files if path == "e2e/smoke.test.ts")
@@ -149,7 +152,7 @@ def e2e_pools(frontend: Path, concurrency: int, selected: tuple[str, ...] = (),
         shared = tuple(sorted((path for path in files if path not in sensitive),
                               key=lambda path: (-seconds.get(path, E2E_DEFAULT_SECONDS), path)))
         pools = ((shared, concurrency), (sensitive, 1))
-    return tuple((group, lanes) for group, lanes in pools if group)
+    return tuple((group, lanes) for group, lanes in (*pools, (writers, 1)) if group)
 
 
 def e2e_log_name(path: str) -> str:
@@ -225,10 +228,14 @@ class WebE2ESmokeTests(unittest.TestCase):
         cls.port = free_port()
         config = settings_file.PeachConfig(
             data, data / settings_file.SETTINGS_FILENAME, present=True, data_root_found=True,
-            locations={"local": (str(media),)},
             server=settings_file.ServerSettings(port=cls.port),
         )
+        sources = media_configuration.prepare_sources([{'location': 'local', 'path': str(media), 'cost': 'free'}],
+                                                       windows=os.name == 'nt', config=config)
+        config = media_identity.configure_sources(config, sources, windows=os.name == 'nt')
         settings_file.write(config)
+        cls.import_root = cls.root / 'import-media'
+        cls.import_sample = next(media.rglob('*.mp4'))
         generated = config.directory("generated")
         # 路由冒烟只验页面与站标端点的衔接；取图算法另有 mock 契约，不让这轮布局测试依赖外网。
         # 站标与来源图标两处缓存都预先填上同一张图：缓存为空时 `/site-mark` 与 `/source-icon`
@@ -254,8 +261,13 @@ class WebE2ESmokeTests(unittest.TestCase):
             cached.parent.mkdir(parents=True, exist_ok=True)
             cached.write_bytes(mark)
         seed_metadata_cache(media, config.directory('sources'))
-        result = process_library(config, cls.db, generated, generated / "covers",
-                                 provider_factory=refuse_network)
+        with mock.patch.dict(os.environ, PEACH_DATA_ROOT=str(data)):
+            settings_file.reset_cache()
+            try:
+                result = process_library(config, cls.db, generated, generated / "covers",
+                                         provider_factory=refuse_network)
+            finally:
+                settings_file.reset_cache()
         if result["status"] != "complete":
             raise AssertionError(f"演示库 process 没有完成：{result}")
         # 普通页面用已看过邀请的账本；首次邀请由教程专用用例独立验证。
@@ -269,7 +281,7 @@ class WebE2ESmokeTests(unittest.TestCase):
 
     @classmethod
     def _start_server(cls):
-        env = dict(os.environ, PEACH_DATA_ROOT=str(cls.data), PYTHONIOENCODING="utf-8")
+        env = dict(os.environ, PEACH_DATA_ROOT=str(cls.data), PYTHONIOENCODING="utf-8", PEACH_TRAY_MANAGED='1')
         cls.log = (cls.root / "serve.log").open("w", encoding="utf-8")
         cls.server = subprocess.Popen(
             [sys.executable, "-X", "utf8", "-m", "peach", "serve", "--host", "127.0.0.1",
@@ -338,7 +350,8 @@ class WebE2ESmokeTests(unittest.TestCase):
 
     def test_every_route_holds_the_layout_and_runtime_invariants(self):
         env = dict(os.environ, PEACH_E2E_ORIGIN=self.origin, PEACH_E2E_ITEM=str(self.item), PEACH_E2E_FFMPEG=self.ffmpeg,
-                   PEACH_E2E_CHROME=self.chrome, PEACH_E2E_NET_LOG_DIR=str(BROWSER_LOGS / "network"))
+                   PEACH_E2E_CHROME=self.chrome, PEACH_E2E_NET_LOG_DIR=str(BROWSER_LOGS / "network"),
+                   PEACH_E2E_IMPORT_ROOT=str(self.import_root), PEACH_E2E_IMPORT_SAMPLE=str(self.import_sample))
         BROWSER_LOGS.mkdir(parents=True, exist_ok=True)
         for pattern in ("batch-*.tap", "e2e-*.tap"):
             for stale in BROWSER_LOGS.glob(pattern):
@@ -571,6 +584,14 @@ class MissingPrerequisiteTests(unittest.TestCase):
                                    "e2e/nested/feature.test.ts", "e2e/sidebar-motion.test.ts",
                                    "e2e/smoke.test.ts"), 1),))
 
+    def test_library_writes_run_alone_after_all_shared_library_checks(self):
+        for concurrency in (1, 4):
+            with self.subTest(concurrency=concurrency):
+                paths = (*self.PATHS, "e2e/library-import.test.ts")
+                pools = self.pools_for(concurrency, paths=paths)
+                self.assertEqual(pools[-1], (("e2e/library-import.test.ts",), 1))
+                self.assertCountEqual(tuple(path for group, _ in pools for path in group), paths)
+
     def test_large_groups_stay_in_one_pool_and_run_each_file_once(self):
         paths = (tuple(f"e2e/design-{index:02}.test.ts" for index in range(13))
                  + tuple(f"e2e/feature-{index:02}.test.ts" for index in range(25))
@@ -628,6 +649,7 @@ class MissingPrerequisiteTests(unittest.TestCase):
             case = WebE2ESmokeTests("test_every_route_holds_the_layout_and_runtime_invariants")
             case.origin, case.item, case.chrome, case.node = "http://fixture", 1, "chrome", "node"
             case.ffmpeg = "ffmpeg"
+            case.import_root, case.import_sample = Path("fixture-import"), Path("fixture-sample.mp4")
             files = ("e2e/first.test.ts", "e2e/second.test.ts", "e2e/third.test.ts", "e2e/fourth.test.ts")
             calls = []
 

@@ -9,7 +9,7 @@
  * 内自动取下一页，点它等于手动取；失败在哨兵后面留一条可重试的 Note，之后只有手动才重试。 */
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useInfiniteQuery, type InfiniteData, type QueryKey } from '@tanstack/react-query';
-import { mixFace as mixArtwork, mixLabel, relayoutCovers, type Artwork } from '@peach/card-art';
+import { cardArtwork, frameArtwork, mixFace as mixArtwork, mixLabel, relayoutCovers, type Artwork } from '@peach/card-art';
 import { requestErrorMessage } from '@peach/legacy/core';
 import { LOAD_MORE_STATUS, loadingDotsHtml } from '@peach/legacy/ui';
 
@@ -30,6 +30,7 @@ import { LibraryCompletionPrompt, missingPreviewIds } from '../library-processin
 import { useCatalogView } from './catalog-view';
 import { queryClient } from '../query';
 import { CatalogListPage } from './catalog-list-page';
+import { LibraryImportPanel } from './library-import-panel';
 
 export function CatalogGridPage(props: CatalogGridProps) {
   const view = useCatalogView();
@@ -113,6 +114,7 @@ function GridBody(props: CatalogGridProps) {
   }), [result.data, props.groupCollapse, props.mix, trash, layout.javImage]);
   const shown = tiles.reduce((count, tile) => count + (tile.kind === 'card' ? 1 : 0), 0);
   const total = Number(result.data?.pages[0]?.total || 0);
+  const libraryEmpty = !entity && !trash && !!result.data?.pages[0]?.libraryEmpty;
   const finiteWall = entity || finiteWallFilters(props.filters);
   const wallAvailable = !trash && !props.selectMode && !!actions.wallPlayer && !!actions.wallDetails;
   const wallItems = tiles.flatMap(tile => tile.kind === 'card' && wallHasCover(tile.item) ? [tile.item] : []);
@@ -152,10 +154,14 @@ function GridBody(props: CatalogGridProps) {
     if (next.isFetchNextPageError) throw next.error;
   }, [result.fetchNextPage]);
 
+  const firstPicture = tiles.find(tile => tile.kind === 'card'
+    && (cardRatio(tile.item, 'grid', layout) === 9 / 16 && tile.item.is_jav
+      ? frameArtwork(tile.item, false)
+      : cardArtwork(tile.item, layout.active && tile.item.is_jav ? layout.size : 'small', false, layout.javImage)).html);
   const card = (tile: Tile) => tile.kind === 'mix'
     ? <HomeMix key={`mix:${tile.seed.id}`} seed={tile.seed} layout={layout} helpers={helpers} actions={actions} />
     : (
-      <MediaCard key={tile.item.id} item={tile.item} grouped={props.groupCollapse !== false}
+      <MediaCard key={tile.item.id} item={tile.item} grouped={props.groupCollapse !== false} priority={tile === firstPicture}
         variant={trash && tile.item.medium && tile.item.medium !== 'video' ? 'resource' : 'grid'} layout={layout}
         selected={props.selected.has(tile.item.id)} selectMode={props.selectMode} seekSeconds={props.seekSeconds}
         helpers={helpers} actions={actions} onOpen={trash ? openResource : open} />
@@ -174,6 +180,7 @@ function GridBody(props: CatalogGridProps) {
         catalogEmpty: props.emptyHtml?.({ trash, libraryEmpty: !!result.data.pages[0]?.libraryEmpty }),
       }) : ''}
       loadMore={loadNext} actions={actions} helpers={helpers} javImage={layout.javImage} />;
+    if (libraryEmpty) return null;
     if (result.isPending) return null;
     if (!result.data) {
       return <RetryNote message={requestErrorMessage(result.error)} onRetry={() => void result.refetch()} />;
@@ -202,6 +209,7 @@ function GridBody(props: CatalogGridProps) {
 
   return (
     <div ref={body} data-media-body="" aria-busy={result.isFetching && !result.isFetchingNextPage}>
+      {!entity && !trash ? <LibraryImportPanel empty={libraryEmpty} onContent={() => void result.refetch()} /> : null}
       <LibraryCompletionPrompt assetIds={missing} />
       {props.wall ? content() : <SkeletonContent pending={result.isPending} skeletonHtml={props.skeletonHtml}>
         {content()}

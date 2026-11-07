@@ -7,7 +7,6 @@ import { beginPlayerGuidePreview } from '../player/guide-preview';
 import type { GuideStep } from './guide-catalog';
 export interface GuidePopoverProps {
   step: GuideStep; position: number; total: number; missing: boolean;
-  invitation?: boolean;
   next(skipped?: boolean): void; previous(): void; close(): void;
 }
 
@@ -53,7 +52,6 @@ export interface GuideSession {
 export function createGuideSession(options: {
   mountPopover(wrapper: HTMLElement, arrow: HTMLElement, props: GuidePopoverProps): () => void;
   navigate(path: string): void; next(skipped?: boolean): void; previous(): void; close(): void; leave?(): void;
-  invitation?: boolean;
 }): GuideSession {
   let active: Driver | null = null;
   let controller: AbortController | null = null;
@@ -85,12 +83,9 @@ export function createGuideSession(options: {
     if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); options.close(); return }
     const panel = document.querySelector<HTMLElement>('.peach-guide-popover');
     if (!panel) return;
-    const onEntry = options.invitation && event.target instanceof Element && event.target.closest('#tutorialBtn');
-    if (!panel.contains(event.target as Node) && !onEntry && event.key !== 'Tab') { event.preventDefault(); event.stopImmediatePropagation(); return }
+    if (!panel.contains(event.target as Node) && event.key !== 'Tab') { event.preventDefault(); event.stopImmediatePropagation(); return }
     if (event.key !== 'Tab') return;
     const buttons = [...panel.querySelectorAll<HTMLElement>('button:not([disabled]), summary, a[href], [tabindex="0"]')].filter(node => node.offsetWidth && node.offsetHeight);
-    const entry = options.invitation ? document.getElementById('tutorialBtn') : null;
-    if (entry) buttons.unshift(entry);
     const at = buttons.indexOf(document.activeElement as HTMLElement);
     event.preventDefault(); event.stopImmediatePropagation();
     buttons[(at + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length]?.focus();
@@ -133,7 +128,7 @@ export function createGuideSession(options: {
       if (disposed || current.signal.aborted) return;
       let missing = !element;
       active = driver({
-        animate: false, smoothScroll: false, disableActiveInteraction: !options.invitation, allowKeyboardControl: false,
+        animate: false, smoothScroll: false, disableActiveInteraction: true, allowKeyboardControl: false,
         allowClose: true, overlayClickBehavior: () => options.close(), stagePadding: 6,
         stageRadius: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--control-radius')) || 8,
         popoverClass: 'peach-react peach-guide-popover', showButtons: [],

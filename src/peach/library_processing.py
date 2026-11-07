@@ -46,6 +46,7 @@ from .fsutil import atomic_write_text
 from . import artifact_rules, upgrade_rules
 from .ffmpeg import FFmpegResolver
 from .jobs import DiskGuard, JobDeferred, JobPolicyError
+from .task_control import Cancelled
 from .media_probe import probe_unmeasured
 from .media_sources import cost_for
 from .media_processing_policy import metadata_only
@@ -141,7 +142,7 @@ def _extended(deadline, extra):
 
 
 def _excused(provider):
-    """provider 累计等人点验证的秒数（`LibraryMetadataProvider.excused`）；没有这一项的 provider 按 0 算。"""
+    """provider 的工具准备耗时；没有这一项的 provider 按 0 算。"""
     value = getattr(provider, 'excused', 0.0)
     return value if isinstance(value, (int, float)) else 0.0
 
@@ -342,18 +343,9 @@ class LibraryMetadataProvider:
                             max_bytes=MAX_SOURCE_BYTES, max_seconds=MAX_SOURCE_SECONDS),
             2.0, limiter=SOURCE_LIMITER)
 
-    #: 由本机浏览器过验证的来源累计等人点验证的秒数（`_excuse`）。调用方拿它前后相减，把这段时间
-    #: 从单项动作预算里扣掉：一个站第一次弹验证窗口时，那一问要等 `min(40, timeout) + 120` 秒，
-    #: 超过一部片 90 秒的资料预算，不扣掉的话这部片会被记成「预算内未取得」（ADR-0065 第二条）。
+    #: 首次准备采集工具的耗时不计入单项资料请求预算。
     excused = 0.0
 
-    def _excuse(self, source, started):
-        """`source` 是浏览器来源、这一问超过了 `BROWSER_REQUEST_TIMEOUT`：超出的那段按等人点验证算。"""
-        from .jav_cover_fetch import BROWSER_REQUEST_TIMEOUT
-        from .scraping_access import SOURCES
-        spent = time.monotonic() - started
-        if SOURCES.get(source, {}).get('browser') and spent > BROWSER_REQUEST_TIMEOUT:
-            self.excused += spent - BROWSER_REQUEST_TIMEOUT
 
     def amane(self, code, *, deadline=None, route=()):
         """经 amane 桥问 `route` 里那几站，一次子进程并发问完，返回 `[(来源, 资料)]`。
@@ -475,11 +467,17 @@ class LibraryMetadataProvider:
             raise _again(cache[code])
         return [*have.items(), *((source, payload) for source, payload in cache[code] if source not in have)]
 
+    def community_problems(self, code):
+        """`community` 问这个番号时没问成的几家 `[(原因, 是否冷却)]`，别的几家照常答上时也留着。
+
+        封面那一步据此不下「没有」的结论（#342）：JavBus 断线、javdb 答上时，只剩 javdb 带水印的那张，
+        印证不了也用不了，可 JavBus 那张下次可能就取到了。"""
+        return list(self.__dict__.get('_community_problems', {}).get(code, ()))
+
     def _ask_community(self, code, sources, deadline, received):
         """逐家问 `sources`，交出答上的 `[(来源, 资料)]`，或一个待缓存再抛的异常（见 `community`）。"""
-        from .jav_cover_fetch import Unavailable
-        from .scraping_access import SourcePaused
-        found, problems, said_no, held = [], [], [], 0
+        found, problems, said_no = [], [], []
+        self.__dict__.setdefault('_community_problems', {})[code] = problems
         for source in sources:
             try:
                 payload = self.site(source, code, deadline=deadline)
@@ -492,15 +490,15 @@ class LibraryMetadataProvider:
                 if is_missing(error):
                     said_no.append(source)
                     continue
-                held += source_paused(error)
                 text = describe_failure(error)
-                problems.append(text if text.startswith(SOURCE_LABELS[source]) else f'{SOURCE_LABELS[source]}：{text}')
+                problems.append((text if text.startswith(SOURCE_LABELS[source]) else f'{SOURCE_LABELS[source]}：{text}',
+                                 source_paused(error)))
                 continue
             found.append((source, payload))
             received([(source, payload)])
         if found or not problems:
             return found or _said_no('社区来源都没有这个番号', said_no)
-        return (SourcePaused if held == len(problems) else Unavailable)('；'.join(problems))
+        return _unreached(problems)
 
     def fc2(self, code, *, deadline=None, route=None, covers=False, required=(), known=(), received=lambda found: None):
         """FC2 自己那一页，下架了就依次问几个存档站；返回沿路答上的每一档 `[(来源, 资料)]`。
@@ -511,8 +509,8 @@ class LibraryMetadataProvider:
         Product 就归 `not_found`——那不是抓取失败，是这部片在站上没有了。本地这批没封面的 FC2 多数是
         这种，所以接着问 fc2cmadb：它留着下架作品的标题、卖家、标签与封面原图。再往下是 FC2PPV-DB
         （女优、卖家、販売日与流出标记，不给封面）与 JAVten（日文标题、标签与存储原件地址），这两站
-        在 Cloudflare 验证后面，经本机浏览器过验证（ADR-0065）；验证没过就整站冷却，链照常往下走。
-        浏览器那一问里等人点验证的时间记进 `excused`，不算进这部片的动作预算。最后才落到 JavArchive，
+        需要可用的站点会话；验证页只记录未取得并冷却，链照常往下走。
+        验证或访问失败按来源记录并继续下一站。最后才落到 JavArchive，
         那一档只给标题和一张转存封面，比官方原图差一档（2026-09-22 实测 `FC2-PPV-4137487`
         在 fc2cmadb 是 404，JavArchive 上有）；它的每一条转存各交一份（`records()`）。几处都
         没有才按 `NotFound` 交出去，记进「没有」的记忆，一周内不再问。
@@ -547,7 +545,6 @@ class LibraryMetadataProvider:
                                                 and _lacks_performers(required, answered)):
                 break
             state['asked'].add(name)
-            started = time.monotonic()
             additions = []
             try:
                 session = Session(self.transport, _extended(deadline, self.excused - mark))
@@ -563,8 +560,6 @@ class LibraryMetadataProvider:
                 _raise_task_failure(error)
                 if not is_missing(error):
                     state['problems'].append(error)
-            finally:
-                self._excuse(name, started)
             received(additions)
         if state['found'] or known:
             return state['found']
@@ -694,6 +689,7 @@ class LibraryMetadataProvider:
                 answers = self.community(code, deadline=_extended(deadline, self.excused - mark), absent=absent,
                                          known=[(name, payload) for name, payload in snapshots
                                                 if name in metadata_routes.COMMUNITY_STAGE])
+                problems += self.community_problems(code)
                 *picked, verified_by = verified_cover(self.transport, code, answers,
                                                       reference=official, siblings=siblings if official else (),
                                                       deadline=_extended(deadline, self.excused - mark))
@@ -1697,7 +1693,6 @@ class _RemoteSession:
                 if source != 'fc2':
                     continue
             try:
-                # 浏览器来源等人点验证的那段不算进这部片的预算（`LibraryMetadataProvider.excused`）。
                 update(current_source={'key': source, 'label': PROVIDER_NAMES.get(source, source)})
                 found = self._ask(source, code, members, cached, required=required, evidence=evidence,
                                   deadline=_extended(deadline, _excused(self._provider) - mark),
@@ -2788,11 +2783,11 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
         remote = _RemoteSession(config, provider_factory, _MissCache(misses_path(config)),
                                 retrying=retrying, recheck_existing=recheck_existing, routes=routes)
         flush_candidates = lambda force=False: None
+        locations = config.locations if location == 'configured' else {location: config.locations[location]}
 
         try:
             guard = DiskGuard(config.data_root, 1)
             guard.check(force=True)
-            locations = config.locations if location == 'configured' else {location: config.locations[location]}
             sources = _scan_sources(config, db_path, locations=locations, asset_ids=scope_ids,
                                     stage=stage, guard=guard, update=update, issue=issue,
                                     scan_checkpoints=state['scan_checkpoints'],
@@ -2811,6 +2806,8 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
             if incremental and not scope_ids:
                 _settle_collection_state(state, {}, [], update)
                 return state
+            from .library_new_assets import snapshot
+            processing_versions = snapshot(db_path, scope_ids)
             _prepare_processing_media(config, db_path, judgement_database, locations, sources,
                                       scope_ids, protected_ids, stage, state, update)
             finish_step('inspect')
@@ -2968,9 +2965,14 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
                 people=_people_allowed(config))
             finish_step('collect')
             _settle_collection_state(state, summary, rows, update)
-        except Exception:
+        except (Exception, Cancelled) as error:
+            if isinstance(error, Cancelled) or (control is not None and control.cancelled):
+                from .library_new_assets import cancel_scope
+                cancel_scope(db_path, (root for roots in locations.values() for root in roots), scope_ids)
             state.update(status='failed', outcome='interrupted', error='处理被中断。核对媒体目录后重试。', completed_at=time.time())
             state.update(interrupted_state(control))
+            if isinstance(error, Cancelled):
+                state.update(status='cancelled', outcome='cancelled', stage='已停止', error='')
             state['traffic'] = traffic.snapshot(finished=state.get('status') in ('failed', 'cancelled'))
             _save(path, state)
             raise
@@ -2978,7 +2980,6 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
             # 被打断也把已经攒下的候选写全：文件里要么是上一份完整的，要么是这一份完整的。
             flush_candidates(force=True)
             remote.close()
-        from .library_new_assets import remember
-        unfinished = set(state['retryable_asset_ids'])
-        remember(db_path, completed=[row['id'] for row in rows if row['id'] not in unfinished])
+        from .library_new_assets import finish
+        finish(db_path, processing_versions, completed=[row['id'] for row in rows])
         return state

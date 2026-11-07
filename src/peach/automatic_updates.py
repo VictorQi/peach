@@ -34,7 +34,8 @@ class AutomaticUpdates:
         data = self.read()
         result = data.get("result")
         if isinstance(result, dict):
-            if result.get("current_version") == release_updates.snapshot()["current_version"]:
+            if (result.get("current_version") == release_updates.snapshot()["current_version"]
+                    and result.get("publisher") == release_updates.REPOSITORY):
                 data["result"] = dict(result, checked_at=data.get("checked_at"))
             else:
                 data.pop("result")

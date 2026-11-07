@@ -18,7 +18,7 @@ JACKET = "https://pics.dmm.co.jp/digital/video/118abw00358/118abw00358pl.jpg"
 DETAIL = {"content_id": "118abw358", "dvd_id": "ABW-358", "title": "Remu Style", "release_date": "2023-05-26",
           "runtime_minutes": 210, "director": "Charlie Nakata", "maker": {"name": "Prestige"},
           "label": {"name": "ABSOLUTELY WONDERFUL"}, "series": {"name": "HOW TO SEX"},
-          "images": {"jacket_image": JACKET},
+          "images": {"jacket_image": {"large": " ", "large2": JACKET}},
           "actresses": [{"name": "Remu Suzumori"}], "categories": [{"name": "Slender"}, {"name": "Variety"}]}
 COMBINED = {"content_id": "118abw358", "title_ja": "涼森れむ流", "series_name_ja": "保健室の先生",
             "label_name_ja": "ABSOLUTELY WONDERFUL", "maker_name_ja": "プレステージ",
@@ -81,6 +81,21 @@ class R18DevSourceTests(unittest.TestCase):
         self.assertEqual(record.performers, ({"japanese_name": "Remu Suzumori"},))
         self.assertEqual(record.tags, ("Slender", "Variety"))
         self.assertEqual((record.extra["content_id"], record.extra["raw"]), ("118abw358", DETAIL))
+
+    def test_jacket_sizes_skip_empty_values_and_keep_unique_urls_in_source_order(self):
+        other = "https://example.test/cover-small.jpg"
+        detail = dict(DETAIL, images={"jacket_image": {
+            "large": " ", "large2": f" {JACKET} ", "duplicate": JACKET,
+            "small": other, "missing": None, "invalid": {"url": JACKET}}})
+        record = R18DevSource().parse(Page(DETAIL_URL, encoded(detail)), "ABW-358")
+        self.assertEqual(record.cover_urls, (JACKET, other))
+
+    def test_missing_or_invalid_jacket_object_does_not_become_a_cover_url(self):
+        for jacket in (None, "", [], 42):
+            with self.subTest(jacket=jacket):
+                detail = dict(DETAIL, images={"jacket_image": jacket})
+                record = R18DevSource().parse(Page(DETAIL_URL, encoded(detail)), "ABW-358")
+                self.assertEqual(record.cover_urls, ())
 
     def test_parse_accepts_the_body_as_str_or_bytes_and_tolerates_missing_fields(self):
         """`_fetch` 交回 bytes；测试桩常给 str，两种都按 JSON 读。站上没给的字段留空，不是 `None`。"""

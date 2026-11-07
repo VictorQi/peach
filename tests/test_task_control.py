@@ -32,6 +32,52 @@ for _ in range(int(sys.argv[2])):
 
 
 class TaskControlTests(unittest.TestCase):
+    def test_finished_parent_loads_all_children_only_to_acknowledge_pause(self):
+        parent = self.store.start('parent', trigger='manual')
+        queued = self.store.enqueue_followups(
+            parent.id, [(f'leaf:{n}', 'leaf', '后继') for n in range(50)])['queued']
+        self.store.finish(parent.id, 'succeeded')
+        run = self.store.get(parent.id)
+        with patch.object(self.store, 'active_descendants', wraps=self.store.active_descendants) as reads:
+            self.assertEqual(task_control.projection(self.store, run)['state'], 'running')
+            reads.assert_called_once_with(parent.id, limit=1)
+            task_control.request(self.store, parent.id, 'pause')
+            reads.reset_mock()
+            self.assertEqual(task_control.projection(self.store, run)['state'], 'paused')
+            self.assertEqual(reads.call_count, 2)
+            self.assertEqual(len(self.store.active_descendants(parent.id)), len(queued))
+
+    def test_page_snapshot_refreshes_control_commands_on_the_next_request(self):
+        parent = self.store.start('parent', trigger='manual')
+        child_id = self.store.enqueue_followups(
+            parent.id, [('child:1', 'child', '后继')])['queued'][0]
+        self.store.finish(parent.id, 'succeeded')
+        child = self.store.get(child_id)
+        original = task_control.projection_reader(self.store)
+        self.assertEqual(original(child)['state'], 'running')
+
+        task_control.request(self.store, parent.id, 'pause')
+        self.assertEqual(original(child)['state'], 'running')
+        self.assertEqual(task_control.requested(self.db, child.id), 'pause')
+        refreshed = task_control.projection_reader(self.store)
+        self.assertEqual(refreshed(child)['state'], 'paused')
+
+        task_control.request(self.store, parent.id, 'resume')
+        self.assertEqual(refreshed(child)['state'], 'paused')
+        self.assertEqual(task_control.projection_reader(self.store)(child)['state'], 'running')
+
+    def test_paused_parent_reads_pending_followups_as_one_group(self):
+        parent = self.store.start('parent', trigger='manual')
+        self.store.enqueue_followups(
+            parent.id, [(f'child:{i}', 'child', '后继') for i in range(64)])
+        self.store.finish(parent.id, 'succeeded')
+        task_control.request(self.store, parent.id, 'pause')
+        database = self.store.database
+        with patch.object(database, 'read_connection', wraps=database.read_connection) as reads:
+            state = self.state(parent.id)
+        self.assertEqual(state['state'], 'paused')
+        self.assertLess(reads.call_count, 5)
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

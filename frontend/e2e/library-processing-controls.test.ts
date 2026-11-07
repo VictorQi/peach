@@ -56,6 +56,10 @@ describe('扫描与采集控制', () => {
         { id: 'preview', label: '生成预览与封面', status: 'pending' }] };
     // 小窗挂在舞台里：进一次详情，那块节点才在。
     const opened = await visit(browser, `/assets/${itemId}`, viewport, async page => {
+      // 初读到的失败不自动弹窗；此布局用例保留用户此前主动展开该任务的选择。
+      await page.addInitScript(() => {
+        sessionStorage.setItem('peach.library-processing.visibility', 'shown:crowded-preview');
+      });
       await page.route('**/api/library-processing{,?*}', route => route.fulfill({ json: state }));
     });
     const { page } = opened;
@@ -120,7 +124,7 @@ describe('扫描与采集控制', () => {
     });
 
     it(`${viewport.name}：资源提示、粗估、模式切换与暂停继续`, async () => {
-      let state = { status: 'idle', job_id: '', checked: 0, total: 100, speed_mode: 'standard',
+      let state = { status: 'idle', job_id: '', checked: 0, total: 100, speed_mode: 'low',
         steps: [{ id: 'sources', label: '扫描文件', status: 'complete' },
           { id: 'collect', label: '采集外部资料与封面', status: 'current' }],
         current_asset_name: '', current_action: '', stage: '',
@@ -160,7 +164,7 @@ describe('扫描与采集控制', () => {
             else if (body.action === 'resume') state = { ...state, status: 'running', eta_initial: false,
               eta_kind: 'measured', eta_seconds_min: 600, eta_seconds_max: 900 };
             else if (body.action === 'set_speed') state.speed_mode = body.speed_mode;
-            else state = { ...state, status: 'running', job_id: 'controlled', speed_mode: body.speed_mode,
+            else state = { ...state, status: 'running', job_id: 'controlled', speed_mode: body.speed_mode || state.speed_mode,
               checked: 38, current_asset_name: '示例影片.mp4', current_action: 'querying_metadata', stage: '采集缺失资料' };
           }
           await route.fulfill({ json: state });
@@ -188,92 +192,13 @@ describe('扫描与采集控制', () => {
         await menu.screenshot({ path: path.join(artifacts, `${viewport.name}-processing-menu.png`) });
         await menu.press('Escape');
         await card.getByRole('button', { name: '同步新增文件', exact: true }).click();
-        const dialog = page.getByRole('dialog', { name: '同步新增文件', exact: true });
-        await dialog.waitFor();
-        await dialog.getByRole('region', { name: '磁盘预估' }).waitFor();
-        const columns = await dialog.locator('[aria-label="流量预估"], [aria-label="磁盘预估"]').evaluateAll(elements =>
-          elements.map(element => { const r = element.getBoundingClientRect(); return { top:r.top,left:r.left,right:r.right } }));
-        assert.equal(columns.length, 2);
-        assert.ok(Math.abs(columns[0].top - columns[1].top) < 1, JSON.stringify(columns));
-        assert.ok(columns[1].left >= columns[0].right, JSON.stringify(columns));
-        await dialog.getByText('网盘缓存占用待确认', { exact: true }).waitFor();
-        assert.match(await dialog.innerText(), /空间不足，还差/);
-        assert.match(await dialog.innerText(), /可能让电脑变慢/);
-        assert.equal(writes.length, 0);
-        const modalLayout = await layout(page);
-        assert.ok(modalLayout.scrollWidth <= modalLayout.viewportWidth, JSON.stringify(modalLayout));
-        assert.deepEqual(modalLayout.offenders, []);
-        await dialog.getByText('正在发现新增文件，数量和预估仍会变化…', { exact: true }).waitFor();
-        assert.equal(await dialog.getByRole('button', { name: '同步新增文件', exact: true }).isEnabled(), true);
-        await dialog.getByText('已发现视频 10 个', { exact: true }).waitFor();
-        const libraryLink = dialog.getByRole('link', { name: '管理媒体库', exact: true });
-        assert.equal(await libraryLink.getAttribute('href'), '/settings/library');
-        const footerOrder = await dialog.locator('.geist-modal-footer').evaluate(el => {
-          const link = el.querySelector('a')!.getBoundingClientRect();
-          const confirm = el.querySelector('[data-modal-confirm]')!.getBoundingClientRect();
-          return link.left < confirm.left && Math.abs((link.top + link.bottom) / 2 - (confirm.top + confirm.bottom) / 2) < 1;
-        });
-        assert.equal(footerOrder, true, '管理媒体库与主按钮在右下同排居中');
-        await libraryLink.click();
-        await page.waitForURL('**/settings/library');
-        assert.equal(await page.getByRole('dialog', { name: '同步新增文件', exact: true }).count(), 0);
-        const inventoryAtClose = inventoryReads;
-        await page.waitForTimeout(600);
-        assert.equal(inventoryReads, inventoryAtClose);
-        assert.equal(writes.length, 0);
-        await page.goto(new URL('/data-cleanup', page.url()).href);
-        await card.waitFor();
-        await card.getByRole('button', { name: '同步新增文件', exact: true }).click();
-        await dialog.getByText('正在发现新增文件，数量和预估仍会变化…', { exact: true }).waitFor();
-        inventoryComplete = true;
-        await dialog.getByText('预计流量', { exact: true }).waitFor();
-        await dialog.getByText('JAV 文件 60 个 · 不同番号 40 个', { exact: true }).waitFor();
-        const centering = await dialog.locator('.processing-effort-panel').evaluate(el => {
-          const panel = el.getBoundingClientRect();
-          const modal = el.closest('dialog')!.getBoundingClientRect();
-          return Math.abs((panel.left + panel.right) / 2 - (modal.left + modal.right) / 2);
-        });
-        assert.ok(centering < 1, `处理强度面板居中偏差 ${centering}px`);
-        const footer = await dialog.locator('.geist-modal-footer').evaluate(el => ({ display: getComputedStyle(el).display, padding: getComputedStyle(el).padding }));
-        assert.equal(footer.display, 'flex');
-        assert.notEqual(footer.padding, '0px');
-        const disclosure = dialog.getByRole('button', { name: /^(查看|收起)明细$/ });
-        assert.equal(await disclosure.getAttribute('aria-expanded'), 'false');
-        assert.equal(await disclosure.locator('svg').count(), 1);
-        await page.emulateMedia({ reducedMotion: 'no-preference' });
-        await dialog.getByText('查看明细', { exact: true }).click();
-        assert.equal(await disclosure.getAttribute('aria-expanded'), 'true');
-        const sources = dialog.locator('[data-processing-traffic] li');
-        assert.match(await sources.nth(0).innerText(), /示例网盘 A[\s\S]*代理/);
-        assert.match(await sources.nth(1).innerText(), /示例网盘 B[\s\S]*直连/);
-        assert.equal(await sources.locator('svg, img').count(), 2);
-        const modalBody = dialog.locator('.ui-geist-modal-body');
-        assert.equal(await modalBody.getAttribute('data-overlay-scrollbar'), 'true');
-        assert.equal(await dialog.evaluate(el => getComputedStyle(el).overflowY), 'hidden');
-        assert.equal(await sources.first().evaluate(el => getComputedStyle(el.parentElement!).overflowY), 'visible',
-          '确认弹窗明细不应嵌套纵向滚动');
-        const frame = () => dialog.locator('.ui-geist-modal-header,.geist-modal-footer').evaluateAll(parts =>
-          parts.map(part => { const box = part.getBoundingClientRect(); return [box.top, box.bottom] }));
-        const stationary = await frame();
-        await modalBody.evaluate(el => { el.scrollTop = el.scrollHeight });
-        assert.deepEqual(await frame(), stationary, '正文滚动时标题或操作条移动');
-        await modalBody.evaluate(el => { el.scrollTop = 0 });
-        assert.equal((await dialog.innerText()).includes('未观测'), false);
-        assert.match(await dialog.innerText(), /约 6MB/);
-        await disclosure.click();
-        assert.equal(await disclosure.getAttribute('aria-expanded'), 'false');
-        assert.equal(await sources.first().isVisible(), false);
-        await disclosure.click();
-        assert.equal(await sources.first().isVisible(), true);
-        await page.emulateMedia({ reducedMotion: 'reduce' });
-        const startupSlider = dialog.getByRole('slider');
-        await startupSlider.press('End');
-        await dialog.screenshot({ path: path.join(artifacts, `${viewport.name}-high-startup.png`) });
-        await startupSlider.press('Home');
-        await dialog.screenshot({ path: path.join(artifacts, `${viewport.name}-startup.png`) });
-        await dialog.getByRole('button', { name: '同步新增文件', exact: true }).click();
         await card.getByText('预计剩余约 20–40 分钟（粗估）', { exact: true }).waitFor();
-        assert.deepEqual(writes[0], { incremental: true, speed_mode: 'low' });
+        assert.equal(await page.getByRole('dialog', { name: '同步新增文件', exact: true }).count(), 0);
+        assert.deepEqual(writes[0], { incremental: true });
+        assert.equal(inventoryReads, 0, '直接启动不扫描一遍文件来填确认框');
+        const startedLayout = await layout(page);
+        assert.ok(startedLayout.scrollWidth <= startedLayout.viewportWidth, JSON.stringify(startedLayout));
+        assert.deepEqual(startedLayout.offenders, []);
         const dock = page.locator('#toasts [data-processing-dock]');
         await dock.locator('[data-processing-traffic]').waitFor();
         state.traffic = { ...state.traffic, used_bytes: 2097152, metered_used_bytes: 1048576,

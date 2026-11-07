@@ -59,13 +59,9 @@ chs.DirectoryNotDedicated=请选择空文件夹或已有的 Peach 安装目录�
 chs.DirectoryNotWritable=当前用户无法写入程序目录或其上级目录。请选择有写入权限的位置，以便安装和更新 Peach。
 chs.DirectoryLink=程序目录和数据目录不能经过目录链接。请选择普通文件夹。
 chs.DirectoryMove=请先卸载现有 Peach（保留数据），再选择新的安装目录。
-chs.ReportingFailed=版本统计与错误诊断选项未能保存。首次设置或设置页可再次选择；未保存的同意不会启用上传。
-chs.LibrarySharingFailed=馆藏与口味上传选项未能保存。可在设置页重新选择。
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "reporting"; Description: "发送版本统计与错误诊断（推荐）：版本、系统信息、故障类型、代码位置与发生次数"; GroupDescription: "数据上传（可在设置页关闭）："
-Name: "librarysharing"; Description: "上传馆藏与各类偏好明细（匿名化处理）"; GroupDescription: "数据上传（可在设置页关闭）："; Flags: unchecked
 
 [InstallDelete]
 ; PyInstaller 的依赖都在 _internal 里；覆盖安装留下上一版多出来的库会被新版误加载。
@@ -233,24 +229,7 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
-  ReportingConsent: String;
-  LibraryConsent: String;
 begin
-  if (CurStep = ssPostInstall) and not WizardSilent() then
-  begin
-    ReportingConsent := '0';
-    if WizardIsTaskSelected('reporting') then ReportingConsent := '1';
-    if not Exec(ExpandConstant('{app}\Peach.exe'),
-      '--installer-reporting ' + ReportingConsent + ' ' + ReportingConsent,
-      ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
-      SuppressibleMsgBox(CustomMessage('ReportingFailed'), mbError, MB_OK, IDOK);
-    LibraryConsent := '0';
-    if WizardIsTaskSelected('librarysharing') then LibraryConsent := '1';
-    if not Exec(ExpandConstant('{app}\Peach.exe'),
-      '--installer-library-sharing ' + LibraryConsent,
-      ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
-      SuppressibleMsgBox(CustomMessage('LibrarySharingFailed'), mbError, MB_OK, IDOK);
-  end;
   { 服务启动时不迁移账本；覆盖安装换了程序，要在这里补上。没有账本的新机器不跑，
     否则会凭空建出账本，首次设置页就再也不出现。migrate 自己会先备份。 }
   if CurStep = ssPostInstall then

@@ -54,12 +54,16 @@ def remember_installation_data_root(config) -> bool:
 
 def read() -> dict:
     try:
-        return json.loads(state_path().read_text(encoding="utf-8"))
+        data = json.loads(state_path().read_text(encoding="utf-8"))
+        if data.get("state") in ACTIVE | {"ready"} and data.get("publisher") != release_updates.REPOSITORY:
+            return dict(data, state="error", progress=0, message="这份更新不属于当前发布源，请重新检查并下载。")
+        return data
     except (OSError, ValueError):
         return {"state": "idle", "progress": 0}
 
 
 def write(data: dict, **changes) -> dict:
+    data.setdefault("publisher", release_updates.REPOSITORY)
     data.update(changes, updated_at=time.time())
     atomic_write_text(state_path(), json.dumps(data, ensure_ascii=False))
     return data
@@ -112,17 +116,6 @@ def extract(archive: Path, destination: Path, progress, *, tool_files: set[str] 
 
 
 def download(url: str, archive: Path, size: int, digest: str, progress) -> None:
-    sources = release_updates.download_sources(url)
-    for index, source in enumerate(sources):
-        try:
-            _download_once(source, archive, size, digest, progress)
-            return
-        except (httpx.HTTPError, ValueError):
-            if index == len(sources) - 1:
-                raise
-
-
-def _download_once(url: str, archive: Path, size: int, digest: str, progress) -> None:
     from .peach_proxy import http_client
     checksum = hashlib.sha256()
     received = 0
@@ -447,6 +440,8 @@ def apply(manifest: Path, wait_pid: int) -> int:
     from . import job_recovery
     try:
         data, target, transaction, stage = _transaction_paths(manifest)
+        if data.get("publisher") != release_updates.REPOSITORY:
+            return 2
     except ValueError:
         return 2
     backup = transaction / "backup"

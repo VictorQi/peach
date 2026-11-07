@@ -198,6 +198,10 @@ class FollowupRunner:
             if thread.is_alive():
                 thread.join(None if thread in required else timeout)
 
+    @property
+    def stopping(self) -> bool:
+        return self._stopping
+
     def resume_after_update(self) -> None:
         if self._paused_for_update:
             self._paused_for_update = False

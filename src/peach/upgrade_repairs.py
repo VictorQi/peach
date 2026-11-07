@@ -153,24 +153,20 @@ class UpgradeRepairs:
                     'available': True, 'message': '处理记录无法读取，请重试'}
         local = receipt.get('local', {})
         queued = receipt.get('queued', {})
-        states = []
-        ids = list(queued.values())
-        if ids:
-            with self.contract.database.read_connection() as connection:
-                for offset in range(0, len(ids), 900):
-                    batch = ids[offset:offset + 900]
-                    states.extend(row[0] for row in connection.execute(
-                        f'SELECT status FROM task_run WHERE id IN ({",".join("?" for _ in batch)})', batch))
+        states = [row['status'] for row in self._family(receipt)]
         active = sum(state in ('pending', 'running') for state in states)
         failed = sum(state in ('failed', 'interrupted') for state in states)
         review = int(local.get('review_count', 0)) + len(receipt.get('deferred', []))
-        state = 'failed' if self.error else 'running' if active else 'failed' if failed else 'review' if review else (
-            'complete' if receipt.get('dispatch_complete') and local else 'pending')
+        enabled = bool(receipt.get('enabled')) and not (receipt.get('dispatch_complete') and not active)
+        state = 'failed' if self.error else 'running' if enabled else 'paused' if active else (
+            'failed' if failed else 'review' if review else 'complete' if receipt.get('dispatch_complete')
+            else 'paused' if receipt.get('scope') else 'idle')
         items = [{'id': REVISION, 'label': '更新已有资料', 'state': local.get('state', 'pending'),
                   'changed': local.get('changed', {}), 'review_count': review},
                  {'id': 'background', 'label': '后台更新进度', 'state': state,
                   'pending': active, 'failed': failed, 'queued': len(queued)}]
-        return {'state': state, 'items': items, 'available': self.available, 'message': self.error}
+        return {'state': state, 'items': items, 'available': self.available, 'enabled': enabled,
+                'started': bool(receipt.get('scope')), 'message': self.error}
 
     def prepare(self) -> None:
         """服务恢复任务前应用本地确定性修复。"""
@@ -188,6 +184,7 @@ class UpgradeRepairs:
                     (CATALOG_REVISION, CATALOG_REVISION + ':text-*')).fetchone()
             if applied is not None:
                 self._restore_receipt(json.loads(applied[0]))
+                self._adopt_control(_read(self.receipt))
                 return
             self._restore_receipt(None)
             sources = Path(contract.follow_sources_root)
@@ -227,6 +224,102 @@ class UpgradeRepairs:
                 connection.execute('INSERT INTO ledger_upgrade_repair(id,applied_at,result_json) VALUES(?,?,?)',
                                    (REVISION, str(time.time()), json.dumps(receipt, ensure_ascii=False)))
             atomic_write_text(self.receipt, json.dumps(receipt, ensure_ascii=False))
+            self._adopt_control(receipt)
+
+    def _parents(self, receipt):
+        """仅查本服务派发的本机父任务，包含已结算但后继仍在工作的批次。"""
+        ids = list(receipt.get('queued', {}).values())
+        parents = set()
+        with self.contract.database.read_connection() as connection:
+            parents.update(row[0] for row in connection.execute(
+                'SELECT DISTINCT p.id FROM task_run p JOIN task_run c ON c.root_run_id=p.id '
+                "WHERE p.task_key=? AND p.host=? AND c.status IN ('pending','running')",
+                (TASK_KEY, self.contract.task_runs.host)))
+            for offset in range(0, len(ids), 900):
+                batch = ids[offset:offset + 900]
+                parents.update(row[0] for row in connection.execute(
+                    f'SELECT DISTINCT p.id FROM task_run c JOIN task_run p ON p.id=c.parent_run_id '
+                    f'WHERE c.id IN ({",".join("?" for _ in batch)}) AND p.task_key=? AND p.host=?',
+                    (*batch, TASK_KEY, self.contract.task_runs.host)))
+        return sorted(parents)
+
+    def _family(self, receipt):
+        """计入接续和更深后继，不能把派发父任务成功当作工作完成。"""
+        rows = {}
+        with self.contract.database.read_connection() as connection:
+            for column, ids in (('id', list(receipt.get('queued', {}).values())),
+                                ('root_run_id', self._parents(receipt))):
+                for offset in range(0, len(ids), 900):
+                    batch = ids[offset:offset + 900]
+                    for row in connection.execute(
+                            f'SELECT id,status,followup_key,task_key,progress_label FROM task_run '
+                            f'WHERE {column} IN ({",".join("?" for _ in batch)}) AND followup_key IS NOT NULL', batch):
+                        key = row['followup_key']
+                        if key not in rows or row['id'] > rows[key]['id']:
+                            rows[key] = dict(row)
+        return list(rows.values())
+
+    def _control_parents(self, receipt, action):
+        from . import task_control
+        store = self.contract.task_runs
+        for run_id in self._parents(receipt):
+            run = store.get(run_id)
+            if task_control.requested(self.contract.db_path, run_id) == 'cancel':
+                continue
+            if task_control.projection(store, run) is not None:
+                try:
+                    task_control.request(store, run_id, action)
+                except ValueError:
+                    if task_control.projection(store, store.get(run_id)) is not None:
+                        raise
+
+    def _adopt_control(self, receipt):
+        """旧版本自动排下的队列保留并暂停；升级不能追认联网意愿。"""
+        if receipt.get('control_version') == 1:
+            return
+        self._control_parents(receipt, 'pause')
+        receipt.update(control_version=1, enabled=False)
+        self._save_receipt(receipt)
+
+    def _stopped(self, receipt):
+        from .task_control import intent
+        since = receipt.get('scope', {}).get('at', 0)
+        with self.contract.database.read_connection() as connection:
+            parents = [row[0] for row in connection.execute('SELECT id FROM task_run WHERE task_key=? AND host=?',
+                                                           (TASK_KEY, self.contract.task_runs.host))]
+        return any(command.get('action') in ('pause', 'cancel') and command.get('at', 0) > since
+                   for command in (intent(self.contract.db_path, run_id) for run_id in parents))
+
+    def control(self, action: str) -> dict:
+        """在现有设置中直接开始或停止；每次新一轮只处理开始时已有的内容。"""
+        if not self.available:
+            raise ValueError('资料更新只在本机写入端可用')
+        if action not in ('start', 'pause'):
+            raise ValueError('请选择开始或停止派发')
+        self.prepare()
+        with FileLock(str(self.receipt) + '.lock', timeout=0):
+            receipt = _read(self.receipt)
+            if action == 'start':
+                if not receipt.get('scope') or (receipt.get('dispatch_complete') and not any(
+                        row['status'] in ('pending', 'running') for row in self._family(receipt))):
+                    from . import seed_followup
+                    with self.contract.database.read_connection() as connection:
+                        asset_max = connection.execute('SELECT coalesce(max(id),0) FROM asset').fetchone()[0]
+                        entity_max = connection.execute('SELECT coalesce(max(id),0) FROM entity').fetchone()[0]
+                        seeds = [dict(key=row.key, task_key=row.task_key, label=row.label)
+                                 for row in seed_followup.plan(connection, since_entity_id=entity_max)]
+                    receipt['scope'] = {'asset_max': asset_max, 'entity_max': entity_max, 'seeds': seeds}
+                    receipt['dispatch_complete'] = False
+                receipt['scope']['at'] = time.time_ns()
+                receipt['enabled'] = True
+                self._control_parents(receipt, 'resume')
+            else:
+                receipt['enabled'] = False
+                self._control_parents(receipt, 'pause')
+            self._save_receipt(receipt)
+            self.error = ''
+        self.tick()
+        return self.snapshot()
 
     def _restore_receipt(self, authoritative):
         try:
@@ -248,12 +341,16 @@ class UpgradeRepairs:
 
     def _plan(self, receipt: dict):
         from . import (avatar_followup, creator_identity_followup, performer_alias_followup,
-                       performer_profile_followup, seed_followup, studio_followup)
+                       performer_profile_followup, studio_followup)
+        from .followups import Followup
         from .library_processing import _people_allowed
         from .media_sources import cost_for
         from .settings_file import load_config, DATA_ROOT_ENV
         config = load_config(environ={DATA_ROOT_ENV: str(self.config.data_root)}) if self.config is not None else load_config()
         seen = set(receipt.get('queued', {}))
+        scope = receipt['scope']
+        if 'retry' in scope:
+            return [Followup(**row) for row in scope['retry'] if row['key'] not in seen][:MAX_FOLLOWUPS]
         inherited = set()
         for key, run_id in receipt.get('queued', {}).items():
             if key.startswith(MEDIA_TASK + ':'):
@@ -262,8 +359,8 @@ class UpgradeRepairs:
                     inherited.add(int(key.rsplit(':', 1)[1]))
         attempts = Attempts(attempts_root(self.contract.candidate_root))
         with self.contract.database.read_connection() as connection:
-            maximum = connection.execute('SELECT coalesce(max(id),0) FROM entity').fetchone()[0]
-            planned = [row for row in seed_followup.plan(connection, since_entity_id=maximum) if row.key not in seen]
+            planned = [Followup(**row) for row in scope['seeds'] if row['key'] not in seen]
+            outside = connection.execute('SELECT id,kind FROM entity WHERE id>?', (scope['entity_max'],)).fetchall()
             planners = (performer_alias_followup, studio_followup, performer_profile_followup,
                         creator_identity_followup, avatar_followup) if (
                             not receipt.get('text_only') and _people_allowed(config)) else ()
@@ -277,10 +374,11 @@ class UpgradeRepairs:
                 elif planner is avatar_followup:
                     args.append(self.contract.avatar_root)
                 args.append(attempts)
-                planned.extend(planner.stock(*args, limit=min(16, remaining), skip=seen))
+                skip = seen | {planner.followup_key(row['kind'], row['id']) if planner is avatar_followup
+                               else planner.followup_key(row['id']) for row in outside}
+                planned.extend(planner.stock(*args, limit=min(16, remaining), skip=skip))
             rows = connection.execute("SELECT id,code,name,path,location,snapshot_path FROM asset WHERE medium='video' "
-                                      "AND disposal IS NULL ORDER BY id").fetchall()
-        from .followups import Followup
+                                      "AND disposal IS NULL AND id<=? ORDER BY id", (scope['asset_max'],)).fetchall()
         selected = set(receipt.get('media_ids', []))
         deferred = []
         for row in rows:
@@ -309,15 +407,22 @@ class UpgradeRepairs:
         try:
             with FileLock(str(self.receipt) + '.lock', timeout=0):
                 receipt = _read(self.receipt)
+                if not receipt.get('enabled'):
+                    return
+                if self._stopped(receipt):
+                    receipt['enabled'] = False
+                    self._control_parents(receipt, 'pause')
+                    self._save_receipt(receipt)
+                    return
+                active = sum(row['status'] in ('pending', 'running') for row in self._family(receipt))
                 if receipt.get('dispatch_complete'):
-                    from . import seed_followup
-                    with self.contract.database.read_connection() as connection:
-                        maximum = connection.execute('SELECT coalesce(max(id),0) FROM entity').fetchone()[0]
-                        seed = seed_followup.plan(connection, since_entity_id=maximum)
-                    if not receipt.get('deferred') and not any(row.key not in receipt.get('queued', {}) for row in seed):
-                        return
-                    receipt['dispatch_complete'] = False
-                planned = self._plan(receipt)
+                    if not active:
+                        receipt['enabled'] = False
+                        self._save_receipt(receipt)
+                    return
+                if active >= MAX_FOLLOWUPS:
+                    return
+                planned = self._plan(receipt)[:MAX_FOLLOWUPS - active]
                 if not planned:
                     receipt['dispatch_complete'] = True
                 else:
@@ -333,11 +438,18 @@ class UpgradeRepairs:
             LOGGER.exception('升级补修派发失败')
 
     def _dispatch(self, planned, receipt):
+        from .update_tasks import _mutex, state_for
+        with _mutex(state_for(self.contract.db_path)):
+            if self._stopped(receipt):
+                return False
+            return self._enqueue(planned, receipt)
+
+    def _enqueue(self, planned, receipt):
         store = self.contract.task_runs
         orphan = store.blocking(TASK_KEY)
         if orphan is not None:
             store.finish(orphan.id, 'failed', error='资料派发被中断，正在重新安排')
-        run = store.start(TASK_KEY, trigger='scheduled', mutex_key=TASK_KEY, label='安排自动更新资料')
+        run = store.start(TASK_KEY, trigger='manual', mutex_key=TASK_KEY, label='安排资料更新')
         if run is None:
             return False
         try:
@@ -360,16 +472,18 @@ class UpgradeRepairs:
     def retry(self) -> dict:
         """显式重试失败项；用户取消的任务保持取消。"""
         if not self.available:
-            raise ValueError('更新后自动处理只在本机写入端可用')
+            raise ValueError('资料更新只在本机写入端可用')
         self.prepare()
         with FileLock(str(self.receipt) + '.lock', timeout=0):
             receipt = _read(self.receipt)
-            kept = {}
-            for key, run_id in receipt.get('queued', {}).items():
-                run = self.contract.task_runs.get(run_id)
-                if run is None or run.status not in ('failed', 'interrupted'):
-                    kept[key] = run_id
-            receipt.update(queued=kept, dispatch_complete=False)
+            failed = [row for row in self._family(receipt) if row['status'] in ('failed', 'interrupted')]
+            if not failed:
+                return self.snapshot()
+            retry = {row['followup_key']: {'key': row['followup_key'], 'task_key': row['task_key'],
+                                          'label': row['progress_label']} for row in failed}
+            kept = {key: run_id for key, run_id in receipt.get('queued', {}).items() if key not in retry}
+            receipt.update(queued=kept, dispatch_complete=False, enabled=True,
+                           scope={'retry': list(retry.values()), 'at': time.time_ns()})
             self._save_receipt(receipt)
             self.error = ''
         self.tick()
@@ -386,7 +500,7 @@ class UpgradeRepairs:
         if self.scheduler.running:
             self.scheduler.shutdown(wait=True)
         if self.available:
-            self.contract.followups.stop(wait_for=(MEDIA_TASK,))
+            self.contract.followups.stop(wait_for=(MEDIA_TASK, 'library-import'))
 
 
 def _media_run(contract, key: str, handle) -> dict:

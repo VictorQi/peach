@@ -5,8 +5,8 @@
  * PEACH_E2E_SETUP_DATA（临时 Peach 数据目录）和 PEACH_E2E_SETUP_MEDIA（一个已建好的空媒体目录）传进来。
  * 本文件由首启专用入口执行；单独执行时缺少这些变量则整组跳过。 */
 import assert from 'node:assert/strict';
-import { readFile, unlink } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, readFile, unlink } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
 import type { Browser, Page } from 'playwright-core';
@@ -55,6 +55,16 @@ describe('首次运行页', { skip: origin && media && dataRoot ? false : '只�
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
 
       // 加载：题目到齐后表单出现，等待态结束，页面不横向溢出。
+      await page.getByRole('button', { name: '添加文件夹', exact: true }).waitFor();
+      const screenshots = resolve('..', 'build', 'agent-verification', 'library-import');
+      await mkdir(screenshots, { recursive: true });
+      for (const size of VIEWPORTS) {
+        await page.setViewportSize({ width: size.width, height: size.height });
+        assert.ok((await layout(page)).scrollWidth <= size.width);
+        await page.screenshot({ path: join(screenshots, `setup-${size.name}.png`), fullPage: true });
+      }
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await page.getByRole('button', { name: '其他设置', exact: true }).click();
       const heading = page.getByRole('heading', { name: '欢迎使用 Peach' });
       await heading.waitFor({ state: 'visible', timeout: 15_000 });
       await page.getByRole('button', { name: '开始设置', exact: true }).click();

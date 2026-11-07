@@ -20,11 +20,10 @@ from scripts.smoke_split_update import verify as verify_split
 from support.ledger import fresh_ledger
 
 
-class ReleaseDownloadFailoverTests(unittest.TestCase):
-    def test_both_sources_fall_back_to_identical_verified_bytes(self):
+class ReleaseDownloadTests(unittest.TestCase):
+    def test_download_failure_does_not_switch_to_another_publisher(self):
         suffix = 'v1.0.0/Peach-1.0.0-windows-x64-update.zip'
-        urls = ('https://github.com/peach-mitao/peach/releases/download/' + suffix,
-                'https://downloads.peach.video/' + suffix)
+        urls = (update.release_updates.RELEASES_URL + '/download/' + suffix,)
         content = b'verified release bytes'
         for primary in urls:
             for failure in ('unavailable', 'corrupt'):
@@ -43,11 +42,11 @@ class ReleaseDownloadFailoverTests(unittest.TestCase):
                     archive = Path(folder).resolve() / 'update.zip'
                     archive.write_bytes(b'previous partial download')
                     with patch('peach.peach_proxy.http_client', side_effect=client):
-                        update.download(primary, archive, len(content), hashlib.sha256(content).hexdigest(), lambda _count: None)
-                    self.assertEqual(calls, [primary, next(url for url in urls if url != primary)])
-                    self.assertEqual(archive.read_bytes(), content)
+                        with self.assertRaises((httpx.HTTPError, ValueError)):
+                            update.download(primary, archive, len(content), hashlib.sha256(content).hexdigest(), lambda _count: None)
+                    self.assertEqual(calls, [primary])
 
-    def test_two_corrupt_sources_cannot_bypass_the_original_digest(self):
+    def test_corrupt_download_cannot_bypass_the_original_digest(self):
         calls = []
 
         def respond(request):
@@ -59,9 +58,9 @@ class ReleaseDownloadFailoverTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as folder, patch('peach.peach_proxy.http_client', side_effect=client):
             with self.assertRaisesRegex(ValueError, '校验失败'):
-                update.download('https://github.com/peach-mitao/peach/releases/download/v1.0.0/Peach-1.0.0-windows-x64.zip',
+                update.download(update.release_updates.RELEASES_URL + '/download/v1.0.0/Peach-1.0.0-windows-x64.zip',
                                 Path(folder).resolve() / 'package.zip', 3, hashlib.sha256(b'yes').hexdigest(), lambda _count: None)
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 1)
 
 
 class StandaloneUpdateTests(unittest.TestCase):
@@ -140,6 +139,29 @@ class StandaloneUpdateTests(unittest.TestCase):
         update.write(dict(id='reader', target=str(target), transaction=str(transaction),
                           stage=str(stage), version='1.0.0'), state='ready')
         return target, stage
+
+    def test_foreign_or_unidentified_staged_update_cannot_replace_program_or_ledger(self):
+        target, stage = self.reader_installation()
+        saved = update.read()
+        before = self.database.read_bytes()
+        for publisher in (None, 'peach-mitao/peach'):
+            with self.subTest(publisher=publisher):
+                data = dict(saved)
+                if publisher is None:
+                    data.pop('publisher')
+                else:
+                    data['publisher'] = publisher
+                payload = json.dumps(data)
+                update.state_path().write_text(payload, encoding='utf-8')
+                self.assertEqual(update.public()['state'], 'error')
+                with patch.object(update.distribution, 'in_app_update', return_value=True):
+                    with self.assertRaisesRegex(ValueError, '尚未准备完成'):
+                        update.request_restart()
+                self.assertEqual(update.apply(update.state_path(), 999), 2)
+                self.assertEqual(update.state_path().read_text(encoding='utf-8'), payload)
+                self.assertEqual(self.database.read_bytes(), before)
+                self.assertEqual((target / 'Peach.exe').read_text(), 'old')
+                self.assertEqual((stage / 'Peach.exe').read_text(), 'new')
 
     def test_reader_with_pending_schema_is_rejected_before_install_or_ledger_writes(self):
         target, stage = self.reader_installation()
@@ -428,30 +450,26 @@ class StandaloneUpdateTests(unittest.TestCase):
         result, requests, manifest, stage, error = self.prepare_online_lite()
         self.assertEqual(result, 0, error.read_text(encoding='utf-8') if error.exists() else '')
         self.assertEqual(len(requests), len(update_packages.TOOL_PATHS))
-        self.assertTrue(all(url.startswith('https://github.com/peach-mitao/peach/releases/download/v1.0.0/') for url in requests))
+        self.assertTrue(all(url.startswith(update.release_updates.RELEASES_URL + '/download/v1.0.0/') for url in requests))
         for bundle in manifest['tools'].values():
             self.assertTrue(update_packages.matches(stage, bundle['files']))
 
-    def test_lite_installer_uses_same_version_r2_when_github_is_unavailable(self):
-        result, requests, manifest, stage, _ = self.prepare_online_lite('unavailable')
-        self.assertEqual(result, 0)
-        self.assertEqual(len(requests), 2 * len(update_packages.TOOL_PATHS))
-        self.assertTrue(all(url.startswith('https://downloads.peach.video/v1.0.0/')
-                            for url in requests[1::2]))
-        for bundle in manifest['tools'].values():
-            self.assertTrue(update_packages.matches(stage, bundle['files']))
+    def test_lite_installer_reports_unavailable_fork_without_using_upstream_mirror(self):
+        result, requests, _manifest, _stage, error = self.prepare_online_lite('unavailable')
+        self.assertEqual(result, 1)
+        self.assertEqual(len(requests), 1)
+        self.assertTrue(error.is_file())
 
-    def test_lite_installer_accepts_only_the_embedded_manifest_digest_across_sources(self):
+    def test_lite_installer_rejects_a_manifest_digest_mismatch(self):
         result, requests, manifest, stage, _ = self.prepare_online_lite('mismatch')
-        self.assertEqual(result, 0)
-        self.assertEqual(len(requests), 2 * len(update_packages.TOOL_PATHS))
-        for bundle in manifest['tools'].values():
-            self.assertTrue(update_packages.matches(stage, bundle['files']))
+        self.assertEqual(result, 1)
+        self.assertEqual(len(requests), 1)
+        self.assertFalse(update_packages.matches(stage, manifest['tools']['ffmpeg']['files']))
 
     def test_lite_installer_rejects_both_sources_when_their_bytes_do_not_match(self):
         result, requests, manifest, stage, error = self.prepare_online_lite('both-corrupt')
         self.assertEqual(result, 1)
-        self.assertEqual(len(requests), 2)
+        self.assertEqual(len(requests), 1)
         self.assertIn('校验失败', error.read_text(encoding='utf-8'))
         self.assertFalse(update_packages.matches(stage, manifest['tools']['ffmpeg']['files']))
 

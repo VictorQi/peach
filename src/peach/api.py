@@ -35,7 +35,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.datastructures import MutableHeaders
 from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES, GZipMiddleware
 
-from . import (__version__, browser_transport, feeds, tunnel, web_contract,
+from . import (__version__, feeds, tunnel, web_contract,
                web_feeds, web_follow, web_settings)
 from . import routes_api, routes_auth, routes_configuration, routes_jav_browser, routes_media, routes_pages, routes_subtitles
 from .buildinfo import frozen_build
@@ -200,8 +200,9 @@ def _restore_task_center(contract) -> None:
 
 #: 开机在后台先算一遍的聚合：口味、复核、垃圾复核、关注的全部条目与筛选项各要几秒到
 #: 十几秒，都按账本版本号缓存（`WebContract.cached_until_changed`），算好一次就一直用到
-#: 账本或文件真的变了。
-WARM_AGGREGATES = (("/api/taste", {"window": "all"}), ("/api/review", {}), ("/api/ads", {}),
+#: 账本或文件真的变了。馆藏排在可选聚合之前，首屏请求复用同一份分组快照。
+WARM_AGGREGATES = (("/api/items", {"limit": "60"}), ("/api/entity/shapes", {}),
+                   ("/api/taste", {"window": "all"}), ("/api/review", {}), ("/api/ads", {}),
                    ("/api/follow", {}))
 
 
@@ -603,6 +604,23 @@ def create_app(
     app.state.jav_browser = jav_browser
     app.state.mount_reachability = mount_reachability
     app.state.network_reachability = network_reachability
+    def activate_media_configuration(prepared, root_id):
+        from . import settings_file
+        from .media import normalized_path
+        from .media_identity import catalog
+        from .platform import translate_roots, location_mounts
+        settings_file.reset_cache()
+        declared = tuple(root for roots in prepared.locations.values() for root in roots)
+        selected = catalog(prepared)[1][root_id]['root']
+        allowed = tuple(normalized_path(root) for root in translate_roots((selected,)))
+        LOCATION_ROOT_DECLARATIONS.update(prepared.locations)
+        filesystem.allowed_roots = tuple(dict.fromkeys((*filesystem.allowed_roots, *allowed)))
+        database.media_roots = declared
+        mount_reachability.replace_roots(source_roots(prepared))
+        push_discovery.refresh_roots(prepared.locations, location_mounts(), selected=(selected,))
+        contract.upgrade_config = prepared
+        contract.cache_bust()
+    app.state.activate_media_configuration = activate_media_configuration
     from .background_issues import IssueLog
     app.state.background_issues = IssueLog()
     app.state.stream_sessions = StreamSessionRegistry()
@@ -725,7 +743,6 @@ def create_app(
                 "ledger_writer_origin": settings.review_writer_origin if read_only else None,
                 "scheme": "https" if settings.tls_enabled else "http",
                 # 采集用的浏览器窗口正等着人点验证的站，供排查时看一眼；窗口本身就是提醒，不另弹通知（ADR-0065）。
-                "attention": browser_transport.attention(),
                 # 健康检查可能被公网探针访问，不能在这里回传随机 Tunnel URL。
                 "tunnel": {"enabled": settings.tunnel_enabled, "state": tunnel_state.state},
         }

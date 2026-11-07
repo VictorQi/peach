@@ -158,7 +158,7 @@ def review(root: Path, repo: str, *, public_github: bool = False,
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", default="peach-mitao/peach")
+    parser.add_argument("--repo", default="VictorQi/peach")
     parser.add_argument("--public-github", action="store_true",
                         help="通过匿名官方 API 读取 GitHub 元数据，不调用 GitHub CLI")
     parser.add_argument("--reference-evidence", action="append", default=[], metavar="SOURCE=FILE",

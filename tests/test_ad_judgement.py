@@ -692,5 +692,20 @@ class ResourceJunkQueueTests(unittest.TestCase):
         self.assertTrue(all(item['score'] >= web_batch.AUTO_TRASH_SCORE for item in items.values()))
 
 
+class ScoringCacheLifetimeTests(unittest.TestCase):
+    def test_failed_scoring_releases_parsed_paths(self):
+        def failed_read(*args, **kwargs):
+            junk._windows_path('R:/Media/sample.mp4')
+            junk._windows_parent('R:/Media/sample.mp4')
+            junk._promo_directory_parts(('Media',))
+            raise OSError('ledger unavailable')
+
+        with mock.patch.object(junk, '_judgement_inputs', side_effect=failed_read):
+            with self.assertRaisesRegex(OSError, 'ledger unavailable'):
+                junk.scored_candidates(None)
+        for cached in (junk._windows_path, junk._windows_parent, junk._promo_directory_parts):
+            self.assertEqual(cached.cache_info().currsize, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

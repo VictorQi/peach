@@ -33,7 +33,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
 
-from .jobs import TaskRunConflict, process_alive
+from .jobs import TaskRunConflict, process_alive, process_matches
 from .repository import LedgerDatabase
 
 __all__ = [
@@ -96,8 +96,10 @@ TASK_LABELS = {
     "mp4-header-repair": "播放文件头修复",
     'jav-discovery-metadata': '发现页资料读取',
     'diagnostic-export': '诊断导出',
-    "upgrade-repairs": "自动修复",
-    "upgrade-library": "资料自动修复",
+    "upgrade-repairs": "资料更新",
+    "upgrade-library": "影片资料更新",
+    "library-add": "添加文件夹",
+    "library-import": "读取文件夹",
     "organize": "按模板整理",
     "batch": "批量操作",
     "scrape-codes": "番号资料刮削",
@@ -660,7 +662,7 @@ class TaskRunStore:
                     continue
             local = run.host == self.host
             alive = (local and run.pid is not None and run.pid != os.getpid()
-                     and process_alive(run.pid))
+                     and process_matches(run.pid, run.heartbeat_at or run.started_at, alive=process_alive))
             beat = _parse(run.heartbeat_at) or _parse(run.started_at)
             expired = beat is None or beat < deadline
             if alive or (not local and not expired):
@@ -751,7 +753,7 @@ class TaskRunStore:
         没有父卡片可挂的散行。父行已被 `prune` 掉的后继自己算顶层。
 
         后继还在排或在跑的那几轮不算「完成」，由 `active_parents` 单独交给「正在进行」：
-        自动修复每分钟派一批，它们留在这里会占满第一页，「最近完成」就只剩一个「加载更早」。
+        资料更新分批派发，它们留在这里会占满第一页，「最近完成」就只剩一个「加载更早」。
         """
         size = max(1, min(int(limit), 500))
         marks = ",".join(f"'{name}'" for name in TERMINAL_STATUSES)
@@ -783,6 +785,33 @@ class TaskRunStore:
                 f"SELECT {_COLUMNS} FROM task_run WHERE root_run_id IN ({holes}) "
                 f"AND id NOT IN ({holes}) AND status IN ({marks}) ORDER BY id",
                 [*ids, *ids]).fetchall()
+        return [_row(row) for row in rows]
+
+    def active_families(self) -> dict[int, list[tuple[int, str]]]:
+        """每条自己或后代还在排在跑的任务 → 这一族里在排在跑的 `(id, status)`（含自己），按 id 排。
+
+        键包含活动任务及其全部祖先。任务中心每条在跑的任务都要问「族里谁还活着」：逐条递归查询、
+        逐条开连接，几千条排队后继时一次轮询要好几秒；这里一条查询沿父链往上一次取齐。
+        """
+        families: dict[int, list[tuple[int, str]]] = {}
+        with self.database.read_connection() as connection:
+            for ancestor, run_id, status in connection.execute(
+                    "WITH RECURSIVE up(ancestor, id, status) AS ("
+                    "SELECT id, id, status FROM task_run WHERE status IN ('pending','running') "
+                    "UNION SELECT t.parent_run_id, u.id, u.status FROM task_run t JOIN up u ON t.id=u.ancestor "
+                    "WHERE t.parent_run_id IS NOT NULL) SELECT ancestor, id, status FROM up ORDER BY ancestor, id"):
+                families.setdefault(int(ancestor), []).append((int(run_id), status))
+        return families
+
+    def active_descendants(self, run_id: int, *, limit: int | None = None) -> list[TaskRun]:
+        """一次读取这轮仍未结束的后继，避免为每个后继重新打开账本。"""
+        with self.database.read_connection() as connection:
+            rows = connection.execute(
+                'WITH RECURSIVE family(id) AS (SELECT id FROM task_run WHERE parent_run_id=? '
+                'UNION ALL SELECT t.id FROM task_run t JOIN family f ON t.parent_run_id=f.id) '
+                f"SELECT {_COLUMNS} FROM task_run WHERE id IN (SELECT id FROM family) "
+                "AND status IN ('pending','running')" + (" LIMIT ?" if limit is not None else ""),
+                (run_id, limit) if limit is not None else (run_id,)).fetchall()
         return [_row(row) for row in rows]
 
     def active_parents(self) -> list[TaskRun]:

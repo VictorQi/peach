@@ -13,7 +13,7 @@ from collections import OrderedDict
 from contextlib import asynccontextmanager, closing
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, Mock, patch
 from types import SimpleNamespace
 from urllib.parse import parse_qs, quote, urlsplit
 
@@ -392,7 +392,6 @@ class FastApiContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["version"], __version__)
         # 采集浏览器等人点验证的站列在这里，供排查（ADR-0065）；平时是空表。
-        self.assertEqual(response.json()["attention"], [])
         checks = response.json()["checks"]
         self.assertEqual(set(checks), {"database", "schema", "configured", "ffmpeg", "media_mounts", "security"})
         self.assertTrue(all(set(check) == {"status", "reason"} for check in checks.values()))
@@ -444,6 +443,26 @@ class FastApiContractTests(unittest.IsolatedAsyncioTestCase):
             response = await self.client.post('/api/configuration/upgrade-repairs/retry?t=secret', json={})
         self.assertEqual(response.status_code, 409)
         retry.assert_not_called()
+
+    async def test_repair_start_and_pause_are_local_explicit_actions(self):
+        service = self.app.state.upgrade_repairs
+        self.app.state.ledger_background_ready = False
+        activation = Mock(resume=AsyncMock(return_value=True))
+        self.app.state.ledger_activation = activation
+        with patch('peach.api._installation_in_progress', return_value=False), patch.object(
+                service, 'control') as control, patch.object(service, 'snapshot', return_value={'state': 'paused'}):
+            denied = await self.client.post('/api/configuration/upgrade-repairs', json={'action': 'start'})
+            self.assertEqual(denied.status_code, 401)
+            invalid = await self.client.post('/api/configuration/upgrade-repairs?t=secret', json={'action': 'unknown'})
+            self.assertEqual(invalid.status_code, 400)
+            paused = await self.client.post('/api/configuration/upgrade-repairs?t=secret', json={'action': 'pause'})
+            self.assertEqual(paused.status_code, 200)
+            activation.resume.assert_not_called()
+            control.assert_called_once_with('pause')
+            started = await self.client.post('/api/configuration/upgrade-repairs?t=secret', json={'action': 'start'})
+            self.assertEqual(started.status_code, 200)
+            activation.resume.assert_awaited_once()
+            self.assertEqual(control.call_args.args, ('start',))
 
     async def test_diagnostics_is_authenticated_local_and_uses_the_shared_report(self):
         from peach import diagnostics
@@ -2351,7 +2370,7 @@ class FastApiContractTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn('<script>', payload)
                 self.assertEqual(response.headers['cache-control'], 'no-store')
 
-    async def test_tutorial_entry_first_frame_uses_shared_ledger_completion(self):
+    async def test_help_entry_stays_available_after_completion_and_reopening(self):
         from html.parser import HTMLParser
         from peach.web_tutorial import CAMPAIGN
 
@@ -2367,7 +2386,7 @@ class FastApiContractTests(unittest.IsolatedAsyncioTestCase):
                              encoding='utf-8')
         await self.client.post('/login', content='token=secret&next=%2F',
                                headers={'Content-Type': 'application/x-www-form-urlencoded'})
-        for action, hidden in ((None, False), ('complete', True), ('reopen', False)):
+        for action in (None, 'complete', 'reopen'):
             if action:
                 result = await self.client.post('/api/tutorial-progress', json={'campaign': CAMPAIGN, 'action': action})
                 self.assertEqual(result.status_code, 200, result.text)
@@ -2377,7 +2396,7 @@ class FastApiContractTests(unittest.IsolatedAsyncioTestCase):
                 parsed = Buttons()
                 parsed.feed(response.text)
                 self.assertIsNotNone(parsed.entry)
-                self.assertEqual('hidden' in parsed.entry, hidden)
+                self.assertNotIn('hidden', parsed.entry)
 
     async def test_canonical_page_urls_require_authentication(self):
         for path in ('/assets/1', '/posts/1', '/works/ABC-001', '/performers/1',
@@ -4035,6 +4054,7 @@ class UnconfiguredMachineTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(app.state.web_contract.downloads._thread)
 
     async def test_shutdown_joins_the_active_aggregate_before_releasing_the_ledger(self):
+        from peach.api import WARM_AGGREGATES
         parent = self.settings.db_path.parent
         parent.mkdir(parents=True)
         database = fresh_ledger(parent)
@@ -4062,7 +4082,7 @@ class UnconfiguredMachineTests(unittest.IsolatedAsyncioTestCase):
                 release.set()
                 await shutdown
                 self.assertTrue(closed.is_set())
-                self.assertEqual(calls, ["/api/taste"])
+                self.assertEqual(calls, [WARM_AGGREGATES[0][0]])
             finally:
                 release.set()
                 if shutdown is not None:

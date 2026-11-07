@@ -232,6 +232,8 @@ class PullRequestIntegrationTests(_WorktreeCase):
         (self.worker / "worker.txt").write_text("worker\n", encoding="utf-8")
         commit(self.worker, "fix(tooling): 示例变更")
         self.head = _git(self.worker, "rev-parse", "HEAD").stdout.strip()
+        _git(self.worker, "remote", "add", "fork", "git@github.com:example/peach.git")
+        _git(self.worker, "config", f"branch.{self.branch}.remote", "fork")
         self.pr = {"url": "https://github.com/example/peach/pull/12", "state": "OPEN",
                    "headRefOid": self.head, "baseRefName": "master"}
 
@@ -268,6 +270,7 @@ class PullRequestIntegrationTests(_WorktreeCase):
         self.assertEqual((self.repo / "worker.txt").read_text(encoding="utf-8"), "worker\n")
         command = query.call_args.args[0]
         self.assertEqual(command[:4], ["gh", "pr", "view", self.branch])
+        self.assertEqual(command[4:6], ["--repo", "example/peach"])
         self.assertEqual(query.call_args.kwargs["cwd"], self.worker)
         self.assertEqual(_git(self.repo, "log", "-1", "--format=%B").stdout.strip(),
                          f"Merge branch '{self.branch}' (#12)")
@@ -303,9 +306,28 @@ class PullRequestIntegrationTests(_WorktreeCase):
 
     def test_an_unavailable_client_and_a_timeout_preserve_master(self):
         for error in (FileNotFoundError("gh"), subprocess.TimeoutExpired(["gh"], 60)):
-            with self.subTest(error=type(error).__name__), self.github() as query:
+            with self.subTest(error=type(error).__name__), self.github() as query, \
+                    mock.patch.object(agent_worktree, "public_github_api", side_effect=OSError("offline")):
                 query.side_effect = error
                 self.assert_refused("未取得 PR")
+
+    def test_public_fork_receipt_works_without_the_optional_cli(self):
+        row = {"html_url": self.pr["url"], "state": "open", "body": "Refs #7",
+               "head": {"ref": self.branch, "sha": self.head, "repo": {"full_name": "example/peach"}},
+               "base": {"ref": "master", "repo": {"full_name": "example/peach"}}}
+        with self.github() as query, mock.patch.object(agent_worktree, "public_github_api", return_value=[row]) as api:
+            query.side_effect = FileNotFoundError("gh")
+            result = integrate(self.repo, self.branch)
+        self.assertEqual(result["pull_request"]["refs"], ["Refs #7"])
+        self.assertTrue(api.call_args.args[0].startswith("repos/example/peach/pulls?"))
+
+    def test_an_upstream_receipt_cannot_authorize_a_fork_merge(self):
+        with self.github(json.dumps({**self.pr, "url": "https://github.com/upstream/peach/pull/12"})):
+            self.assert_refused("仓库.*不一致")
+
+    def test_a_branch_without_a_tracking_remote_is_refused(self):
+        _git(self.worker, "config", "--unset", f"branch.{self.branch}.remote")
+        self.assert_refused("跟踪远端")
 
     def test_a_worker_change_during_the_remote_read_prevents_merge(self):
         before = _git(self.repo, "rev-parse", "HEAD").stdout.strip()
@@ -566,7 +588,7 @@ class PruneTests(_WorktreeCase):
     def test_a_worktree_a_process_is_working_in_is_kept(self):
         """会话、终端或预览服务还开在里面的工作树不回收：分支合入了，人还在用。"""
         worker = self._integrated("in-use")
-        process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], cwd=worker)
+        process = subprocess.Popen([sys._base_executable, "-c", "import time; time.sleep(60)"], cwd=worker)
         try:
             report = prune(self.repo, apply=True)
         finally:
@@ -727,7 +749,7 @@ class LeftoverProcessTests(_WorktreeCase):
 
     def sleeper(self, cwd: Path) -> subprocess.Popen:
         cwd.mkdir(parents=True, exist_ok=True)
-        child = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"],
+        child = subprocess.Popen([sys._base_executable, "-c", "import sys; sys.stdin.read()"],
                                  cwd=cwd, stdin=subprocess.PIPE)
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
@@ -738,7 +760,7 @@ class LeftoverProcessTests(_WorktreeCase):
         return child
 
     def stop(self, child: subprocess.Popen) -> None:
-        # EOF 让解释器自己退出；Windows venv 启动器也会等其子进程结束。
+        # 直接运行标准库解释器，EOF 让持有工作目录的同一个进程退出。
         child.communicate(timeout=10)
 
     def test_a_process_working_in_a_worktree_is_listed_with_its_details(self):

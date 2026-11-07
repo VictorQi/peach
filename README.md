@@ -4,10 +4,10 @@
 
 A local-first video metadata scraper and media manager.
 
-[Website](https://peach.video) · [Download](#download-and-use) · [Live demo](https://demo.peach.video) · [Documentation](#documentation) · [简体中文](README.zh-CN.md)
+[Upstream website](https://peach.video) · [Download](#download-and-use) · [Upstream demo](https://demo.peach.video) · [Documentation](#documentation) · [简体中文](README.zh-CN.md)
 
-[![Release](https://img.shields.io/github/v/release/peach-mitao/peach?include_prereleases&sort=semver&label=release&logo=github)](https://github.com/peach-mitao/peach/releases)
-[![CI pipelines](https://img.shields.io/github/actions/workflow/status/peach-mitao/peach/test.yml?branch=master&label=CI&logo=githubactions&logoColor=white)](https://github.com/peach-mitao/peach/actions/workflows/test.yml)
+[![Release](https://img.shields.io/github/v/release/VictorQi/peach?include_prereleases&sort=semver&label=release&logo=github)](https://github.com/VictorQi/peach/releases)
+[![CI pipelines](https://img.shields.io/github/actions/workflow/status/VictorQi/peach/test.yml?branch=master&label=CI&logo=githubactions&logoColor=white)](https://github.com/VictorQi/peach/actions/workflows/test.yml)
 [![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue?logo=gnu&logoColor=white)](LICENSE)
 [![Windows x64](https://img.shields.io/badge/Windows-x64-0078D4)](docs/TESTING_DESKTOP.md)
 [![macOS DMG](https://img.shields.io/badge/macOS-DMG-555555?logo=apple&logoColor=white)](docs/OPERATIONS.md#macos-独立测试包)
@@ -49,14 +49,19 @@ Movie demo data; see [asset credits and licenses](https://peach.video/en/credits
 - **Cloud download**: search by video code or submit a magnet link, then organize completed downloads into your library.
 - **Library management**: manage tags, duplicates, versions and parts; permanently delete videos by performer while keeping profiles and photos. Metadata and watch history are stored locally.
 - **Task center**: pause, resume or cancel local background tasks and view their CPU, GPU and download activity where available.
-- **Guided tours**: learn the interface and settings as needed; tutorial progress is shared across devices connected to the same instance.
+- **Guided tours**: open help when needed to learn the interface and settings; tutorial progress is shared across devices connected to the same instance.
+
+Background collection does not open or control a browser. Restricted content is skipped when optional source credentials are missing, while your existing library remains available. Optional library updates after an upgrade start when you choose and can be stopped. Version information and update actions stay in settings.
 
 ## Download and use
 
+On the desktop, choose a video folder to start browsing. New libraries use local metadata by default; folders added to an existing library keep its settings.
+Daily browsing opens the catalog without waiting for optional source checks. Cataloged items remain visible when a source is offline, with this device's concealment, sort and layout preferences preserved.
+
 | Method | Get started |
 | --- | --- |
-| Windows x64 | [Installer](https://github.com/peach-mitao/peach/releases/download/v0.50.0/Peach-0.50.0-windows-x64-setup.exe) · [Portable](https://github.com/peach-mitao/peach/releases/download/v0.50.0/Peach-0.50.0-windows-x64.zip) |
-| macOS | [Apple Silicon / ARM64](https://github.com/peach-mitao/peach/releases/download/v0.50.0/Peach-0.50.0-macos-arm64.dmg) · [Intel / x86_64](https://github.com/peach-mitao/peach/releases/download/v0.50.0/Peach-0.50.0-macos-x86_64.dmg) |
+| Windows x64 | [Installer](https://github.com/VictorQi/peach/releases/latest) · [Portable](https://github.com/VictorQi/peach/releases/latest) |
+| macOS | [Apple Silicon / ARM64](https://github.com/VictorQi/peach/releases/latest) · [Intel / x86_64](https://github.com/VictorQi/peach/releases/latest) |
 | Docker / NAS | [Deployment guide](docs/DOCKER.md) |
 | Source | [Setup instructions](docs/OPERATIONS.md#从源码运行windowsmacos); requires Git, uv and Python 3.14+ |
 
@@ -70,13 +75,13 @@ Development: [Contributing](CONTRIBUTING.md) · [Development guide](AGENTS.md) �
 
 ## Reporting problems
 
-[Report a bug or suggest a feature](https://github.com/peach-mitao/peach/issues/new/choose) with your version, steps and error message. Use demo data in public screenshots and redact private information; do not upload videos or databases. Report vulnerabilities privately through the [security policy](SECURITY.md).
+This Fork has no public issue tracker enabled. Report problems through the channel where you obtained it; code changes go through [pull requests](https://github.com/VictorQi/peach/pulls). Include your version, steps and error message. Use demo data in public screenshots and redact private information; do not upload videos or databases.
 
 ## Related projects
 
 Thanks to [amane](https://github.com/sqzw-x/amane), [Gfriends](https://github.com/gfriends/gfriends) and [CloudDrive2](https://www.clouddrive2.com/). See the [reuse inventory](docs/REUSE.md) for full credits.
 
-## Star History
+## Upstream Star History
 
 <a href="https://github.com/peach-mitao/peach/tree/star-history">
   <picture>

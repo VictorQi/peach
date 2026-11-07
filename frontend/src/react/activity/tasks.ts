@@ -90,7 +90,7 @@ export function followupTally(counts: FollowupCounts | undefined, runs: TaskRunP
   return { total, active, failed, cancelled, settled: total - active };
 }
 
-/** 同一种任务连着派出的几轮合成一件事：自动修复每分钟派一批，一屏十几张「已完成」卡说的是同一件事。
+/** 同一种任务连着派出的几轮合成一件事：资料更新分批派发，一屏十几张「已完成」卡说的是同一件事。
  *  每组按最新那一轮排在前面，`runs[0]` 是最新那一轮。 */
 export function foldByKind(rows: TaskRunPayload[]): RunFold[] {
   const folds = new Map<string, RunFold>();
@@ -128,6 +128,12 @@ export const pollInterval = (data: ActivityData | undefined): number =>
   data?.running?.length ? RUNNING_POLL_MS : SETTLED_POLL_MS;
 
 export const fetchTasks = (signal?: AbortSignal) => apiGet<ActivityData>(TASKS_URL, signal);
+
+/** 常驻刷新不读取完整任务列表。 */
+export const RESULT_UPDATES_KEY = ['result-updates'] as const;
+export type ResultUpdatesData = Pick<ActivityData, 'result_versions'> & { busy?: boolean };
+export const fetchResultUpdates = (signal?: AbortSignal) =>
+  apiGet<ResultUpdatesData>('/api/result-updates', signal);
 
 export const controlTask = (id: number, action: TaskControlAction, signal?: AbortSignal) =>
   apiSend(`${TASKS_URL}/${id}/control`, { action }, 'POST', signal);

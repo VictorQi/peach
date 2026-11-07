@@ -50,17 +50,6 @@ export function initialCatalogFilters(address: CatalogAddress, preferences: Cata
   };
 }
 
-/** 全部来源离线时保留范围，空范围在 API 中表示整个馆藏。 */
-export function onlineDefaultLoc(loc: string, online: Readonly<Record<string, boolean | undefined>>): string {
-  return loc.split(',').filter(Boolean).filter(key => online[key] !== false).join(',') || loc;
-}
-
-/** 显式来源参数（包括空串）拥有最终决定权。 */
-export function defaultCatalogLoc(loc: string, search: string,
-  online: Readonly<Record<string, boolean | undefined>>): string {
-  return new URLSearchParams(search).has('loc') ? loc : onlineDefaultLoc(loc, online);
-}
-
 export function homePath(filters: Readonly<CatalogFilters>): string {
   const path = STATE_ROUTES[filters.state ?? ''] || '/';
   const params = new URLSearchParams();

@@ -664,7 +664,7 @@ it('跑完那一轮显示摘要，失败那一轮显示原因', async () => {
 
 it('做完的几批派发并成一张卡，摘要说一共处理了几项、失败几项，失败的明细排在前面', async () => {
   const batch = (id: number, minute: number) => run({
-    id, task_key: 'upgrade-repairs', task_label: '自动修复', trigger: 'scheduled', status: 'succeeded',
+    id, task_key: 'upgrade-repairs', task_label: '资料更新', trigger: 'manual', status: 'succeeded',
     progress_total: null, finished_at: `2026-10-28T08:${minute}:00Z`, result_summary: { outcome: '已安排 64 项处理' } });
   const child = (id: number, parent: number, status: string) => followup(parent, {
     id, task_key: 'upgrade-library', task_label: '资料自动修复', status,

@@ -1,4 +1,4 @@
-/* 检查更新：当前与最新版本、下载安装进度，准备好之后确认重启。
+/* 检查更新：当前与最新版本、下载安装进度，重启安装由用户主动发起。
  *
  * 更新任务进行中每秒问一次状态，空闲时 30 秒一次；连续 120 次问不到就停下并说明原因。 */
 import { useEffect, useRef, useState } from 'react';
@@ -25,7 +25,6 @@ export function ReleaseUpdates({ initial, initialJob }: { initial: ReleaseState;
   const [job, setJob] = useState<UpdateJob>(initialJob || { state: 'idle', progress: 0 });
   const [pollError, setPollError] = useState('');
   const action = useAction();
-  const prompted = useRef(false);
   const mounted = useRef(true);
   const running = ACTIVE.has(job.state);
 
@@ -42,12 +41,6 @@ export function ReleaseUpdates({ initial, initialJob }: { initial: ReleaseState;
     title: '更新已准备好', body: `Peach ${job.version || ''} 将在重启后安装。`,
     confirmLabel: '立即重启', cancelLabel: '稍后', onConfirm: restart,
   });
-
-  useEffect(() => {
-    if (job.state !== 'ready' || prompted.current) return;
-    prompted.current = true;
-    confirmRestart();
-  }, [job.state]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -77,7 +70,6 @@ export function ReleaseUpdates({ initial, initialJob }: { initial: ReleaseState;
 
   const download = () => {
     if (running) return;
-    prompted.current = false;
     setPollError('');
     void action.run('download', (signal) => apiSend<UpdateJob>('/api/configuration/update', {}, 'POST', signal), setJob);
   };

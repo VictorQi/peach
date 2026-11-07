@@ -616,6 +616,35 @@ class CloudChannelTests(_ServiceCase):
 
 
 class LocalChannelTests(_ServiceCase):
+    def test_optional_new_watch_failure_keeps_existing_monitor_and_does_not_block_reading(self):
+        service = self.service()
+        observer = service._observer = mock.Mock()
+        observer.schedule.side_effect = OSError('watch limit')
+        service.local_channel = push.ChannelState(True, '', (self.declared['local'][0],))
+        service._start_local([('local', 'S:/new', self.media)])
+        self.assertIs(service._observer, observer)
+        self.assertTrue(service.local_channel.running)
+        self.assertEqual(service.local_channel.roots, (self.declared['local'][0],))
+        self.assertIn('watch limit', service.local_channel.message)
+        observer.stop.assert_not_called()
+
+    def test_adding_roots_preserves_watcher_queue_and_settings_without_reprobing_old_roots(self):
+        service = self.service()
+        observer = service._observer = mock.Mock()
+        queue, config = service.queue, service.config
+        declared = {**self.declared, 'local': (*self.declared['local'], 'S:/new')}
+        with mock.patch.object(service, '_start_local') as start, mock.patch.object(service.queue, 'stop') as stop, \
+                mock.patch.object(service, '_local_roots', return_value=[('local', 'S:/new', self.root/'new')]) as paths:
+            service.refresh_roots(declared, self.mounts)
+        observer.stop.assert_not_called()
+        observer.join.assert_not_called()
+        stop.assert_not_called()
+        self.assertIs(service.queue, queue)
+        self.assertIs(service.config, config)
+        self.assertEqual(service.declared_roots, declared)
+        paths.assert_called_once_with({'local': ('S:/new',)})
+        self.assertEqual(start.call_count, int(service.available and config.enabled))
+
     def test_historic_macos_events_do_not_enter_the_queue(self):
         service = mock.Mock()
         with mock.patch.object(push.time, 'time_ns', return_value=100):

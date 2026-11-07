@@ -1,6 +1,6 @@
 # ADR-0065：Cloudflare 后面的来源由本机浏览器打开，验证由浏览器自己过
 
-- 状态：Accepted
+- 状态：已由 [ADR-0134](0134-consumer-control-and-privacy.md) 替代后台浏览器采集决策；下文保留历史依据
 - 日期：2026-09-25
 - 修订：ADR-0060 第五条（UA 走整站、Cookie 由用户贴）与「后果」第二条（自动过验证不做）；[开发约定](../../AGENTS.md) 「被 Cloudflare 拦的站一律放弃」那一条
 - 依据：ADR-0060 的实测（两站只认浏览器过完验证发下的 `cf_clearance`）、`peach-reuse-first`（OpenAver 的做法作参照）

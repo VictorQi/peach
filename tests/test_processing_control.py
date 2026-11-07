@@ -1,5 +1,6 @@
 """馆藏处理控制与启动粗估的隔离行为回归。"""
 import json
+import os
 import tempfile
 import threading
 import time
@@ -18,6 +19,123 @@ from support.ledger import fresh_ledger
 
 
 class ProcessingControlTests(unittest.TestCase):
+    def test_completed_versions_preserve_changes_that_arrive_during_processing(self):
+        from peach.library_new_assets import finish, observe, pending, snapshot
+        self.seed(2)
+        observe(self.db, 1, 100, 1000, new=True)
+        observe(self.db, 2, 100, 1000, new=True)
+        versions = snapshot(self.db, [1, 2])
+        observe(self.db, 1, 100, 2000)
+        finish(self.db, versions)
+        self.assertEqual(pending(self.db), [1])
+        finish(self.db, snapshot(self.db, [1]))
+        self.assertEqual(pending(self.db), [])
+
+    def test_automatic_collection_preserves_interrupted_and_later_file_versions(self):
+        from peach.library_new_assets import observe, pending
+        self.seed(2)
+        for asset_id in (1, 2):
+            observe(self.db, asset_id, 100, 1000, new=True)
+        job = Mock()
+        job.start.side_effect = lambda work, **kwargs: work('isolated-job') or {}
+        contract = SimpleNamespace(db_path=self.db, candidate_root=self.root / 'candidates',
+            cover_root=self.root / 'covers', database=Mock(), library_processing_job=job, cache_bust=Mock())
+        with patch('peach.web_library_processing.settings_file.active', return_value=self.config), \
+                patch('peach.web_library_processing._current', return_value={}), \
+                patch('peach.web_library_processing._processing_request', return_value=(None, [1, 2], 'collect')), \
+                patch('peach.web_library_processing.initial_estimate', return_value={}), \
+                patch('peach.web_library_processing.process_library') as process:
+            process.side_effect = RuntimeError('isolated-interruption')
+            with self.assertRaisesRegex(RuntimeError, 'isolated-interruption'):
+                w_library_processing(contract, {'asset_ids': [1, 2], 'automatic': True})
+            self.assertEqual(pending(self.db), [1, 2])
+            def complete(*args, **kwargs):
+                observe(self.db, 1, 100, 2000)
+                return {'status': 'failed', 'stage': '处理结束', 'completed_at': 1,
+                        'retryable_asset_ids': [2]}
+            process.side_effect = complete
+            w_library_processing(contract, {'asset_ids': [1, 2], 'automatic': True})
+            self.assertEqual(pending(self.db), [1])
+
+    def test_file_versions_queue_only_new_or_changed_events(self):
+        from peach.library_new_assets import _path, observe, pending, remember
+        self.seed(2)
+        observe(self.db, 1, 100, 1000)
+        self.assertEqual(pending(self.db), [])
+        observe(self.db, 1, 100, 2000)
+        self.assertEqual(pending(self.db), [1])
+        remember(self.db, completed=[1])
+        versions = _path(self.db).with_name('incremental-media.json')
+        os.utime(versions, (1, 1))
+        previous_write = versions.stat().st_mtime_ns
+        observe(self.db, 1, 100, 2000)
+        self.assertEqual(pending(self.db), [])
+        self.assertEqual(versions.stat().st_mtime_ns, previous_write)
+        observe(self.db, 2, 100, 1000, new=True)
+        self.assertEqual(pending(self.db), [2])
+
+    def test_automatic_collection_uses_pending_scope_and_respects_paused_work(self):
+        from peach.library_new_assets import remember
+        from peach.web_library_processing import dispatch_incremental
+        self.seed(3)
+        remember(self.db, [2])
+        contract = SimpleNamespace(db_path=self.db)
+        with patch('peach.web_library_processing._current', return_value={'status': 'complete'}), \
+                patch('peach.job_recovery.read', return_value={}), \
+                patch('peach.web_library_processing.w_library_processing') as launch:
+            dispatch_incremental(contract)
+            launch.assert_called_once_with(contract, {'asset_ids': [2], 'stage': 'collect', 'automatic': True})
+        with patch('peach.web_library_processing._current', return_value={'status': 'paused'}), \
+                patch('peach.web_library_processing.w_library_processing') as launch:
+            dispatch_incremental(contract)
+            launch.assert_not_called()
+
+    def test_automatic_collection_does_not_preempt_a_scoped_background_reader(self):
+        from filelock import FileLock
+        from peach.library_new_assets import remember
+        from peach.library_processing import state_path
+        from peach.web_library_processing import dispatch_incremental
+        self.seed(2)
+        remember(self.db, [2])
+        state_path(self.config).parent.mkdir(parents=True, exist_ok=True)
+        with patch('peach.web_library_processing.settings_file.active', return_value=self.config), \
+                patch('peach.web_library_processing._current', return_value={}), \
+                patch('peach.job_recovery.read', return_value={}), \
+                patch('peach.web_library_processing.w_library_processing') as launch:
+            with FileLock(str(state_path(self.config)) + '.lock'):
+                dispatch_incremental(SimpleNamespace(db_path=self.db))
+            launch.assert_not_called()
+
+    def test_task_center_cancel_closes_only_its_requested_versions(self):
+        from peach.library_new_assets import observe, pending
+        from peach.task_control import request
+        from peach.task_runs import TaskRunStore
+        self.seed(3)
+        for asset_id in (1, 2, 3):
+            observe(self.db, asset_id, 100, 1000, new=True)
+        store = TaskRunStore(self.db, host='processing-test')
+        run = store.start('library-processing', trigger='manual')
+        store.suspend(run.id, paused_for_update=False)
+        job_recovery.save(self.db, 'library-processing', 'cancel-test', {'asset_ids': [2]}, run_id=run.id)
+        with patch('peach.settings_file.active', return_value=self.config):
+            request(store, run.id, 'cancel')
+        self.assertEqual(store.get(run.id).status, 'cancelled')
+        self.assertEqual(pending(self.db), [1, 3])
+        observe(self.db, 2, 100, 2000)
+        self.assertEqual(pending(self.db), [1, 2, 3])
+
+    def test_patch_queue_import_keeps_only_pending_items_and_can_be_consumed(self):
+        from peach.library_new_assets import _path, pending, remember
+        self.seed(3)
+        state = _path(self.db).parent
+        state.mkdir(exist_ok=True)
+        (state / 'incremental-media.json').write_text(json.dumps({'items': {
+            '1': {'status': 'complete'}, '2': {'status': 'pending'}, '3': {'status': 'needs_retry'}}}), encoding='utf-8')
+        self.assertEqual(pending(self.db), [2])
+        remember(self.db, completed=[2])
+        self.assertEqual(pending(self.db), [])
+        self.assertTrue((state / 'library-new-assets.json').is_file())
+
     def assert_processing_status(self, contract, expected):
         from peach.web_library_processing import q_library_processing
         deadline = time.monotonic() + 5

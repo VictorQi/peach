@@ -2177,11 +2177,12 @@ class FollowContractTests(unittest.TestCase):
     def test_one_failing_source_does_not_hide_the_others(self):
         self._seed()
         self._seed(provider="rule34xxx", ref="lazyprocrastinator", candidates=())
+        _credential_store(self.contract).save("rule34xxx", {"user_id": "fixture", "api_key": "fixture"})
 
         def factory(provider, **kwargs):
             connector = mock.Mock()
             if provider == "rule34xxx":
-                connector.fetch.side_effect = CredentialError("需要 user_id 与 api_key")
+                connector.fetch.side_effect = CredentialError("user_id 与 api_key 已失效")
             else:
                 connector.fetch.return_value = SourceFetch(
                     provider="rule34video", ref="lazyprocrastinator",
@@ -2221,6 +2222,7 @@ class FollowContractTests(unittest.TestCase):
     def test_one_source_evidence_conflict_does_not_abort_the_other_sources(self):
         self._seed()
         self._seed(provider="rule34xxx", ref="lazyprocrastinator", candidates=())
+        _credential_store(self.contract).save("rule34xxx", {"user_id": "fixture", "api_key": "fixture"})
         persist = FollowStore._persist_evidence
 
         def evidence(store, fetch, moment):
@@ -2754,9 +2756,10 @@ class FollowSourceAddTests(FollowContractTests):
         self.assertEqual(sources[0]["ref"], "lazyprocrastinator")
 
     def test_a_failing_first_check_still_leaves_the_source_registered(self):
-        # rule34.xxx 缺 key 就是这种情况。整个回滚掉反而让人不知道发生了什么。
+        # 凭据完整才入队；远端拒绝已失效的会话也不应回滚来源登记。
+        _credential_store(self.contract).save("rule34xxx", {"user_id": "fixture", "api_key": "fixture"})
         with mock.patch.object(web_follow, "build_connector") as factory:
-            factory.return_value.fetch.side_effect = CredentialError("需要 user_id")
+            factory.return_value.fetch.side_effect = CredentialError("user_id 已失效")
             result = self._post("/api/follow/source", {
                 "action": "add",
                 "url": "https://rule34.xxx/index.php?page=post&s=list&tags=lazy"})
@@ -2765,6 +2768,25 @@ class FollowSourceAddTests(FollowContractTests):
         source = self._get()["sources"][0]
         self.assertEqual(source["last_status"], "unauthorized")
         self.assertIn("user_id", source["last_error"])
+
+    def test_required_source_waits_for_complete_credentials_without_checking(self):
+        for values in ({}, {"user_id": "fixture"}):
+            with self.subTest(values=values):
+                _credential_store(self.contract).save("rule34xxx", values)
+                with mock.patch.object(web_follow, "build_connector") as factory:
+                    result = self._post("/api/follow/source", {
+                        "action": "add", "url": "https://rule34.xxx/index.php?page=post&s=list&tags=lazy"})
+                factory.assert_not_called()
+                self.assertTrue(result["ok"])
+                self.assertTrue(result["checked"]["ok"])
+                self.assertTrue(result["checked"]["deferred"])
+                self.assertEqual(result["checked"]["message"], "已登记，来源凭据尚未配置完整，暂未检查")
+                self.assertNotIn("status", result["checked"])
+                source = self._get()["sources"][0]
+                self.assertEqual(source["id"], result["source"])
+                self.assertIsNone(source["last_checked_at"])
+                self.assertNotEqual(source["last_status"], "unauthorized")
+                self.assertFalse(source["last_error"])
 
     def test_a_busy_check_lock_says_registered_instead_of_staying_silent(self):
         """自动检查正好占着锁的时候，顺带的首次检查做不了。
@@ -2781,7 +2803,7 @@ class FollowSourceAddTests(FollowContractTests):
         self.assertTrue(result["ok"])
         self.assertTrue(result["checked"]["deferred"])
         self.assertTrue(result["checked"]["ok"])
-        self.assertIn("已登记", result["checked"]["message"])
+        self.assertIn("另一次检查正在进行", result["checked"]["message"])
         factory.assert_not_called()
         # 来源本身必须已经落库，稍后的自动检查才有东西可查。
         self.assertEqual(self._get()["sources"][0]["ref"], "lazyprocrastinator")
@@ -2792,16 +2814,21 @@ class FollowSourceAddTests(FollowContractTests):
                        {"action": "add", "url": "https://example.test/creator"})
         self.assertIn("kemono.cr", str(caught.exception))
 
-    def test_a_simpcity_thread_registers_and_the_first_check_asks_for_the_cookie(self):
-        # 没有 cookie 时来源照样登记，首次检查报「未授权」而不是把整次登记回滚。
-        result = self._post("/api/follow/source",
-                            {"action": "add", "url": "https://simpcity.cr/threads/x.4242/"})
+    def test_a_simpcity_thread_registers_without_checking_until_cookie_is_configured(self):
+        with mock.patch.object(web_follow, "build_connector") as factory:
+            result = self._post("/api/follow/source",
+                                {"action": "add", "url": "https://simpcity.cr/threads/x.4242/"})
+        factory.assert_not_called()
         self.assertTrue(result["ok"])
-        self.assertFalse(result["checked"]["ok"])
-        self.assertEqual(result["checked"]["status"], "unauthorized")
-        self.assertIn("cookie", result["checked"]["error"])
+        self.assertTrue(result["checked"]["ok"])
+        self.assertTrue(result["checked"]["deferred"])
+        self.assertEqual(result["checked"]["message"], "已登记，来源凭据尚未配置完整，暂未检查")
+        self.assertNotIn("status", result["checked"])
         source = self._get()["sources"][0]
         self.assertEqual((source["provider"], source["ref"]), ("simpcity", "4242"))
+        self.assertIsNone(source["last_checked_at"])
+        self.assertNotEqual(source["last_status"], "unauthorized")
+        self.assertFalse(source["last_error"])
 
     def test_simpcity_images_are_playable_only_when_the_media_proxy_can_fetch_them(self):
         # 帖子里的图不论挂在站方图床还是哪家第三方图站，都经 /follow-stream 就地看；

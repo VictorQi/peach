@@ -709,11 +709,11 @@ class PushDiscoveryService:
 
     # -- 本地通道
 
-    def _local_roots(self) -> list[tuple[str, str, Path]]:
+    def _local_roots(self, declarations=None) -> list[tuple[str, str, Path]]:
         """列出本地来源的数据库路径前缀及其本机目录；不包含网盘来源。"""
         from .scan import walk_root_for
         found: list[tuple[str, str, Path]] = []
-        for root in self.declared_roots.get("local", ()):
+        for root in (self.declared_roots if declarations is None else declarations).get("local", ()):
             try:
                 directory = walk_root_for(
                     "local", root, declared_roots=self.declared_roots, mounts=self.mounts)
@@ -743,11 +743,11 @@ class PushDiscoveryService:
         if self.config.cloud:
             self.secret.ensure()
 
-    def _start_local(self) -> None:
+    def _start_local(self, roots=None) -> None:
         if not self.config.watch_local:
             self.local_channel = ChannelState(False, "本地通道没有打开")
             return
-        roots = self._local_roots()
+        roots = self._local_roots() if roots is None else roots
         if not roots:
             self.local_channel = ChannelState(False, "本地来源在这台机器上没有可监视的目录")
             return
@@ -757,18 +757,20 @@ class PushDiscoveryService:
             self.local_channel = ChannelState(False, f"文件监视不可用：{error}")
             return
         handler = _LocalEventHandler(self)
-        observer = Observer()
-        for location, root, directory in roots:
-            handler.register(location, root, directory)
-            observer.schedule(handler, str(directory), recursive=True)
+        observer = self._observer or Observer()
         try:
-            observer.start()
+            for location, root, directory in roots:
+                handler.register(location, root, directory)
+                observer.schedule(handler, str(directory), recursive=True)
+            if self._observer is None:
+                observer.start()
         except OSError as error:
-            self.local_channel = ChannelState(False, f"文件监视启动失败：{error}")
+            self.local_channel = ChannelState(self._observer is not None, f"文件监视启动失败：{error}",
+                                              self.local_channel.roots)
             return
         self._observer = observer
         self.local_channel = ChannelState(
-            True, "", tuple(root for _location, root, _ in roots))
+            True, "", tuple(dict.fromkeys((*self.local_channel.roots, *(root for _location, root, _ in roots)))))
 
     def stop(self) -> None:
         observer, self._observer = self._observer, None
@@ -779,6 +781,19 @@ class PushDiscoveryService:
         self.queue.stop()
 
     # -- 设置
+
+    def refresh_roots(self, declared_roots, mounts, *, selected=()) -> None:
+        """热加入只为选中的新增根追加监视，保留旧监视、队列和开关。"""
+        with self._lock:
+            previous = set(self.declared_roots.get('local', ()))
+            self.declared_roots = {key: tuple(value) for key, value in declared_roots.items()}
+            self.mounts = {key: tuple(value) for key, value in mounts.items()}
+            if self.available and self.config.enabled and self.config.watch_local:
+                chosen = set(selected) if selected else set(self.declared_roots.get('local', ())) - previous
+                roots = self._local_roots({'local': tuple(root for root in self.declared_roots.get('local', ())
+                                         if root in chosen and root not in self.local_channel.roots)})
+                if roots:
+                    self._start_local(roots)
 
     def save(self, body: dict) -> dict:
         if not self.available:

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { PICK_FOLDER_URL } from '../../src/configuration-endpoints';
 import { SetupPage } from '../../src/react/pages/setup/setup-page';
+import { SetupQuickOpening } from '../../src/react/pages/setup/setup-quick-start';
 import { SETUP_QUESTIONS_URL, SETUP_URL, type SetupDone, type SetupQuestions } from '../../src/react/pages/setup/setup-api';
 import { RESTART_REDIRECT_MS } from '../../src/react/restart-redirect';
 import { MEDIA_SOURCE_OPTIONS } from '../../src/core/media-sources';
@@ -63,6 +64,8 @@ async function open(over: Partial<SetupQuestions> = {}, routes: Record<string, R
   const api = server({ [SETUP_QUESTIONS_URL]: { status: 200, body: questions(over) }, ...routes });
   const host = await mount(<SetupPage />);
   await settle();
+  const other = buttonNamed('其他设置', host);
+  if (other) { await click(other);await settle() }
   return { host, ...api };
 }
 
@@ -87,6 +90,47 @@ const chooseProcessing = async (root: ParentNode, option: string) => {
 const alertsWith = (root: ParentNode, message: string) =>
   [...root.querySelectorAll('[role="alert"]')].filter((node) => node.textContent?.includes(message));
 const occurrences = (root: HTMLElement, message: string) => (root.textContent ?? '').split(message).length - 1;
+
+it('首次打开可直接选择文件夹，取消不提交；选好就用本地默认开始', async () => {
+  const { fetcher, sent } = server({
+    [SETUP_QUESTIONS_URL]: { status: 200, body: questions() },
+    [PICK_FOLDER_URL]: [{ status: 200, body: { path: null } }, { status: 200, body: { path: 'D:\\Videos' } }],
+    [SETUP_URL]: { status: 200, body: done({ scan_requested: true }) },
+  });
+  const host = await mount(<SetupPage />);
+  await settle();
+  expect(buttonNamed('添加文件夹', host)).not.toBeNull();
+  expect(buttonNamed('开始设置', host)).toBeNull();
+  await click(buttonNamed('添加文件夹', host));
+  expect(fetcher.mock.calls.filter(([url]) => url === SETUP_URL)).toHaveLength(0);
+  await click(buttonNamed('添加文件夹', host));
+  expect(sent(SETUP_URL)).toMatchObject({ host: '1', access_enabled: false, scan_now: true, history_guide: false,
+    media_dir: [{ path: 'D:\\Videos', location: 'local', cost: 'free', library_policy: 'local' }] });
+  expect(fetcher.mock.calls.filter(([url]) => url === SETUP_URL)).toHaveLength(1);
+});
+
+it('暂不添加直接进入，既不扫描也不邀请教程', async () => {
+  const { sent } = server({ [SETUP_QUESTIONS_URL]: { status: 200, body: questions() },
+    [SETUP_URL]: { status: 200, body: done({ skip_media: true }) } });
+  const host = await mount(<SetupPage />);
+  await settle();
+  await click(buttonNamed('暂不添加', host));
+  expect(sent(SETUP_URL)).toMatchObject({ media_dir: [], skip_media: true, scan_now: false, host: '1', history_guide: false });
+});
+
+it('首次服务准备好才接续馆藏，断连等待不打开其他窗口', async () => {
+  vi.useFakeTimers();
+  const replace = vi.fn();
+  vi.stubGlobal('location', { replace });
+  const fetcher = vi.fn().mockResolvedValueOnce({ ok: false, json: async () => ({ ready: false }) })
+    .mockResolvedValue({ ok: true, json: async () => ({ ready: true }) });
+  vi.stubGlobal('fetch', fetcher);
+  await mount(<SetupQuickOpening done={done({ redirect: 'http://127.0.0.1:8900/' })} />);
+  expect(replace).not.toHaveBeenCalled();
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000) });
+  expect(replace).toHaveBeenCalledExactlyOnceWith('http://127.0.0.1:8900/');
+  expect(fetcher.mock.calls[0]?.[0]).toBe('/healthz?ready=1');
+});
 
 it('分步设置返回后保留目录，确认前不提交配置', async () => {
   const { host, fetcher } = await open();
@@ -134,7 +178,7 @@ it('首启版本统计与错误诊断默认勾选，取消后共同关闭', asyn
     fields: { usage: '版本与系统', errors: '异常链与错误码' }, notice: '不发送媒体信息' };
   const { host, sent } = await open({ remote_reporting: reporting, access_enabled: false },
     { [SETUP_URL]: { status: 200, body: done() } });
-  const reportingSwitches = host.querySelectorAll<HTMLInputElement>('input[aria-label="发送版本统计与错误诊断（推荐）"]');
+  const reportingSwitches = host.querySelectorAll<HTMLInputElement>('input[aria-label="发送版本统计与错误诊断"]');
   expect(reportingSwitches).toHaveLength(1);
   expect(reportingSwitches[0]!.checked).toBe(true);
   await click(reportingSwitches[0]!);
@@ -522,5 +566,5 @@ it('读题失败时给原因和重试', async () => {
   await click(buttonNamed('立即重试', host));
   await settle();
   expect(fetcher).toHaveBeenCalledTimes(2);
-  expect(paths(host)).toHaveLength(1);
+  expect(buttonNamed('添加文件夹', host)).not.toBeNull();
 });

@@ -20,6 +20,7 @@ import type { Browser, Locator, Page } from 'playwright-core';
 
 import { configurationBody, expectBody, layout, launch, requiredEnv, settle, unmanagedScrollers, visit, VIEWPORTS } from './harness.ts';
 import { mockJavDetail } from './jav-detail-fixture.ts';
+import { prepareKnownHomeFeed } from './home-feed-fixture.ts';
 
 interface Route {
   path: string;
@@ -228,17 +229,22 @@ describe('路由冒烟', () => {
     }
   }
 
-  /* 任务页与常驻的结果更新共用查询：离页卸掉任务页，结果更新继续低频读取。
+  /* 任务页与常驻结果更新分别查询：离页停止完整任务读取，结果更新继续低频读取。
      固定空态让轮询保持十秒间隔；回到任务页前撤掉拦截，再读取服务端真实任务。
      换页走 pushState + popstate：侧栏按钮、抽屉和浏览器后退最后走的都是这一条路。 */
   it('离开任务页卸载旧根，全局结果轮询持续，返回读取真实任务', { timeout: 120_000 }, async () => {
     const polls: number[] = [];
+    const fullPolls: number[] = [];
     const opened = await visit(browser, '/tasks', DESKTOP, async (page) => {
       await page.route('**/api/tasks', route => route.fulfill({ json: {
         available: true, running: [], skipped: [], finished: [], finished_has_more: false,
       } }));
+      await page.route('**/api/result-updates', route => route.fulfill({ json: {
+        busy: false, result_versions: {},
+      } }));
       page.on('request', (request) => {
-        if (new URL(request.url()).pathname === '/api/tasks') polls.push(performance.now());
+        if (new URL(request.url()).pathname === '/api/result-updates') polls.push(performance.now());
+        if (new URL(request.url()).pathname === '/api/tasks') fullPolls.push(performance.now());
       });
     });
     try {
@@ -247,7 +253,7 @@ describe('路由冒烟', () => {
           if (polls.length >= least) return;
           await opened.page.waitForTimeout(250);
         }
-        assert.ok(polls.length >= least, `${what}：只看到 ${polls.length} 次 /api/tasks，要 ${least} 次`);
+        assert.ok(polls.length >= least, `${what}：只看到 ${polls.length} 次结果刷新，要 ${least} 次`);
       };
       await expectBody(opened.page, '/tasks', tasksBody(opened.page));
       // 先取得首屏与下一次轮询，离页后才能核对共享查询的节律。
@@ -262,6 +268,7 @@ describe('路由冒烟', () => {
       await expectBody(opened.page, '/stats', [statsInventoryTab(opened.page)]);
       await settle(opened.page);
       const leftAt = polls.length;
+      const fullAt = fullPolls.length;
       // 统计页自己也是 React 档：管理区正文里应当只剩它那一棵根。
       assert.equal(await opened.page.locator('#stats .peach-react').count(), 1,
         '管理区正文里不是只剩统计页那一棵 React 根');
@@ -272,6 +279,7 @@ describe('路由冒烟', () => {
       // 两秒余量容纳导航与计时误差，也能拒绝活跃任务的两秒节律或并行的重复请求。
       await opened.page.waitForTimeout(12_000);
       const continued = polls.slice(leftAt);
+      assert.equal(fullPolls.length, fullAt, '离开任务页后不再组装完整任务列表');
       assert.ok(continued.length >= 1 && continued.length <= 2,
         `离开任务页后全局结果轮询应持续单路低频读取，十二秒内看到 ${continued.length} 次请求`);
       for (let index = leftAt; index < polls.length; index += 1) {
@@ -296,7 +304,7 @@ describe('路由冒烟', () => {
   /* 首页那一行新作只属于目录页：从首页进统计页要收起保留，取数还没回来就离开的那一轮
      也不许回头把它画到管理区上。演示库没有订阅，新作由拦截的接口给一条。 */
   it('离开首页之后新作那一行收起，晚到的取数也不画回来', { timeout: 60_000 }, async () => {
-    const opened = await visit(browser, '/stats', DESKTOP);
+    const opened = await visit(browser, '/stats', DESKTOP, prepareKnownHomeFeed);
     try {
       let hold: Promise<void> | null = null;
       let served = 0;
@@ -365,7 +373,7 @@ describe('路由冒烟', () => {
   /* 还没装进本机的新作只有来源给的封套地址，没有边车。贴右缘的话 0.75 的卡片比正封宽，
      左边带进一条书脊；按正封先验比例 0.704 从右缘量回去才只剩正封。 */
   it('远程封套按正封先验比例切，不带进书脊', { timeout: 60_000 }, async () => {
-    const opened = await visit(browser, '/stats', DESKTOP);
+    const opened = await visit(browser, '/stats', DESKTOP, prepareKnownHomeFeed);
     try {
       await expectBody(opened.page, '/stats', [statsInventoryTab(opened.page)]);
       const remote = 'https://covers.example.test/sleeve.svg';
@@ -397,7 +405,7 @@ describe('路由冒烟', () => {
   /* 最近一轮取封面断在连接上、这一行又还有没封面的卡时，行上方挂一条 Note 指去采集页。
      一排「无封面」自己说不清是官方没出还是线路不通。 */
   it('封面连不上图片主机时新作那一行上方指去配连接方式', { timeout: 60_000 }, async () => {
-    const opened = await visit(browser, '/stats', DESKTOP);
+    const opened = await visit(browser, '/stats', DESKTOP, prepareKnownHomeFeed);
     try {
       await opened.page.route(/\/api\/feeds\/discoveries\?/, (route) => route.fulfill({ json: {
         ok: true, more: false, cover_network: 3, items: [{

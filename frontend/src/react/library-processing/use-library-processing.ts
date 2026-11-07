@@ -30,17 +30,16 @@ export function useLibraryProcessingJob(
     refetchInterval: (query) => pollInterval(query.state.data, watching),
   });
   const [settled, setSettled] = useState<LibraryProcessingData | null>(null);
-  const previous = useRef<string | undefined>(undefined);
+  const previous = useRef<LibraryProcessingData | undefined>(undefined);
   const state = job.data;
   useEffect(() => {
     if (!state) return;
     const was = previous.current;
-    previous.current = state.status;
-    const witnessed = !!was && ['running', 'pausing', 'paused', 'stopping'].includes(was) && !processingActive(state);
+    previous.current = state;
+    const witnessed = !!was && !!state.job_id && was.job_id === state.job_id
+      && ['running', 'pausing', 'paused', 'stopping'].includes(was.status) && !processingActive(state);
     if (witnessed) setSettled(state);
-    /* 任务面还要认「刚结束」：首次引导那一趟常在跳到目录页之前就跑完，它从没见过
-       「运行中」。卡片只认自己看着跑完的那一趟。 */
-    if (witnessed || mode === 'notice') announceCompletion(state, toast, witnessed);
+    if (witnessed) announceCompletion(state, toast, witnessed);
   }, [state, mode, toast]);
 
   return { job, settled, forget: () => setSettled(null) };

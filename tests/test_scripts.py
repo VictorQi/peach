@@ -5217,7 +5217,7 @@ class ReleaseDownloadNotesTests(unittest.TestCase):
         from scripts.package_windows_release import download_notes
         links = re.findall(r'https://[^\s)]+', download_notes('1.0.0', lite_installer=True))
         self.assertEqual(len(links), 8)
-        self.assertTrue(all(url.startswith('https://github.com/peach-mitao/peach/releases/download/v1.0.0/')
+        self.assertTrue(all(url.startswith('https://github.com/VictorQi/peach/releases/download/v1.0.0/')
                             for url in links))
 
     def test_r2_release_notes_link_both_native_platforms_and_tagged_docs(self):

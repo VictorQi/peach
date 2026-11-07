@@ -3,7 +3,6 @@ import { createPortal, flushSync } from 'react-dom';
 import { Button } from '@/components/base/buttons/button';
 import { RiFolderLine, RiListCheck3, RiPlayCircleLine, RiRocketLine, RiRssLine, RiBarChartLine, RiDownloadCloudLine, RiSmartphoneLine, RiCheckboxCircleLine } from '@remixicon/react';
 import { Radio } from 'react-aria-components';
-import { toast } from 'sonner';
 import { SEGMENT, SEGMENTED_TRACK, SegmentedRadioGroup } from '../components/segmented';
 import { apiGet } from '../../api';
 import { isPreferencePath, navigationBackground, peachHistory } from '../../history';
@@ -66,21 +65,17 @@ function GettingStarted({ go }: { go(path: string): void }) {
   </div>;
 }
 
-const SYNC_TOAST = 'tutorial-sync';
 
 export function TutorialCenter({ actions }: { actions: ShellActions }) {
   const [open, setOpen] = useState(false);
-  const [invitation, setInvitation] = useState(false);
   const [tab, setTab] = useState<'start' | 'interface' | 'settings'>('interface');
   const [query, setQuery] = useState('');
   const [progress, setProgress] = useState<GuideProgress>(emptyProgress);
-  const [ready, setReady] = useState(false);
   const [syncError, setSyncError] = useState('');
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
   const body = useOverlayScrollbar<HTMLDivElement>();
   const session = useRef<GuideSession | null>(null);
-  const invitationSession = useRef<GuideSession | null>(null);
   const epoch = useRef(0);
   const progressRef = useRef(progress); progressRef.current = progress;
   const position = useRef(0);
@@ -89,7 +84,6 @@ export function TutorialCenter({ actions }: { actions: ShellActions }) {
   const dirty = useRef(false);
   const startRequest = useRef<(chapter: GuideChapter, resume: boolean) => void>(() => {});
   const writes = useRef(Promise.resolve());
-  const pendingWrites = useRef(0);
   const revision = useRef(0);
   const mounted = useRef(true);
   const applyProgress = (next: GuideProgress) => { progressRef.current = next; setProgress(next) };
@@ -98,9 +92,8 @@ export function TutorialCenter({ actions }: { actions: ShellActions }) {
     try {
       const next = await readGuideProgress();
       if (!mounted.current || ticket !== revision.current) return false;
-      applyProgress(next); setReady(true);
+      applyProgress(next);
       if (clearError) setSyncError('');
-      if (!session.current) setInvitation(!next.invited && !next.completed);
       return true;
     } catch {
       if (mounted.current) setSyncError('未取得账本中的教程状态，请重新读取。');
@@ -110,7 +103,6 @@ export function TutorialCenter({ actions }: { actions: ShellActions }) {
   const save = (next: GuideProgress, action: GuideAction) => {
     applyProgress(next);
     const ticket = ++revision.current;
-    pendingWrites.current += 1;
     writes.current = writes.current.then(async () => {
       try {
         const saved = await saveGuideProgress(next.campaign, action);
@@ -120,65 +112,22 @@ export function TutorialCenter({ actions }: { actions: ShellActions }) {
           setSyncError('教程进度未保存到本机账本，其他设备尚未同步。请重新读取后继续。');
           if (ticket === revision.current) await refresh(false);
         }
-      } finally { pendingWrites.current -= 1 }
+      }
     });
   };
-  const refreshRef = useRef(refresh); refreshRef.current = refresh;
-  /* 教程窗口关着时，同步失败走全站通知栈：和回执、后台任务同一列上下排开，不各自钉在右下角
-     叠成一摞。窗口开着时由窗口里的那条提示负责。 */
-  useEffect(() => {
-    if (!syncError || open) { toast.dismiss(SYNC_TOAST); return }
-    toast.error(syncError, {
-      id: SYNC_TOAST, toasterId: 'receipts', duration: Infinity,
-      action: { label: '重新读取', onClick: (event) => { event.preventDefault(); void refreshRef.current() } },
-    });
-  }, [syncError, open]);
-  useEffect(() => () => { toast.dismiss(SYNC_TOAST) }, []);
-  useEffect(() => {
-    if (!ready && !syncError) return;
-    const entry = document.getElementById('tutorialBtn');
-    if (entry) entry.hidden = !syncError && progress.completed;
-  }, [progress.completed, ready, syncError]);
-  const dismissInvite = () => {
-    invitationSession.current?.stop(); invitationSession.current = null;
-    setInvitation(false); save({ ...progressRef.current, invited: true }, { action: 'dismiss' });
-  };
-  useEffect(() => {
-    if (!invitation || open || syncError || !ready) return;
-    let cancelled = false;
-    let intro: GuideSession | null = null;
-    void import('../../onboarding/guide-driver').then(({ createGuideSession }) => {
-      if (cancelled) return;
-      intro = createGuideSession({
-        mountPopover: mountGuidePopover,
-        invitation: true, navigate: actions.navigate, previous: () => {}, close: dismissInvite,
-        next: () => { dismissInvite(); setOpen(true) },
-      });
-      invitationSession.current = intro;
-      void intro.show({ id: 'tutorial-entry', title: '从这里打开新手教程',
-        body: '点击这个指南针，先用 4 步认识 Peach。其他功能用到时再看。', target: '#tutorialBtn' }, 0, 1);
-    }).catch(() => setSyncError('教程提示未能加载，请重新读取。'));
-    return () => {
-      cancelled = true;
-      const closing = intro;
-      if (invitationSession.current === closing) invitationSession.current = null;
-      queueMicrotask(() => closing?.stop());
-    };
-  }, [invitation, open, syncError, ready]);
   const restoreFocus = () => {
     const target = returnFocus.current;
     if (target?.isConnected && target.getBoundingClientRect().width) target.focus();
     else document.getElementById('settingsBtn')?.focus();
   };
-  const stop = (reopen = false) => {
+  const stop = (restore = false) => {
     epoch.current += 1; session.current?.stop(); session.current = null;
     document.body.classList.remove('peach-guiding'); setLoading(false);
-    if (reopen) {
+    if (restore) {
       actions.closeSettings?.();
       if (returnPath.current && returnPath.current !== `${location.pathname}${location.search}${location.hash}`) actions.navigate(returnPath.current);
-      setOpen(true);
     }
-    else restoreFocus();
+    restoreFocus();
   };
   useEffect(() => {
     mounted.current = true;
@@ -192,28 +141,17 @@ export function TutorialCenter({ actions }: { actions: ShellActions }) {
       const opener = document.activeElement as HTMLElement;
       await writes.current;
       if (!mounted.current) return;
-      const loaded = await refresh();
-      if (!loaded || request.invitation) return;
-      stop(); returnFocus.current = opener;
+      returnFocus.current = opener; stop();
       setNotice(''); setQuery('');
+      setOpen(true);
+      const loaded = await refresh();
+      if (!loaded || !mounted.current) return;
       const requested = GUIDE_CHAPTERS.find(item => item.id === request.chapter);
-      if (request.reopen) {
-        setInvitation(false);
-        save({ ...progressRef.current, invited: true, completed: false }, { action: 'reopen' });
-      } else dismissInvite();
-      restoreFocus();
       if (requested) { setTab(requested.kind); startRequest.current(requested, false) }
       else setOpen(true);
     })() });
-    const onFocus = () => {
-      if (document.visibilityState === 'visible' && !session.current && !pendingWrites.current) void refresh();
-    };
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onFocus);
     return () => {
       mounted.current = false;
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onFocus);
       unlisten(); releaseDraft(); epoch.current += 1; session.current?.stop();
       document.body.classList.remove('peach-guiding');
       document.removeEventListener('input', onChange); document.removeEventListener('change', onChange);
@@ -244,7 +182,7 @@ export function TutorialCenter({ actions }: { actions: ShellActions }) {
       if (new URLSearchParams(location.search).has('edit')) destination.searchParams.set('edit', '');
       returnPath.current = `${destination.pathname}${destination.search}${destination.hash}`;
       position.current = Math.min(from, chapter.steps.length - 1);
-      dismissInvite(); flushSync(() => setOpen(false)); document.body.classList.add('peach-guiding');
+      flushSync(() => setOpen(false)); document.body.classList.add('peach-guiding');
       const show = () => {
         const value = progressRef.current;
         const row = value.chapters[chapter.id] || { next: 0, read: [], skipped: [] };
@@ -255,7 +193,7 @@ export function TutorialCenter({ actions }: { actions: ShellActions }) {
       session.current = createGuideSession({
         mountPopover: mountGuidePopover,
         navigate: actions.navigate,
-        close: () => { stop(true); setTab(chapter.kind) },
+        close: () => stop(true),
         leave: () => stop(),
         previous: () => { if (position.current > 0) { position.current -= 1; show() } },
         next: async (skipped = false) => {
@@ -271,7 +209,7 @@ export function TutorialCenter({ actions }: { actions: ShellActions }) {
               ? '本章已结束，未显示的步骤尚未完成，可以稍后继续。'
               : chapter.id === 'basics'
               ? progressRef.current.completed
-                ? '快速导览已完成，所有设备的教程入口都会收起。以后可到设置 → Peach 配置 → 应用与维护 → 新手教程重新打开，其余内容按需查看。'
+                ? '快速导览已完成。需要时可从帮助入口查看其他内容。'
                 : '导览已结束，但完成状态未保存。请重新读取教程状态后再试。'
               : '这段导览已完成。需要时再了解其他功能。');
           } else { position.current = next; show() }

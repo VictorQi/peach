@@ -164,6 +164,32 @@ class PosixShapeTests(_ScanCase):
             self._scan('R:\\media', **options)
             self.assertEqual(pending(self.db), [])
 
+    def test_full_scan_queues_changed_videos_without_reprocessing_unchanged_files(self):
+        from peach.library_new_assets import pending, remember
+        options = dict(declared_roots={'local': ('R:\\media',)}, mounts={'local': (self.media,)}, windows=False)
+        self._scan('R:\\media', **options)
+        original = pending(self.db)
+        remember(self.db, completed=original)
+        video = self.media / '创作者/sub/a.mp4'
+        stamp = video.stat().st_mtime_ns
+        os.utime(video, ns=(stamp, stamp + 1_000_000))
+        self._scan('R:\\media', **options)
+        self.assertEqual(pending(self.db), original)
+        remember(self.db, completed=original)
+        self._scan('R:\\media', **options)
+        self.assertEqual(pending(self.db), [])
+
+    def test_a_reappearing_watched_video_is_queued_even_when_its_version_is_unchanged(self):
+        from peach.library_new_assets import pending, remember
+        options = dict(declared_roots={'local': ('R:\\media',)}, mounts={'local': (self.media,)}, windows=False)
+        self._scan('R:\\media', **options)
+        original = pending(self.db)
+        remember(self.db, completed=original)
+        with closing(sqlite3.connect(self.db)) as connection, connection:
+            connection.execute("UPDATE asset SET disposal='vanished' WHERE medium='video'")
+        scan.ingest_path(self.db, 'local', 'R:\\media\\创作者\\sub\\a.mp4', **options)
+        self.assertEqual(pending(self.db), original)
+
     def test_windows_mount_mapping_has_the_same_ledger_path_contract(self):
         options = dict(declared_roots={'local': ('R:\\media',)}, mounts={'local': (self.media,)}, windows=True)
         self.assertEqual(scan.walk_root_for('local', 'R:\\media\\创作者', **options), self.media / '创作者')

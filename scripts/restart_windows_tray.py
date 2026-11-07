@@ -29,7 +29,8 @@ from peach.config import DATABASE_PATH, STATE_DIR
 from peach.jobs import process_alive
 from peach.runtime_prepare import Dependencies, RestartPreparation, read_record, task_gate
 from peach.windows_restart import (
-    DEFAULT_TIMEOUT, find_tray_windows, restart_source_tray, restart_tray, venv_holders,
+    DEFAULT_TIMEOUT, find_tray_windows, restart_source_tray, restart_tray, standalone_target,
+    venv_holders,
 )
 
 
@@ -63,13 +64,14 @@ def main(argv: list[str] | None = None) -> int:
                          ensure_ascii=False))
         return 1
 
-    prepare = preparation()
     timeout = max(1.0, args.timeout)
     if not args.source and find_tray_windows(args.target):
+        # 独立包自带运行环境，不能同步发起重启的源码工作树 venv。
+        prepare = None if standalone_target(args.target) else preparation()
         result = restart_tray(args.target, timeout=timeout, swap_from=args.swap_from,
                               prepare=prepare)
     else:
-        result = restart_source_tray(timeout=timeout, prepare=prepare)
+        result = restart_source_tray(timeout=timeout, prepare=preparation())
     payload = asdict(result)
     payload["tasks"] = gate.as_dict()
     if result.new_tray_pid is not None:

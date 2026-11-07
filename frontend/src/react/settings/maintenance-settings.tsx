@@ -41,11 +41,11 @@ export function MaintenanceSettings(
   );
 }
 
-/** 恢复账本共享的教程入口，保留首次设置与章节进度。 */
+/** 用户主动查看教程，保留章节进度。 */
 export function TutorialSettings({ reopenTutorial }: ConfigurationProps) {
   return (
     <section aria-label="新手教程" className="w-full"><SettingsCard>
-      <Rows><SettingsRow label="新手教程" description="在所有设备上恢复右上角教程入口，保留已读进度">
+      <Rows><SettingsRow label="新手教程" description="按需要查看使用说明，保留已读进度">
         <Button variant="secondary" onClick={() => void reopenTutorial()}>重新打开</Button>
       </SettingsRow></Rows>
     </SettingsCard></section>

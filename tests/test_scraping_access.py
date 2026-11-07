@@ -3,7 +3,6 @@ import json
 import io
 from pathlib import Path
 import tempfile
-import threading
 import time
 from types import SimpleNamespace
 import unittest
@@ -24,10 +23,69 @@ class ScrapingAccessTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
-        # 这台机器上装着 Edge 的话，两个 Cloudflare 来源会真的拉起浏览器；测试里当作没有浏览器。
-        finder = patch("peach.browser_transport.find_browser", return_value=None)
-        finder.start()
-        self.addCleanup(finder.stop)
+
+    def test_collection_uses_http_even_with_a_saved_browser_preference(self):
+        from peach.follow_secrets import CredentialStore
+
+        calls = []
+        def respond(request):
+            calls.append(str(request.url))
+            return httpx.Response(200, text='<title>作品资料</title>')
+        def client(root, source, **kwargs):
+            return client_for(root, source, transport=httpx.MockTransport(respond), **kwargs)
+
+        for source, url in (('fc2ppvdb', 'https://fc2ppv-db.com/ja/videos/1'),
+                            ('javten', 'https://javten.com/video/1'),
+                            ('minnano-av', 'https://www.minnano-av.com/actress/1')):
+            with self.subTest(source=source):
+                CredentialStore(self.root).save('scraping-' + source, {'transport': 'browser'})
+                transport = SourceTransport(self.root)
+                self.addCleanup(transport.close)
+                with patch('peach.scraping_access.client_for', side_effect=client), \
+                        patch('subprocess.Popen') as process, patch('webbrowser.open') as window, \
+                        patch('peach.browser_transport._Browser') as browser:
+                    self.assertEqual(transport(HttpRequest('GET', url, {}), 5, 1024).status, 200)
+                process.assert_not_called()
+                window.assert_not_called()
+                browser.assert_not_called()
+        self.assertEqual(len(calls), 3)
+
+    def test_refusal_verification_and_origin_failure_stop_without_opening_an_application(self):
+        from peach.scraping_access import SourcePaused, paused_until
+
+        for status, body in ((403, b''), (429, b''), (522, b''),
+                             (200, b'<title>Just a moment...</title>')):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                transport = SourceTransport(root)
+                self.addCleanup(transport.close)
+                requests = []
+                def answer(request, *_, requests=requests, status=status, body=body):
+                    requests.append(request.url)
+                    return HttpResponse(status, {}, body, request.url)
+                transport.transports['minnano-av'] = answer
+                request = HttpRequest('GET', 'https://www.minnano-av.com/actress/1', {})
+                with patch('subprocess.Popen') as process, patch('webbrowser.open') as window, \
+                        patch('peach.browser_transport._Browser') as browser:
+                    with self.assertRaises(SourcePaused):
+                        transport(request, 5, 1024)
+                    with self.assertRaises(SourcePaused):
+                        SourceTransport(root)(request, 5, 1024)
+                self.assertEqual(len(requests), 1)
+                self.assertGreater(paused_until(root, 'minnano-av'), time.time())
+                process.assert_not_called()
+                window.assert_not_called()
+                browser.assert_not_called()
+
+    def test_a_saved_browser_cooldown_survives_the_http_only_upgrade(self):
+        from peach.scraping_access import SourcePaused, cooldown_path
+
+        cooldown_path(self.root, 'minnano-av').write_text(json.dumps({
+            'until': time.time() + 600, 'blocks': 1, 'via': 'browser',
+        }), encoding='utf-8')
+        with patch('peach.scraping_access.client_for') as client, self.assertRaises(SourcePaused):
+            SourceTransport(self.root)(HttpRequest('GET', 'https://www.minnano-av.com/', {}), 5, 1024)
+        client.assert_not_called()
 
     def test_independent_installations_never_share_session_or_proxy(self):
         peach_proxy.save(self.root, {"mode": "proxy", "proxy": "http://user:private-proxy@127.0.0.1:7890"})
@@ -68,6 +126,7 @@ class ScrapingAccessTests(unittest.TestCase):
         self.addCleanup(transport.close)
         with patch("peach.scraping_access.client_for") as factory:
             fake = factory.return_value
+            fake.stream.return_value.__enter__.return_value.status_code = 200
             fake.stream.return_value.__enter__.return_value.iter_bytes.return_value = [b"ok"]
             for _ in range(2):
                 transport(HttpRequest("GET", "https://pics.dmm.co.jp/x", {}), 1, 10)
@@ -134,18 +193,6 @@ class ScrapingAccessTests(unittest.TestCase):
         self.assertEqual(seen[1].headers.get_list("Accept-Language"), ["zh-CN,zh;q=0.9"])
         self.assertEqual(seen[1].headers["X-Test"], "preserved")
 
-    def test_browser_obeys_global_direct_proxy_and_environment_modes(self):
-        transport = SourceTransport(self.root)
-        self.addCleanup(transport.close)
-        for mode, direct, proxy in (("direct", True, ""),
-                                    ("proxy", False, "http://127.0.0.1:7890"),
-                                    ("environment", False, "")):
-            with self.subTest(mode=mode):
-                peach_proxy.save(self.root, {"mode": mode, "proxy": "http://127.0.0.1:7890"})
-                with patch("peach.browser_transport.shared") as shared:
-                    transport._browser_for("javten")
-                self.assertEqual(shared.call_args.kwargs["direct"], direct)
-                self.assertEqual(shared.call_args.kwargs["proxy"], proxy)
 
     def test_switching_networks_releases_the_previous_exit_cooldown(self):
         from peach.scraping_access import pause_source, paused_until
@@ -340,6 +387,7 @@ class ScrapingAccessTests(unittest.TestCase):
         self.addCleanup(transport.close)
         with patch("peach.scraping_access.client_for") as factory:
             fake = factory.return_value
+            fake.stream.return_value.__enter__.return_value.status_code = 200
             fake.stream.return_value.__enter__.return_value.iter_bytes.return_value = [b"ok"]
             transport(HttpRequest("GET", "https://www.javbus.com/MIDE-594", {}), 1, 10)
             transport(HttpRequest("GET", "https://pics.dmm.co.jp/x", {}), 1, 10)
@@ -356,6 +404,7 @@ class ScrapingAccessTests(unittest.TestCase):
         self.addCleanup(transport.close)
         with patch("peach.scraping_access.client_for") as factory:
             fake = factory.return_value
+            fake.stream.return_value.__enter__.return_value.status_code = 200
             fake.stream.return_value.__enter__.return_value.iter_bytes.return_value = [b"ok"]
             transport(HttpRequest("GET", "https://fc2cmadb.com/articles/4030617", {}), 1, 10)
         self.assertEqual(factory.call_args.args[1], "fc2cmadb")
@@ -368,9 +417,8 @@ class ScrapingAccessTests(unittest.TestCase):
         """`cf_clearance` 绑着解题那台浏览器的 UA：整站 UA 与用户的 Chrome 一致，Cookie 由用户贴，卡上不另收 UA。"""
         from peach.user_agent import USER_AGENT
         shown = save(self.root, "fc2ppvdb", {"cookie": "cf_clearance=abc"})
-        self.assertEqual(set(shown), {"source", "label", "login", "accepts_cookie", "network", "cookie_saved", "browser", "cooldown_until"})
+        self.assertEqual(set(shown), {"source", "label", "login", "accepts_cookie", "network", "cookie_saved", "cooldown_until"})
         self.assertTrue(shown["cookie_saved"])
-        self.assertFalse(shown["browser"], "没有浏览器的机器上这张卡照旧收 Cookie")
         for name in ("fc2ppvdb", "javten"):
             with client_for(self.root, name) as client:
                 self.assertEqual(client.headers["user-agent"], USER_AGENT, name)
@@ -378,112 +426,13 @@ class ScrapingAccessTests(unittest.TestCase):
         self.addCleanup(transport.close)
         with patch("peach.scraping_access.client_for") as factory:
             fake = factory.return_value
+            fake.stream.return_value.__enter__.return_value.status_code = 200
             fake.stream.return_value.__enter__.return_value.iter_bytes.return_value = [b"ok"]
             transport(HttpRequest("GET", "https://fc2ppv-db.com/ja/videos/4898837", {}), 1, 10)
             transport(HttpRequest("GET", "https://javten.com/search?kw=4898837", {}), 1, 10)
         self.assertEqual([(call.args[1], call.kwargs["session"]) for call in factory.call_args_list],
                          [("fc2ppvdb", True), ("javten", True)])
 
-    def test_the_cloudflare_sources_go_through_the_local_browser_when_there_is_one(self):
-        """有浏览器的机器上两站的请求在浏览器页面里发（ADR-0065）：连接方式换成启动参数，Cookie 不再是必需的。"""
-        save(self.root, "fc2ppvdb", {"network": "direct"})
-        peach_proxy.save(self.root, {"mode": "proxy", "proxy": "socks5://127.0.0.1:7890"})
-        fake = lambda request, timeout, max_bytes: HttpResponse(200, {}, b"page", request.url)
-        fake.close = lambda: self.fail("浏览器是进程共用的，SourceTransport.close 不许关它")
-        transport = SourceTransport(self.root)
-        with patch("peach.browser_transport.shared", return_value=fake) as shared:
-            transport(HttpRequest("GET", "https://fc2ppv-db.com/ja/videos/1", {}), 1, 100)
-            transport(HttpRequest("GET", "https://javten.com/search?kw=1", {}), 1, 100)
-        self.assertEqual([(call.kwargs["direct"], call.kwargs["proxy"]) for call in shared.call_args_list],
-                         [(True, ""), (False, "socks5://127.0.0.1:7890")])
-        self.assertEqual(shared.call_args.args, (self.root / "browser",))
-        self.assertEqual(shared.call_args_list[0].kwargs["gates"],
-                         {"fc2ppv-db.com": {"path": "/age-verify", "button": r"18|はい|入場|同意|以上|Enter|Yes"}},
-                         "FC2PPV-DB 的年龄门交给浏览器传输去点")
-        self.assertEqual(shared.call_args_list[1].kwargs["gates"], {}, "JAVten 没有门")
-        transport.close()
-        self.assertFalse(describe(self.root, "javten")["browser"])
-        with patch("peach.browser_transport.find_browser", return_value="C:/edge.exe"):
-            self.assertTrue(describe(self.root, "javten")["browser"])
-        with patch("peach.scraping_access.client_for") as factory, \
-                patch("peach.browser_transport.shared", return_value=None):
-            factory.return_value.stream.return_value.__enter__.return_value.iter_bytes.return_value = [b"ok"]
-            SourceTransport(self.root)(HttpRequest("GET", "https://javten.com/", {}), 1, 10)
-        self.assertEqual(factory.call_args.kwargs["session"], True, "没有浏览器就退回带 Cookie 的直连")
-
-    def test_an_unsolved_challenge_pauses_the_source_and_a_lost_browser_reads_as_a_connection_failure(self):
-        from peach import browser_transport
-        from peach.scraping_access import SourcePaused
-        cooldown = self.root / "scraping-fc2ppvdb.cooldown.json"
-        request = HttpRequest("GET", "https://fc2ppv-db.com/ja/videos/1", {})
-
-        def unsolved(*args):
-            raise browser_transport.ChallengeUnsolved("fc2ppv-db.com 的人机验证在 150 秒内没有通过")
-
-        transport = SourceTransport(self.root)
-        transport.transports["fc2ppvdb"] = unsolved
-        with self.assertRaises(SourcePaused) as caught:
-            transport(request, 1, 100)
-        self.assertIn("点一下验证", str(caught.exception))
-        self.assertTrue(cooldown.exists())
-        cooldown.unlink()
-
-        def lost(*args):
-            raise browser_transport.BrowserUnavailable("浏览器请求未取得")
-
-        transport.transports["fc2ppvdb"] = lost
-        with self.assertRaises(httpx.TransportError):
-            transport(request, 1, 100)
-        self.assertFalse(cooldown.exists(), "浏览器断了是连接问题，不记来源的账")
-
-    def test_a_pause_earned_on_the_direct_path_does_not_hold_back_the_browser(self):
-        """直连 403 攒下的冷却不压到浏览器那条路上：换了路就作废，浏览器撞验证没过从第一档重新数。"""
-        from peach import browser_transport
-        from peach.scraping_access import FIRST_BLOCKED_PAUSE, SourcePaused
-
-        class FakeBrowser(browser_transport.BrowserTransport):
-            def __init__(self, respond):
-                self.respond = respond
-
-            def __call__(self, request, timeout, max_bytes):
-                return self.respond(request)
-
-        cooldown = self.root / "scraping-fc2ppvdb.cooldown.json"
-        request = HttpRequest("GET", "https://fc2ppv-db.com/ja/videos/1", {})
-        refused = SourceTransport(self.root)
-        refused.transports["fc2ppvdb"] = lambda *args: HttpResponse(403, {}, b"")
-        for _ in range(3):
-            with self.assertRaises(SourcePaused):
-                refused(request, 1, 100)
-            record = json.loads(cooldown.read_text(encoding="utf-8"))
-            cooldown.write_text(json.dumps({**record, "until": 0}), encoding="utf-8")
-        cooldown.write_text(json.dumps({**record, "until": time.time() + 3600}), encoding="utf-8")
-        self.assertEqual((record["blocks"], record["via"]), (3, "http"))
-
-        opened = SourceTransport(self.root)
-        opened.transports["fc2ppvdb"] = FakeBrowser(lambda request: HttpResponse(200, {}, b"page", request.url))
-        self.assertEqual(opened(request, 1, 100).status, 200, "直连那一小时的冷却不拦浏览器")
-        self.assertFalse(cooldown.exists())
-
-        def unsolved(request):
-            raise browser_transport.ChallengeUnsolved("fc2ppv-db.com 的人机验证在 160 秒内没有通过")
-
-        cooldown.write_text(json.dumps({"until": 0, "blocks": 3, "via": "http"}), encoding="utf-8")
-        challenged = SourceTransport(self.root)
-        challenged.transports["fc2ppvdb"] = FakeBrowser(unsolved)
-        with self.assertRaises(SourcePaused):
-            challenged(request, 1, 100)
-        record = json.loads(cooldown.read_text(encoding="utf-8"))
-        self.assertEqual((round(record["until"] - time.time()), record["blocks"], record["via"]),
-                         (FIRST_BLOCKED_PAUSE, 1, "browser"), "浏览器那条路的第一次从第一档起")
-        with self.assertRaises(SourcePaused):
-            challenged(request, 1, 100)
-
-        # 浏览器那条路写下的冷却，回到直连时同样作废：直连会被按自己的账重新判。
-        direct = SourceTransport(self.root)
-        direct.transports["fc2ppvdb"] = lambda *args: HttpResponse(200, {}, b"page")
-        self.assertEqual(direct(request, 1, 100).status, 200)
-        self.assertFalse(cooldown.exists())
 
     def test_a_new_cookie_lifts_the_pause_the_old_one_earned(self):
         """过期的 `cf_clearance` 撞出 403 后整站冷却；用户换了新 Cookie 就该立刻再试，不等旧账到期。"""
@@ -494,7 +443,7 @@ class ScrapingAccessTests(unittest.TestCase):
         refused.transports["javten"] = lambda *args: HttpResponse(403, {}, b"")
         with self.assertRaises(SourcePaused) as caught:
             refused(request, 1, 100)
-        self.assertIn("更新它的 Cookie", str(caught.exception))
+        self.assertIn("来源拒绝访问", str(caught.exception))
         self.assertTrue(cooldown.exists())
         save(self.root, "javten", {"network": "peach"})
         self.assertTrue(cooldown.exists(), "只改连接方式不算换了 Cookie")
@@ -608,190 +557,3 @@ class ScrapingAccessTests(unittest.TestCase):
                       w_scraping_check(SimpleNamespace(follow_secrets_root=self.root), {"source": "dmm"})["results"]}
         self.assertIn(MOBILE_BROADBAND_HINT, checks["高清图片 CDN"]["message"])
         self.assertNotIn(MOBILE_BROADBAND_HINT, checks["来源页面"]["message"])
-
-
-class BrowserFallbackTests(unittest.TestCase):
-    """登记了 `browser_fallback` 的来源（minnano-av）：HTTP 客户端被拦时由本机浏览器验证一页，
-    取到就固定走浏览器；浏览器也没取到才照 HTTP 客户端被拦那样冷却。"""
-
-    SEARCH = "https://www.minnano-av.com/search_result.php?search_scope=actress&search_word=x"
-
-    def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name).resolve()
-        self.cooldown = self.root / "scraping-minnano-av.cooldown.json"
-        self.request = HttpRequest("GET", self.SEARCH, {})
-        finder = patch("peach.browser_transport.find_browser", return_value=None)
-        finder.start()
-        self.addCleanup(finder.stop)
-
-    def browser(self, respond):
-        from peach import browser_transport
-
-        class FakeBrowser(browser_transport.BrowserTransport):
-            def __init__(self):
-                self.calls = []
-
-            def __call__(self, request, timeout, max_bytes):
-                self.calls.append(request.url)
-                return respond(request)
-
-        return FakeBrowser()
-
-    def refused_transport(self, response=None):
-        transport = SourceTransport(self.root)
-        http_calls = []
-
-        def http(request, *_args):
-            http_calls.append(request.url)
-            return response or HttpResponse(403, {}, b"")
-
-        transport.transports["minnano-av"] = http
-        return transport, http_calls
-
-    def record(self) -> dict:
-        return json.loads(self.cooldown.read_text(encoding="utf-8"))
-
-    def test_a_refused_http_request_is_retried_in_the_browser_and_the_source_stays_there(self):
-        from peach.scraping_access import fixed_to_browser
-        page = HttpResponse(200, {}, b"<title>actress</title>", "https://www.minnano-av.com/actress1.html")
-        browser = self.browser(lambda request: page)
-        self.cooldown.write_text(json.dumps({"until": 0, "blocks": 6, "via": "http"}), encoding="utf-8")
-        transport, http_calls = self.refused_transport()
-        with patch("peach.browser_transport.shared", return_value=browser):
-            self.assertIs(transport(self.request, 1, 100), page)
-            self.assertIs(transport(self.request, 1, 100), page, "本趟之后的请求直接走浏览器")
-        self.assertEqual(len(http_calls), 1)
-        self.assertEqual(browser.calls, [self.SEARCH, self.SEARCH])
-        self.assertTrue(fixed_to_browser(self.root, "minnano-av"))
-        self.assertFalse(self.cooldown.exists(), "HTTP 客户端攒下的六次拒绝不压到浏览器上")
-
-        later = SourceTransport(self.root)
-        with patch("peach.browser_transport.shared", return_value=browser), \
-                patch("peach.scraping_access.client_for", side_effect=AssertionError("固定后不该再起 HTTP 客户端")):
-            self.assertIs(later(self.request, 1, 100), page)
-        with patch("peach.browser_transport.find_browser", return_value="C:/chrome.exe"):
-            self.assertTrue(describe(self.root, "minnano-av")["browser"])
-        save(self.root, "minnano-av", {"network": "direct"})
-        self.assertTrue(fixed_to_browser(self.root, "minnano-av"), "改连接方式不丢固定")
-
-    def test_user_pause_between_http_and_browser_waits_before_opening_the_browser(self):
-        from peach.processing_control import ProcessingControl
-
-        control = ProcessingControl(self.root / 'control.json')
-        paused = threading.Event()
-        finished = threading.Event()
-        errors = []
-        browser = self.browser(lambda request: HttpResponse(200, {}, b'<title>actress</title>'))
-        transport = SourceTransport(self.root)
-        self.addCleanup(transport.close)
-
-        def http(*args):
-            control.request('pause', 'job')
-            return HttpResponse(403, {}, b'')
-
-        transport.transports['minnano-av'] = http
-
-        def run():
-            try:
-                with control.bind('job', publish=lambda **values: paused.set() if values.get('status') == 'paused' else None,
-                                  active=lambda: True, db_path=self.root / 'database/ledger.db', mode='high'):
-                    transport(self.request, 1, 100)
-            except BaseException as error:
-                errors.append(error)
-            finally:
-                finished.set()
-
-        with patch('peach.browser_transport.shared', return_value=browser):
-            thread = threading.Thread(target=run)
-            thread.start()
-            try:
-                self.assertTrue(paused.wait(2))
-                self.assertEqual(browser.calls, [])
-                self.assertFalse(finished.is_set())
-            finally:
-                control.request('resume', 'job')
-                thread.join(2)
-        self.assertFalse(thread.is_alive())
-        self.assertEqual(errors, [])
-        self.assertEqual(browser.calls, [self.SEARCH])
-
-    def test_user_cancel_between_http_and_browser_does_not_open_the_browser(self):
-        from peach.jobs import JobCancelled
-        from peach.processing_control import ProcessingControl
-
-        control = ProcessingControl(self.root / 'control.json')
-        transport = SourceTransport(self.root)
-        self.addCleanup(transport.close)
-
-        def http(*args):
-            control.request('cancel', 'job')
-            return HttpResponse(403, {}, b'')
-
-        transport.transports['minnano-av'] = http
-        with patch('peach.browser_transport.shared') as browser, \
-                control.bind('job', publish=lambda **values: None, active=lambda: True,
-                             db_path=self.root / 'database/ledger.db', mode='high'):
-            with self.assertRaises(JobCancelled):
-                transport(self.request, 1, 100)
-        browser.assert_not_called()
-
-    def test_a_challenge_page_over_http_also_gets_the_browser_check(self):
-        challenge = HttpResponse(200, {}, b"<html><head><title>Just a moment...</title></head></html>")
-        page = HttpResponse(200, {}, b"<title>actress</title>")
-        transport, _calls = self.refused_transport(challenge)
-        with patch("peach.browser_transport.shared", return_value=self.browser(lambda request: page)):
-            self.assertIs(transport(self.request, 1, 100), page)
-
-    def test_when_the_browser_fails_too_the_http_refusal_cools_down_as_before(self):
-        from peach import browser_transport
-        from peach.scraping_access import FIRST_BLOCKED_PAUSE, SourcePaused, fixed_to_browser
-
-        def unsolved(request):
-            raise browser_transport.ChallengeUnsolved("minnano-av.com 的人机验证没有通过")
-
-        def lost(request):
-            raise browser_transport.BrowserUnavailable("浏览器请求未取得")
-
-        for respond in (unsolved, lost, lambda request: HttpResponse(403, {}, b"")):
-            with self.subTest(respond=respond):
-                self.cooldown.unlink(missing_ok=True)
-                transport, _calls = self.refused_transport()
-                with patch("peach.browser_transport.shared", return_value=self.browser(respond)), \
-                        self.assertRaises(SourcePaused):
-                    transport(self.request, 1, 100)
-                record = self.record()
-                self.assertEqual((round(record["until"] - time.time()), record["blocks"], record["via"]),
-                                 (FIRST_BLOCKED_PAUSE, 1, "http"))
-                self.assertFalse(fixed_to_browser(self.root, "minnano-av"))
-
-        self.cooldown.unlink()
-        transport, _calls = self.refused_transport()
-        with patch("peach.browser_transport.shared", return_value=None), self.assertRaises(SourcePaused):
-            transport(self.request, 1, 100)
-        self.assertEqual(self.record()["via"], "http", "没有浏览器的机器照 HTTP 客户端冷却")
-
-    def test_a_source_fixed_to_the_browser_cools_down_on_the_browser_path(self):
-        from peach import browser_transport
-        from peach.scraping_access import FIRST_BLOCKED_PAUSE, SourcePaused, fix_to_browser, fixed_to_browser
-
-        def unsolved(request):
-            raise browser_transport.ChallengeUnsolved("minnano-av.com 的人机验证没有通过")
-
-        fix_to_browser(self.root, "minnano-av")
-        with patch("peach.browser_transport.shared", return_value=self.browser(unsolved)), \
-                self.assertRaises(SourcePaused):
-            SourceTransport(self.root)(self.request, 1, 100)
-        record = self.record()
-        self.assertEqual((round(record["until"] - time.time()), record["blocks"], record["via"]),
-                         (FIRST_BLOCKED_PAUSE, 1, "browser"))
-        self.assertTrue(fixed_to_browser(self.root, "minnano-av"), "浏览器那条路冷却完还走浏览器")
-
-    def test_sources_without_the_fallback_never_open_the_browser_on_a_refusal(self):
-        from peach.scraping_access import SourcePaused
-        transport = SourceTransport(self.root)
-        transport.transports["avwikidb"] = lambda *args: HttpResponse(403, {}, b"")
-        with patch("peach.browser_transport.shared", side_effect=AssertionError("avwikidb 不走浏览器")), \
-                self.assertRaises(SourcePaused):
-            transport(HttpRequest("GET", "https://avwikidb.com/actor/x/", {}), 1, 100)

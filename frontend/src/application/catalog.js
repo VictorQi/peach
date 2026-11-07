@@ -1,4 +1,4 @@
-import { initialCatalogFilters, resetCatalogFilters, homeCatalogState, homePath as pathForCatalog, onlineDefaultLoc as defaultLocations, resolveSort } from '../react/catalog-grid/catalog-state';
+import { initialCatalogFilters, resetCatalogFilters, homeCatalogState, homePath as pathForCatalog, resolveSort } from '../react/catalog-grid/catalog-state';
 import { CatalogController } from '../react/catalog-grid/catalog-controller';
 import { nextRating, ratingStars } from '../react/components/rating-values';
 /* catalog 域控制器：本域状态与动作，启动由 Application 的生命周期统一安装。 */
@@ -27,7 +27,7 @@ import { entityFaceImg, facePos, logoUrl } from './../card-art/markup';
 import { sidebarHasCatalogContent } from './../sidebar';
 import { rememberRepresentatives } from './../card-art/representatives';
 import { clearHomeFeed, isFeedNewPath, renderHomeFeed } from './feed.js';
-import { loadingState, renderCatalogLoading } from './loading.js';
+import { renderCatalogLoading } from './loading.js';
 import { releaseHoverPreviews } from './../card-art/hover';
 import { revealRoutedPage } from './follow.js';
 import { pageSkeletonHtml } from './../management-placeholder';
@@ -36,13 +36,6 @@ import { junkRoute } from './../junk-queue';
 import { wallAddress } from '../react/video-wall/wall-route';
 import { restoringPage } from '../history/page-navigation';
 export const catalogState = { homeHasFeed: undefined, barsRequestSeq: undefined, barsPendingSeq: undefined, barsRendered: undefined, catalogFilterProps: undefined, catalogFilterMounting: undefined, catalogTagRows: undefined, catalogTopsPages: undefined, initialParams: undefined, resolveSort: undefined, initialCatalogUrl: undefined, initialParam: undefined, HOME_QUERY_KEYS: undefined, searchValueSnapshot: undefined, cancelSearchDissolve: undefined, rememberSearchValue: undefined, clearSearchField: undefined, mixRelatedCache: undefined, reduceMotion: undefined, tagList: undefined, tagPressed: undefined, withTagToggled: undefined, gridHelpers: undefined, gridActions: undefined, topsQueryParams: undefined, facetCountsSeq: undefined, VIEW_PILLS: undefined, catalogViews: undefined, TAGS_FIRST: undefined, catalogOnScreen: undefined, COMBO_LABELS: undefined, hideCatalogCombo: undefined, junkQueueHelpers: undefined, junkQueueActions: undefined };
-
-export function dropOfflineFromDefaultLoc(){
-  if(catalogState.initialParams.has('loc'))return;
-  state.loc=onlineDefaultLoc(state.loc);notifyShell();
-}
-
-export function onlineDefaultLoc(loc) { return defaultLocations(loc,preferencesState.sourceOnline) }
 
 export function homePath(filters=state) { return pathForCatalog(filters) }
 
@@ -405,8 +398,6 @@ export async function loadCatalog(){
   showHomeSurfaces();
   const painting=paintCatalogGrid(surface);
   if(isFeedNewPath(location.pathname)&&state.browse!=='folders'){
-    await loadingState.entityShapesReady;
-    if(!navigationState.surfaceCurrent(surface))return;
     renderHomeFeed();
   }else clearHomeFeed();
   renderCombo();

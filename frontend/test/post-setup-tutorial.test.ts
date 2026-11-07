@@ -109,7 +109,7 @@ describe('章节进度', () => {
     expect(listener).toHaveBeenCalledExactlyOnceWith({ chapter: 'settings' }); close();
     const later = vi.fn(), unsubscribe = listenGuide(later);
     await Promise.resolve(); expect(later).not.toHaveBeenCalled(); unsubscribe();
-    openGuide({ invitation: true });
+    openGuide();
     const discarded = vi.fn(); listenGuide(discarded)();
     await Promise.resolve(); expect(discarded).not.toHaveBeenCalled();
   });
@@ -123,25 +123,6 @@ describe('只读导览会话', () => {
     vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(DOMRect.fromRect({ width: 100, height: 40 }));
     return target;
   };
-  it('首次邀请框选教程按钮并保留入口的键盘操作，遮罩可关闭', async () => {
-    const entry = visibleTarget(); entry.id = 'tutorialBtn';
-    const instance = { destroy: vi.fn(), highlight: vi.fn(), refresh: vi.fn() };
-    mocks.driver.mockReturnValue(instance);
-    const actions = callbacks(), session = createGuideSession({ ...actions, invitation: true });
-    try {
-      await session.show({ id: 'tutorial-entry', title: '打开教程', body: '认识入口', target: '#tutorialBtn' }, 0, 1);
-      expect(instance.highlight.mock.calls[0]![0].element).toBe(entry);
-      expect(mocks.driver.mock.calls[0]![0].disableActiveInteraction).toBe(false);
-      const panel = document.createElement('div'); panel.className = 'peach-guide-popover'; document.body.append(panel);
-      const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
-      entry.dispatchEvent(event);
-      expect(event.defaultPrevented).toBe(false);
-      mocks.driver.mock.calls[0]![0].overlayClickBehavior();
-      expect(actions.close).toHaveBeenCalledOnce();
-      expect(actions.next).not.toHaveBeenCalled();
-    } finally { session.stop() }
-  });
-
   it('从馆藏打开真实详情，结束后释放临时播放模式且不保留小窗', async () => {
     history.replaceState({}, '', '/taste');
     const target = visibleTarget(); target.dataset.guideVideo = ''; target.dataset.id = '42';

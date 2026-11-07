@@ -151,7 +151,7 @@ function SourceCard({ source, toast }: { source: Source } & ScrapingProps) {
     || (check.error ? errorMessage(check.error) : '');
   const results = check.data?.results ?? [];
   // 这一块空着时连同它那道分隔线一起不画：直连、又不收 Cookie 的来源只有一行连接方式。
-  const detailed = network === 'peach' || source.accepts_cookie || source.browser || !!problem || results.length > 0;
+  const detailed = network === 'peach' || source.accepts_cookie || !!problem || results.length > 0;
 
   return (
     <Section title={source.label} onSubmit={submit} aside={
@@ -180,15 +180,9 @@ function SourceCard({ source, toast }: { source: Source } & ScrapingProps) {
               </LinkButton>
             </span>
           : null}
-        {/* 由本机浏览器过验证的来源不收 Cookie：浏览器自己带着会话。留着「撤销 Cookie」让人清掉旧的。 */}
-        {source.browser
-          ? <p className="text-body-2-regular text-text-secondary">
-              人机验证由本机浏览器自动完成；需要点击时窗口会弹出。这台机器上不需要 Cookie。
-            </p>
-          : null}
-        {source.accepts_cookie && !source.browser ? <>
+        {source.accepts_cookie ? <>
           <div className="flex flex-col gap-2"><span className="self-start"><StatusLabel tone={source.cookie_saved ? 'success' : 'neutral'}>{source.cookie_saved ? 'Cookie 已保存' : 'Cookie 未配置'}</StatusLabel></span>
-            <p className="text-body-2-regular text-text-secondary">{source.cookie_saved ? '登录有效性待验证。' : '需要登录时，任选一种方式提供 Cookie。'}</p></div>
+            <p className="text-body-2-regular text-text-secondary">{source.cookie_saved ? '登录有效性待验证。' : '可选配置；未提供时跳过需要登录的内容。'}</p></div>
           {/* 两种方式互斥，交上去的只能是其中一种：切换时把另一种的输入清掉，
               不让看不见的那一份跟着提交。 */}
           <RadioGroup aria-label="提供 Cookie 的方式（二选一）" value={method}

@@ -14,6 +14,7 @@ import random
 import re
 import time
 from collections.abc import Callable
+from functools import lru_cache
 
 from . import entities, media_libraries, sample_images, settings_file
 
@@ -109,6 +110,7 @@ def attach_jav_display_fields(row: dict, tags=(), entity_kinds=()) -> None:
         row.update(jav_display_metadata(row.get("name"), code, tags))
 
 
+@lru_cache(maxsize=65536)
 def _filename_fc2_code(name) -> str:
     code = release_code_from_filename(name) or ''
     return code if code.startswith('FC2-PPV-') else ''
@@ -676,7 +678,13 @@ def _edition_label(row: dict, tags: tuple[str, ...] = ()) -> str:
     判据只有 `jav_edition_badges` 一份。自己按文件名再写一套「像不像无码」的判断，
     会和卡片上已经显示的徽章各说各话——同一个文件，角标写着无码、分组却当它是正片。
     """
-    badges = jav_edition_badges(row.get('name'), row.get('code'), tags)
+    return _edition_badge(row.get('name'), row.get('code'), tuple(tags))
+
+
+@lru_cache(maxsize=16384)
+def _edition_badge(name, code, tags: tuple[str, ...]) -> str:
+    """按文件名、番号和标签复用版次判断，标签变化使用新的缓存键。"""
+    badges = jav_edition_badges(name, code, tags)
     return str(badges[0]) if badges else "有码"
 
 

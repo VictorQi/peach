@@ -671,10 +671,17 @@ describe('设计决定：人物与厂牌资料页', () => {
 
   it('人物页骨架第一帧就带着这一位有的新作行与同台艺人，数据到了一次换齐、高度不变、封面不再等第二遍', { timeout: 60_000 }, async () => {
     const name = '七沢みあ';
+    const shape = { id: 90_001, kind: 'performer', names: [name], parts: ['feed', 'costars'] };
     const opened = await visit(browser, '/', DESKTOP);
     try {
+      // 已知人物直达页由 HTML 提供首帧形状，异步名单不再阻塞页面；与冷启动骨架夹具一致。
+      await opened.page.route('**/performers/90001', async route => {
+        const response = await route.fetch({ url: requiredEnv('PEACH_E2E_ORIGIN') + '/' });
+        await route.fulfill({ response, body: (await response.text()).replace('</head>',
+          `<script type="application/json" id="peach-entity-shape">${JSON.stringify(shape)}</script></head>`) });
+      });
       await opened.page.route(/\/api\/entity\/shapes/, (route) => route.fulfill({ json: {
-        ok: true, entities: [{ id: 90_001, kind: 'performer', names: [name], parts: ['feed', 'costars'] }] } }));
+        ok: true, entities: [shape] } }));
       // 骨架插进页面的那一刻就记下它带着哪几块：之后才补进去的，就是在骨架里跳了一下。
       await opened.page.addInitScript(() => {
         const first = { feed: null as boolean | null, foot: null as boolean | null, sheen: '' };
@@ -724,7 +731,7 @@ describe('设计决定：人物与厂牌资料页', () => {
         await new Promise((resolve) => setTimeout(resolve, 400));
         await route.fulfill({ contentType: 'image/png', body: Buffer.from(PIXEL, 'base64') });
       });
-      await opened.page.goto(new URL(`/performers/${encodeURIComponent(name)}`,
+      await opened.page.goto(new URL(`/performers/${shape.id}`,
         opened.page.url()).href, { waitUntil: 'load' });
       const skeleton = opened.page.locator('[data-skeleton="entity/performer"]');
       await skeleton.locator('.feednew .feednewskeleton').first().waitFor({ timeout: 15_000 });

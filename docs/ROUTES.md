@@ -116,7 +116,7 @@
 
 用户脚本通过专用令牌调用 `POST /api/jav-browser/errors`，仅接收白名单错误字段并写入本机日志；批次、体积、限频与诊断包范围见 [浏览器添加 JAV](JAV_BROWSER.md)。状态接口 `GET /api/jav-browser` 同时投影真实下载与整理进度，不授予配置、账号或账本写入权限。
 
-`GET /api/client-updates` 要求应用鉴权，返回运行版本与构建标记、发行版检查结果、安装状态、用户脚本版本和自动补修状态，不触发外部检查。`GET /api/jav-browser/updates` 使用用户脚本专用令牌，无需番号，返回运行与发行版、脚本版本快照，不暴露补修明细。`POST /api/configuration/upgrade-repairs/retry` 限本机同源请求，重试失败项；`GET /api/configuration/upgrade-repairs/review` 限本机管理权限，下载 JSON 复核记录，无记录时返回 404。
+`GET /api/client-updates` 要求应用鉴权，返回运行版本与构建标记、发行版检查结果、安装状态、用户脚本版本和资料更新状态，不触发外部检查。`GET /api/jav-browser/updates` 使用用户脚本专用令牌，无需番号，返回运行与发行版、脚本版本快照，不暴露补修明细。`POST /api/configuration/upgrade-repairs` 限本机同源请求，以 `action=start|pause` 开始或停止一轮资料更新；默认不启动，开始时固定已有内容范围。`POST /api/configuration/upgrade-repairs/retry` 使用同一权限，仅重试已失败或中断的项目；`GET /api/configuration/upgrade-repairs/review` 限本机管理权限，下载 JSON 复核记录，无记录时返回 404。
 
 `GET /api/configuration/cloud-proxies` 返回已添加媒体库对应的 CloudDrive 账号及 API／数据代理、未匹配媒体库和账号修订号，不回显代理密码；尚未填写 CloudDrive2 地址时返回空列表与 `configured: false`。`POST` 接受账号 `id`、`revision` 和本次修改的 `api`／`data`，写回 CloudDrive 后返回该账号当前状态；配置冲突返回 409。这两条接口均限本机管理权限，写入还要求同源请求。
 
@@ -144,6 +144,8 @@
 `/api/*`、`/stream`、`/follow-stream`、封面、图片及其他媒体端点使用各自的服务契约。实体只读接口 `/api/entity`、`/api/photos` 支持 `kind` 加 `id`，也接受 `kind` 加 `name`。鉴权与本机写入权限由服务端检查。
 
 启用接口文档时，`/docs`、`/docs/oauth2-redirect` 和 `/openapi.json` 是服务文档入口；首次运行表单由未配置状态下的首页展示。
+
+`GET /api/library-imports` 使用应用鉴权，返回原位添加所需的目录、操作能力和读取任务快照；没有本机管理权限时不返回目录及任务明细。`POST /api/library-imports` 仅允许可写实例的本机同源请求：提供 `path` 添加本地目录，或提供 `root_id` 读取已配置目录；可选 `library_id` 只能指向已有媒体库。两种目标互斥。目录保存后热更新媒体授权、探测与监视，定向读取复用任务后继；取消系统选择窗口不会调用保存接口，安装进行中不接受添加请求。
 
 远程媒体代理拒绝 HTML、SVG、XML 和未声明类型的内容；普通媒体和 HLS 清单使用被动响应策略。旧磁盘缓存同样校验类型，缓存字节可复用，浏览器须回源复验。图像响应及其 304 回执携带 CSP `sandbox` 和 `nosniff`。
 

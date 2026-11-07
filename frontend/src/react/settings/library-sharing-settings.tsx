@@ -56,7 +56,7 @@ export function LibrarySharingSettings({ initial, receipt }: {
     {value.enabled && value.last_attempt?.status === 'unknown'
       ? <Stack divided><span className="self-start"><StatusLabel tone="warning">结果未取得</StatusLabel></span><Help>未取得上传结果，本周不再发送。</Help></Stack> : null}
     {preview ? <Stack divided>
-      <Help>当前预览包含 {preview.data.library.length} 部有编号作品、{preview.data.coverage.uncoded_items} 条无编号馆藏的汇总，约 {(preview.bytes / 1024).toFixed(1)} KiB。不含账号、设备、文件路径和浏览器历史记录等个人数据。</Help>
+      <Help>当前预览包含 {preview.data.library.length} 部有编号作品、{preview.data.coverage.uncoded_items} 条无编号馆藏的汇总，约 {(preview.bytes / 1024).toFixed(1)} KiB。不含账号、设备、文件路径和浏览器历史记录；作品编号与偏好仍可能反映个人兴趣。</Help>
       <Disclosure summary="上传数据预览" defaultOpen>
         <CodeBlock code={previewText} language="json" label="馆藏与口味上传预览" maxCharacters={24000} />
       </Disclosure>

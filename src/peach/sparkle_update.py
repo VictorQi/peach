@@ -20,9 +20,9 @@ from . import distribution
 
 LOGGER = logging.getLogger(__name__)
 
-FEED_URL = "https://downloads.peach.video/sparkle/macos-{architecture}.xml"
-#: EdDSA 公钥（base64，32 字节），2026-11-02 生成；私钥在 GitHub `release` 环境的 secret 与维护者的离线备份里。
-PUBLIC_ED_KEY: str | None = "iSagMtxBRMOuBVruHAWuSkhh/zwz+k5GC0p497nbMsM="
+FEED_URL = "https://github.com/VictorQi/peach/releases/latest/download/macos-{architecture}.xml"
+#: 本 Fork 尚未配置自己的 EdDSA 签名密钥，使用设置页的 DMG 下载入口。
+PUBLIC_ED_KEY: str | None = None
 #: appcast 条目里新版本最高迁移号的元素名；Sparkle 以限定名为键放进 `propertiesDictionary`。
 MIGRATION_HEAD = "peach:migrationHead"
 MIGRATION_NAMESPACE = "https://peach.video/xml-namespaces/sparkle"

@@ -64,3 +64,5 @@ class RecoveryService:
         if not is_pausing(self.contract.db_path):
             restore(self.contract)
             self.contract.followups.resume_after_update()
+            from .web_library_processing import dispatch_incremental
+            dispatch_incremental(self.contract)

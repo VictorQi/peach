@@ -1,14 +1,14 @@
 (function() {
 	try {
 		var e = typeof globalThis < "u" ? globalThis : typeof window < "u" ? window : typeof global < "u" ? global : typeof self < "u" ? self : {}, t = new e.Error().stack;
-		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "29f9e346-1df7-4000-acce-466d6653fd1d", e._sentryDebugIdIdentifier = "sentry-dbid-29f9e346-1df7-4000-acce-466d6653fd1d");
+		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "3007e9d4-a49b-4c2c-ab2b-9e1d5edfd18e", e._sentryDebugIdIdentifier = "sentry-dbid-3007e9d4-a49b-4c2c-ab2b-9e1d5edfd18e");
 	} catch {}
 })();
 import { $fe21c36db05242bb$export$d7b12c4107be0d61 as e, AMANE_BRIDGE_CHECK_URL as t, AMANE_BRIDGE_KEY as n, AMANE_BRIDGE_REBUILD_URL as r, Button as i, COVER_JOB_KEY as a, CUSTOM_SOURCES_KEY as o, CUSTOM_SOURCES_URL as s, Checkbox as c, Disclosure as l, ErrorText as u, ExternalLink as d, Fact as f, FactList as p, FieldLabel as m, Footer as h, Help as g, Input as _, LinkButton as v, LoadingDots as y, Note as b, Rows as ee, SCRAPING_CHECK_URL as te, SCRAPING_COVER_URL as x, SCRAPING_KEY as S, SCRAPING_SETTINGS_URL as ne, SEGMENT as re, SEGMENTED_TRACK as ie, Section as C, SegmentedRadioGroup as ae, Select$1 as oe, SelectField as w, SelectItem as se, SettingsRow as ce, Stack as T, StatusLabel as E, __toESM as D, apiSend as O, busyProps as k, checkText as le, confirmModal as A, errorMessage as j, esc as M, fetchAmaneBridge as N, fetchCoverJob as P, fetchCustomSources as F, fetchSources as I, i2 as ue, queryClient as L, require_jsx_runtime as R, require_react as z, spinnerHtml as B, useAction as V, useBackgroundJob as H, useMutation as U, useQuery as W } from "./peach-app.js";
-import { CodeBlock as de } from "./peach-app.code-block-CyDva4Ms.js";
+import { ConnectionStatus as de } from "./peach-app.connection-status-DI6kgn3i.js";
 import { Page as G } from "./peach-app.page-QAncjzM1.js";
 import { SiteMark as K } from "./peach-app.site-mark-D_VlIyJz.js";
-import { ConnectionStatus as fe } from "./peach-app.connection-status-DI6kgn3i.js";
+import { CodeBlock as fe } from "./peach-app.code-block-CyDva4Ms.js";
 // src/react/scraping/custom-sources.tsx
 var q = /* @__PURE__ */ D(z(), 1), J = R(), pe = [
 	["code", "番号"],
@@ -220,7 +220,7 @@ function ge({ initial: e, cancel: t, saved: n }) {
 				role: "status",
 				children: [/* @__PURE__ */ (0, J.jsx)("span", { dangerouslySetInnerHTML: { __html: B("正在试查来源") } }), "正在试查来源"]
 			}) : null,
-			d ? /* @__PURE__ */ (0, J.jsx)(de, {
+			d ? /* @__PURE__ */ (0, J.jsx)(fe, {
 				code: d,
 				language: "json",
 				label: "元数据接口返回"
@@ -274,7 +274,7 @@ function ve({ source: t, toast: n }) {
 			}), A(), n(t ? "Cookie 已撤销" : "来源设置已保存");
 		}
 	}), N = U({ mutationFn: () => O(te, { source: t.source }) }), P = M.isPending || N.isPending, F = (e) => {
-		e.preventDefault(), !P && (N.reset(), M.mutate(!1));
+		e.preventDefault(), P || (N.reset(), M.mutate(!1));
 	}, I = () => {
 		P || (N.reset(), M.mutate(!0));
 	}, R = () => {
@@ -291,7 +291,7 @@ function ve({ source: t, toast: n }) {
 			w("Cookie 文件未读取，请重新选择");
 		}
 	}
-	let B = x || (M.error ? j(M.error) : "") || (N.error ? j(N.error) : ""), V = N.data?.results ?? [], H = r === "peach" || t.accepts_cookie || t.browser || !!B || V.length > 0;
+	let B = x || (M.error ? j(M.error) : "") || (N.error ? j(N.error) : ""), V = N.data?.results ?? [], H = r === "peach" || t.accepts_cookie || !!B || V.length > 0;
 	return /* @__PURE__ */ (0, J.jsxs)(C, {
 		title: t.label,
 		onSubmit: F,
@@ -344,11 +344,7 @@ function ve({ source: t, toast: n }) {
 							children: "配置 Peach 代理"
 						})
 					}) : null,
-					t.browser ? /* @__PURE__ */ (0, J.jsx)("p", {
-						className: "text-body-2-regular text-text-secondary",
-						children: "人机验证由本机浏览器自动完成；需要点击时窗口会弹出。这台机器上不需要 Cookie。"
-					}) : null,
-					t.accepts_cookie && !t.browser ? /* @__PURE__ */ (0, J.jsxs)(J.Fragment, { children: [
+					t.accepts_cookie ? /* @__PURE__ */ (0, J.jsxs)(J.Fragment, { children: [
 						/* @__PURE__ */ (0, J.jsxs)("div", {
 							className: "flex flex-col gap-2",
 							children: [/* @__PURE__ */ (0, J.jsx)("span", {
@@ -359,7 +355,7 @@ function ve({ source: t, toast: n }) {
 								})
 							}), /* @__PURE__ */ (0, J.jsx)("p", {
 								className: "text-body-2-regular text-text-secondary",
-								children: t.cookie_saved ? "登录有效性待验证。" : "需要登录时，任选一种方式提供 Cookie。"
+								children: t.cookie_saved ? "登录有效性待验证。" : "可选配置；未提供时跳过需要登录的内容。"
 							})]
 						}),
 						/* @__PURE__ */ (0, J.jsx)(ae, {
@@ -415,7 +411,7 @@ function ve({ source: t, toast: n }) {
 						tone: e.ok ? "success" : "error",
 						children: /* @__PURE__ */ (0, J.jsxs)("span", {
 							className: "flex flex-col items-start gap-1",
-							children: [/* @__PURE__ */ (0, J.jsx)(fe, {
+							children: [/* @__PURE__ */ (0, J.jsx)(de, {
 								tone: e.ok ? "success" : "error",
 								children: e.ok ? "可访问" : "连接失败"
 							}), /* @__PURE__ */ (0, J.jsx)("span", { children: le(e, t.label) })]
@@ -454,7 +450,7 @@ function ye({ toast: e }) {
 			t.status === "complete" && e(t.result || "封面采集完成");
 		}
 	}), c = (e) => {
-		e.preventDefault(), !(r || s.isPending || !t.trim()) && s.mutate();
+		e.preventDefault(), r || s.isPending || !t.trim() || s.mutate();
 	}, l = s.error ? j(s.error) : o?.status === "failed" ? o.error || "采集未取得" : "";
 	return /* @__PURE__ */ (0, J.jsx)(C, {
 		title: "高清封面",
@@ -615,4 +611,4 @@ function xe({ toast: e }) {
 }
 export { xe as ScrapingPage, Q as linkHost, Z as networkOptions };
 
-//# debugId=29f9e346-1df7-4000-acce-466d6653fd1d
+//# debugId=3007e9d4-a49b-4c2c-ab2b-9e1d5edfd18e

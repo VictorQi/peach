@@ -109,8 +109,8 @@ from .web_scraping import (
     q_scraping, q_scraping_amane_bridge, w_scraping_amane_check, w_scraping_amane_rebuild,
     w_scraping_check, w_scraping_cover, w_scraping_settings,
 )
-from .web_state import WebContract, path_version
-from .web_tasks import q_tasks
+from .web_state import WebContract, path_version, revision_snapshot
+from .web_tasks import q_result_updates, q_tasks
 from .web_timeline_thumbnails import (
     q_media_processing, q_thumbnail_jobs, q_timeline, w_media_processing, w_thumbnail_jobs,
 )
@@ -349,6 +349,7 @@ GET_HANDLERS = {
     "/api/media-processing": q_media_processing,
     "/api/folders": q_folders,
     "/api/tasks": q_tasks,
+    "/api/result-updates": q_result_updates,
     "/api/downloads": q_downloads,
     "/api/resources/search": q_resource_search,
     "/api/jav/detail": q_jav_detail,
@@ -519,7 +520,8 @@ def dispatch_api_get(contract: WebContract, path, args):
         handler = GET_HANDLERS[path]
     except KeyError as exc:
         raise ContractRouteNotFound(path) from exc
-    return handler(contract, args)
+    with revision_snapshot():
+        return handler(contract, args)
 
 
 def dispatch_api_post(contract: WebContract, path, body):

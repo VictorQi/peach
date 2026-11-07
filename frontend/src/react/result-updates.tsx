@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
-import { fetchTasks, pollInterval, TASKS_KEY } from './activity/tasks';
+import { fetchResultUpdates, RESULT_UPDATES_KEY, RUNNING_POLL_MS, SETTLED_POLL_MS } from './activity/tasks';
 import { queryClient } from './query';
 
 const CATALOG = ['catalog-grid', 'catalog-folders', 'item', 'item-related', 'item-queue',
@@ -47,8 +47,8 @@ export function createResultRefresher() {
 }
 
 export function ResultUpdates() {
-  const query = useQuery({ queryKey: TASKS_KEY, queryFn: ({ signal }) => fetchTasks(signal),
-    refetchInterval: current => pollInterval(current.state.data) });
+  const query = useQuery({ queryKey: RESULT_UPDATES_KEY, queryFn: ({ signal }) => fetchResultUpdates(signal),
+    refetchInterval: current => current.state.data?.busy ? RUNNING_POLL_MS : SETTLED_POLL_MS });
   const previous = useRef<Record<string, string> | undefined>(undefined);
   const [refresh] = useState(createResultRefresher);
   const versions = query.data?.result_versions;

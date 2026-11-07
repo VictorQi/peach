@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import type { LibraryProcessingProps } from '../bundle';
 import { errorMessage } from '../../api';
-import { DISCONNECTED_TEXT, freshProcessingResult, processingActive } from './library-processing';
+import { DISCONNECTED_TEXT, processingActive } from './library-processing';
 import { ProcessingNoticePanel } from './library-processing-notice';
 import { useLibraryProcessingJob } from './use-library-processing';
 import { setProcessingNoticeVisible, useProcessingNoticeVisibility } from './processing-notice-visibility';
@@ -24,7 +24,7 @@ export function LibraryProcessingDock({ toast: receipt }: Pick<LibraryProcessing
   useEffect(() => {
     const active = processingActive(state);
     const currentFailure = state?.status === 'failed'
-      && (settled?.job_id === state.job_id || freshProcessingResult(state));
+      && settled?.job_id === state.job_id;
     if (hidden || (state?.archived && !problem) || (!active && !problem && !currentFailure && !(requested && state?.status === 'failed'))) {
       if (shown.current) toast.dismiss(TASK_TOAST);
       shown.current = false;

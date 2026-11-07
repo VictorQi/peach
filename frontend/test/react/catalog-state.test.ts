@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  defaultCatalogLoc, homeCatalogState, homePath, initialCatalogFilters, onlineDefaultLoc,
+  homeCatalogState, homePath, initialCatalogFilters,
   resetCatalogFilters, resolveSort,
 } from '../../src/react/catalog-grid/catalog-state';
 
@@ -51,13 +51,10 @@ describe('目录地址与默认范围', () => {
       .toBe('/unseen?tag_match=any&sort=new');
   });
 
-  it('默认范围剔除明确离线来源，全部离线时仍保留原范围', () => {
-    expect(onlineDefaultLoc('local,115,pikpak', { local: true, '115': false })).toBe('local,pikpak');
-    expect(onlineDefaultLoc('local,115', { local: false, '115': false })).toBe('local,115');
-    expect(onlineDefaultLoc('', { local: true })).toBe('');
-    expect(defaultCatalogLoc('local,115', '?loc=', { '115': false })).toBe('local,115');
-    expect(defaultCatalogLoc('', '?loc=', { '115': false })).toBe('');
-    expect(defaultCatalogLoc('local,115', '?q=test', { '115': false })).toBe('local');
+  it('默认浏览已编目来源，显式空范围和所选目录保持原值', () => {
+    expect(initial().loc).toBe('local,115');
+    expect(initial('/', '?loc=').loc).toBe('');
+    expect(initial('/', '?loc=offline-root').loc).toBe('offline-root');
   });
 
   it('重置保留来源并更新种子，首页筛选条与目录状态共用对象', () => {

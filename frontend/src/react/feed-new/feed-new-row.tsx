@@ -9,7 +9,7 @@ import { SourceAvatar } from '../components/source-avatar';
 
 import type { FeedNew } from './feed-new';
 
-export function FeedNewRow({ feedNew, host, wire, act, settled }: {
+export function FeedNewRow({ feedNew, host, wire, act, settled, deferred = false }: {
   feedNew: FeedNew | null;
   host: HTMLElement;
   /** 拖动、滚轮，按设置接自动滚动。 */
@@ -18,6 +18,7 @@ export function FeedNewRow({ feedNew, host, wire, act, settled }: {
   act(feedId: number, action: string): Promise<void>;
   /** 有没有卡：画出来、或最后一张被收起时报一次。 */
   settled?(hasItems: boolean): void;
+  deferred?: boolean;
 }) {
   const actions = useContext(ShellActionsContext);
   const box = useRef<HTMLDivElement>(null);
@@ -25,13 +26,13 @@ export function FeedNewRow({ feedNew, host, wire, act, settled }: {
   const html = feedNew?.items.length ? feedNew.html : '';
   useLayoutEffect(() => {
     host.removeAttribute('aria-busy');
-    host.hidden = !html;
+    host.hidden = deferred || !html;
     if (feedNew) settled?.(!!html);
-  }, [host, html, feedNew, settled]);
+  }, [host, html, feedNew, settled, deferred]);
   useEffect(() => {
-    if (html) wire(box.current?.querySelector('.feednewrow') ?? null);
+    if (html && !deferred) wire(box.current?.querySelector('.feednewrow') ?? null);
     setSourceFaces([...box.current?.querySelectorAll<HTMLElement>('[data-feed-source-avatar]') ?? []]);
-  }, [wire, html]);
+  }, [wire, html, deferred]);
   const click = async (event: MouseEvent<HTMLDivElement>) => {
     const link = (event.target as Element).closest<HTMLAnchorElement>('a.feednewopen');
     if (link && actions && !event.button && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
@@ -57,7 +58,7 @@ export function FeedNewRow({ feedNew, host, wire, act, settled }: {
       settled?.(false);
     }
   };
-  return html ? <><div ref={box} className="contents" onClick={(event) => { void click(event) }}
+  return html && !deferred ? <><div ref={box} className="contents" onClick={(event) => { void click(event) }}
     dangerouslySetInnerHTML={{ __html: html }} />{sourceFaces.map((face, index) => createPortal(
       <SourceAvatar code={face.dataset.code!} person={{ name: face.dataset.name!, source_actor_id: face.dataset.actor! }} />,
       face, `${html.length}:${index}`))}</> : null;

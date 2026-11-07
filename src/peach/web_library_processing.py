@@ -241,8 +241,11 @@ def _announce_control(job, job_id, status):
 def _writer_active(config):
     from filelock import FileLock, Timeout
     from .library_processing import state_path
+    path = state_path(config)
+    if not path.parent.is_dir():
+        return False
     try:
-        with FileLock(str(state_path(config)) + '.lock', timeout=0):
+        with FileLock(str(path) + '.lock', timeout=0):
             return False
     except Timeout:
         return True
@@ -356,6 +359,47 @@ def _processing_request(contract, config, previous, body):
     return retry_ids, asset_ids, stage
 
 
+def dispatch_incremental(contract):
+    """目录监视登记的新影片在主任务空闲时交给统一处理入口。"""
+    from .library_new_assets import pending, available_for_dispatch
+    from .job_recovery import read
+    if _current(contract).get('status') in ACTIVE:
+        return
+    if read(contract.db_path, 'library-processing').get('status') == 'active':
+        return
+    config = settings_file.active()
+    if _writer_active(config):
+        return
+    selected = available_for_dispatch(contract.db_path, pending(contract.db_path), config)
+    if selected:
+        w_library_processing(contract, {'asset_ids': selected, 'stage': 'collect', 'automatic': True})
+
+
+def _processing_worker(contract, config, previous, *, resume, retry_ids, asset_ids, stage, incremental, automatic):
+    """绑定本次处理范围，负责版本确认、任务结果发布与缓存失效。"""
+    def work(job_id):
+        try:
+            from .library_new_assets import finish, snapshot
+            versions = snapshot(contract.db_path, asset_ids) if automatic else {}
+            result = process_library(config, contract.db_path, contract.candidate_root, contract.cover_root,
+                job_id=job_id, retry_ids=retry_ids, stage=stage, asset_ids=asset_ids, incremental=incremental,
+                # 自动落库与页面写的是同一个 `LedgerDatabase`：进程内写锁在实例上，
+                # 另建一个就是在同一个进程里开第二条写入路径。
+                database=contract.database,
+                resume_state=previous if resume else None,
+                speed_mode=control_for(config).mode,
+                active=lambda: (contract.library_processing_job.snapshot() or {}).get('job_id') == job_id,
+                report=lambda state: contract.library_processing_job.update(job_id, **{
+                    key: value for key, value in state.items() if key != 'job_id'}))
+            if versions and result.get('completed_at') and result.get('stage') == '处理结束':
+                # 完成的失败版本由任务重试列表接管；中断与后到版本仍留在队列。
+                finish(contract.db_path, versions)
+            contract.library_processing_job.update(job_id, **{key: value for key, value in result.items() if key != 'job_id'})
+        finally:
+            contract.cache_bust()
+    return work
+
+
 def w_library_processing(contract, body, *, resume=False):
     config = settings_file.active()
     if (body or {}).get('action'):
@@ -375,21 +419,8 @@ def w_library_processing(contract, body, *, resume=False):
     mode = valid_mode(control_for(config).mode if resume else
                       (body or {}).get('speed_mode') or control_for(config).mode)
     control_for(config).request('set_speed', mode=mode)
-    def work(job_id):
-        try:
-            result = process_library(config, contract.db_path, contract.candidate_root, contract.cover_root,
-                job_id=job_id, retry_ids=retry_ids, stage=stage, asset_ids=asset_ids, incremental=incremental,
-                # 自动落库与页面写的是同一个 `LedgerDatabase`：进程内写锁在实例上，
-                # 另建一个就是在同一个进程里开第二条写入路径。
-                database=contract.database,
-                resume_state=previous if resume else None,
-                speed_mode=control_for(config).mode,
-                active=lambda: (contract.library_processing_job.snapshot() or {}).get('job_id') == job_id,
-                report=lambda state: contract.library_processing_job.update(job_id, **{
-                    key: value for key, value in state.items() if key != 'job_id'}))
-            contract.library_processing_job.update(job_id, **{key: value for key, value in result.items() if key != 'job_id'})
-        finally:
-            contract.cache_bust()
+    work = _processing_worker(contract, config, previous, resume=resume, retry_ids=retry_ids,
+        asset_ids=asset_ids, stage=stage, incremental=incremental, automatic=bool((body or {}).get('automatic')))
     # 起步那行字按这一趟真正要做的事写：点了「只扫描」却看到「读取本地资料」，
     # 人会以为点错了。
     labels = {ALL_STAGES: '准备处理', SCAN_STAGE: '准备扫描文件', COLLECT_STAGE: '准备采集资料',

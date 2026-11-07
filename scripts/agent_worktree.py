@@ -12,6 +12,7 @@ import time
 from collections.abc import Iterable
 from contextlib import nullcontext
 from pathlib import Path
+from urllib.parse import urlencode
 
 if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -19,6 +20,7 @@ if not __package__:
 from . import (changelog, check_readme_impact, co_author, commit_subject,
                test_evidence, test_runner, version_bump)
 from .release_tag import MASTER_WRITER
+from .release_review import public_github_api
 
 #: `create` 的落点，建在主检出旁边（ADR-0017 的四个运行时目录之一）。
 WORKTREE_ROOT = "peach-worktrees"
@@ -181,12 +183,38 @@ def require_pull_request(worker: Path, branch: str, target_branch: str, head: st
 
     正文里独占一行的 issue 关联行原样带出，写进合并提交；正文中顺带提到的编号不算。
     """
+    remote = _git(worker, "config", "--get", f"branch.{branch}.remote", check=False).stdout.strip()
+    if not remote or remote == ".":
+        raise WorkspaceError("未取得 PR 仓库：请先将当前分支推送并设置跟踪远端")
+    remote_url = _git(worker, "remote", "get-url", remote).stdout.strip()
+    match = re.fullmatch(r"(?:git@github\.com:|https://github\.com/)([\w.-]+/[\w.-]+?)(?:\.git)?", remote_url)
+    if not match:
+        raise WorkspaceError("PR 跟踪远端不是可识别的 GitHub 仓库")
+    repository = match[1]
     fields = ("url", "state", "headRefOid", "baseRefName")
     try:
         result = subprocess.run(
-            ["gh", "pr", "view", branch, "--json", ",".join((*fields, "body"))], cwd=worker,
+            ["gh", "pr", "view", branch, "--repo", repository,
+             "--json", ",".join((*fields, "body"))], cwd=worker,
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
         )
+    except FileNotFoundError:
+        query = urlencode({"state": "open", "head": f"{repository.split('/')[0]}:{branch}",
+                           "base": target_branch, "per_page": 100})
+        try:
+            rows = public_github_api(f"repos/{repository}/pulls?{query}")
+            rows = [row for row in rows if row["head"]["ref"] == branch
+                    and row["head"]["repo"]["full_name"].casefold() == repository.casefold()
+                    and row["base"]["repo"]["full_name"].casefold() == repository.casefold()]
+            if len(rows) != 1:
+                raise ValueError("当前跟踪仓库没有唯一开放 PR")
+            row = rows[0]
+            payload = {"url": row["html_url"], "state": row["state"].upper(),
+                       "headRefOid": row["head"]["sha"], "baseRefName": row["base"]["ref"],
+                       "body": row.get("body")}
+            result = subprocess.CompletedProcess([], 0, json.dumps(payload), "")
+        except Exception as error:
+            raise WorkspaceError(f"未取得 PR：{error}") from error
     except (OSError, subprocess.TimeoutExpired) as error:
         raise WorkspaceError(f"未取得 PR：{error}") from error
     if result.returncode:
@@ -199,6 +227,8 @@ def require_pull_request(worker: Path, branch: str, target_branch: str, head: st
         raise WorkspaceError("PR 回执字段无效")
     if not re.fullmatch(r"https://[^/\s]+/[^/\s]+/[^/\s]+/pull/[1-9]\d*", pr["url"]):
         raise WorkspaceError("PR 回执链接无效")
+    if not pr["url"].casefold().startswith(f"https://github.com/{repository}/pull/".casefold()):
+        raise WorkspaceError("PR 仓库与当前分支的跟踪远端不一致")
     if pr["state"] != "OPEN":
         raise WorkspaceError(f"PR 状态为 {pr['state']}；交付 PR 必须开放待合入")
     if pr["headRefOid"] != head:

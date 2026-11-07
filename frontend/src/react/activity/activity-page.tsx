@@ -393,14 +393,14 @@ export function ActivityPage() {
     && !skipped.some((row) => row.id === run.id));
   // 每小时一轮的定时检查什么也没发生时一条条摆出来，一页就被同一句「已检查 83」占满。
   // 派了后继的那一轮，后继全部顺利做完才算例行，有一条失败就单独摆出来。只负责派发的那种
-  // （自动修复每分钟一批）例外：同一件事的几批照样并成一张，失败数写在卡上。
+  // 资料更新派发例外：同一件事的几批照样并成一张，失败数写在卡上。
   const quietChildren = (run: TaskRunPayload) => {
     const children = byParent.get(run.id) || [];
     return children.every((row) => row.status === 'succeeded' && !hasResultProblems(row))
       && followupTally(counts, [run]).failed === 0;
   };
-  const folds = foldRoutine(finished, (run) => isRoutine(run)
-    && (quietChildren(run) || DISPATCHERS.has(run.task_key)));
+  const folds = foldRoutine(finished, (run) => DISPATCHERS.has(run.task_key)
+    || (isRoutine(run) && quietChildren(run)));
   // 各父任务的控制范围独立：合成一张卡会让较早那批的后继没有对应操作入口。
   const workingGroups = [
     ...foldByKind(working.filter((run) => !run.control)),

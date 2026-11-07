@@ -1,8 +1,8 @@
 # ADR-0126：升级时自动处理存量资料与派生缓存
 
-- 状态：Accepted
+- 状态：部分被 [ADR-0134](0134-consumer-control-and-privacy.md) 替代：联网补全改为主动开始，更新提示留在设置页；本地迁移与确定性修复保持自动
 - 日期：2026-10-25
-- 关联：[ADR-0040](0040-tasks-declare-followups-at-the-end.md)、[运行与配置](../OPERATIONS.md#升级后的自动处理)
+- 关联：[ADR-0040](0040-tasks-declare-followups-at-the-end.md)、[运行与配置](../OPERATIONS.md#升级后的资料处理)
 
 ## 背景
 

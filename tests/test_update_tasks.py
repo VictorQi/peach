@@ -8,11 +8,12 @@ import sys
 import tempfile
 import threading
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from peach import desktop_installer, job_recovery, settings_file, update_tasks
 from peach.jobs import BackgroundJob
-from peach.task_runs import TaskRunStore
+from peach.task_runs import TaskRunStore, stamp
 from support.ledger import fresh_ledger
 
 
@@ -65,6 +66,67 @@ class UpdateTaskTests(unittest.TestCase):
         self.assertNotIn(run.id, self.store.recover_interrupted())
         pending = self.store.get(run.id)
         self.assertEqual((pending.status, pending.progress_current, pending.progress_total), ('pending', 3, 5))
+
+    def test_recovery_resumes_when_saved_pid_was_reused_by_another_process(self):
+        run = self.store.start('library-processing', trigger='manual', mutex_key='library-processing')
+        old_start = stamp(datetime.now(timezone.utc) - timedelta(days=1))
+        with self.store.database.write_transaction(notify=False) as connection:
+            connection.execute('UPDATE task_run SET started_at=?,heartbeat_at=? WHERE id=?',
+                               (old_start, old_start, run.id))
+        job_recovery.save(self.db, 'library-processing', 'old-job', {'stage': 'collect'}, run_id=run.id)
+        self.store.suspend(run.id)
+        observed = []
+        job = BackgroundJob('pid-reuse-test', runs=self.store, task_key='library-processing',
+                            mutex_key='library-processing')
+        def finish(identity):
+            observed.append(job.snapshot())
+            job.update(identity, status='complete')
+        handler = {'library-processing': lambda request: job.start(finish, restart=True, recovery=request)}
+        try:
+            with patch('peach.jobs.process_creation_time', return_value=datetime.now(timezone.utc).timestamp()):
+                self.assertEqual(job_recovery.resume(self.db, handler), ['library-processing'])
+        finally:
+            if job.thread is not None:
+                job.thread.join(5)
+        self.assertFalse(job.thread.is_alive())
+        self.assertEqual((observed[0]['job_id'], observed[0]['run_id']), ('old-job', run.id))
+        self.assertEqual(self.store.get(run.id).status, 'succeeded')
+        self.assertIsNone(self.store.blocking('library-processing'))
+
+    def test_reused_pid_does_not_override_saved_user_pause_or_cancel(self):
+        control_path = update_tasks.state_for(self.db).parent / 'library-processing-control.json'
+        for intent, expected in (('paused', 'pending'), ('cancelled', 'cancelled')):
+            with self.subTest(intent=intent):
+                run = self.store.start('library-processing', trigger='manual')
+                old_start = stamp(datetime.now(timezone.utc) - timedelta(days=1))
+                with self.store.database.write_transaction(notify=False) as connection:
+                    connection.execute('UPDATE task_run SET started_at=?,heartbeat_at=? WHERE id=?',
+                                       (old_start, old_start, run.id))
+                job_recovery.save(self.db, 'library-processing', intent, {'stage': 'collect'}, run_id=run.id)
+                self.store.suspend(run.id)
+                control_path.write_text(json.dumps({'job_id': intent, intent: True}), encoding='utf-8')
+                resumed = []
+                with patch('peach.jobs.process_creation_time', return_value=datetime.now(timezone.utc).timestamp()):
+                    self.assertEqual(job_recovery.resume(self.db, {'library-processing': resumed.append}), [])
+                self.assertEqual(resumed, [])
+                self.assertEqual(self.store.get(run.id).status, expected)
+                self.assertEqual(job_recovery.read(self.db, 'library-processing')['status'],
+                                 'active' if intent == 'paused' else 'cancelled')
+                self.store.finish(run.id, 'cancelled')
+
+    def test_installation_pause_reconciles_a_reused_live_pid(self):
+        run = self.store.start('library-processing', trigger='manual')
+        old_start = stamp(datetime.now(timezone.utc) - timedelta(days=1))
+        with self.store.database.write_transaction(notify=False) as connection:
+            connection.execute('UPDATE task_run SET started_at=?,heartbeat_at=? WHERE id=?',
+                               (old_start, old_start, run.id))
+        job_recovery.save(self.db, 'library-processing', 'old-job', {'stage': 'collect'}, run_id=run.id)
+        job_recovery.request_pause(self.db)
+        with patch('peach.jobs.process_creation_time', return_value=datetime.now(timezone.utc).timestamp()):
+            job_recovery.reconcile_paused(self.db)
+        self.assertEqual(self.store.get(run.id).status, 'pending')
+        recovery = job_recovery.read(self.db, 'library-processing')
+        self.assertEqual((recovery['pid'], recovery['job_id'], recovery['run_id']), (-1, 'old-job', run.id))
 
     def test_terminal_checkpoint_is_readable_by_a_new_job_instance(self):
         first = BackgroundJob('resume-test', runs=self.store, task_key='link-check')

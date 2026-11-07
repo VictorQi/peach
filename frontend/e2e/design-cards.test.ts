@@ -591,25 +591,68 @@ describe('设计决定：作品卡、管理页与复核', () => {
 
   for (const [label, viewport] of [['390px', MOBILE], ['宽屏', DESKTOP]] as const) {
     it(`${label} 下教程中心可阅读、关闭与重开，不提交业务写入`, { timeout: 60_000 }, async () => {
-      const opened = await visit(browser, '/', viewport, freshTutorial);
+      const writes: string[] = [];
+      const streams: string[] = [];
+      const tutorialRequests: string[] = [];
+      const opened = await visit(browser, '/', viewport, async page => {
+        page.on('request', request => {
+          const path = new URL(request.url()).pathname;
+          if (/^\/(?:stream|api\/stream-plan)/.test(path)) streams.push(path);
+          if (path === '/api/tutorial-progress') tutorialRequests.push(request.method());
+          if (path === '/api/diagnostics/client-error' && request.postDataJSON()?.kind === 'context') return;
+          if (path.startsWith('/api/') && path !== '/api/tutorial-progress' && !['GET', 'HEAD'].includes(request.method())) {
+            writes.push(`${request.method()} ${path}`);
+          }
+        });
+        await freshTutorial(page);
+      });
       try {
         const page = opened.page;
         await expectBody(page, '/', [page.locator('#grid')]);
         await settle(page);
-        const writes: string[] = [];
-        const streams: string[] = [];
-        page.on('request', request => {
-          if (/^\/(?:stream|api\/stream-plan)/.test(new URL(request.url()).pathname)) streams.push(request.url());
-          if (new URL(request.url()).pathname === '/api/diagnostics/client-error' && request.postDataJSON()?.kind === 'context') return;
-          if (new URL(request.url()).pathname.startsWith('/api/') && new URL(request.url()).pathname !== '/api/tutorial-progress' && !['GET', 'HEAD'].includes(request.method())) {
-            writes.push(`${request.method()} ${new URL(request.url()).pathname}`);
-          }
-        });
         const opener = page.locator('#tutorialBtn');
-        await page.locator('.peach-guide-popover').getByRole('heading', { name: '从这里打开新手教程' }).waitFor();
-        assert.ok(await opener.evaluate(node => node.classList.contains('driver-active-element')));
-        await opener.click();
         const dialog = page.getByRole('dialog', { name: '新手教程', exact: true });
+        assert.equal(await page.locator('.peach-guide-popover, .driver-overlay').count(), 0, '未主动打开时不展示教程邀请');
+        assert.equal(await dialog.isVisible(), false);
+        assert.deepEqual(tutorialRequests, [], '未主动打开时不读取或写入教程进度');
+        assert.equal(await opener.evaluate(node => node.classList.contains('driver-active-element')), false);
+        await page.evaluate(() => {
+          const classify = (node: EventTarget | null) => node === document.getElementById('tutorialBtn') ? 'tutorial-opener'
+            : node === document.getElementById('settingsBtn') ? 'settings-opener'
+            : node === document.body ? 'body'
+            : node instanceof Element && node.closest('.peach-guide-center') ? 'tutorial-dialog' : 'other';
+          const trace: { event: string; target: string; atMs: number }[] = [];
+          const state = window as unknown as { tutorialFocusDiagnostic: () => unknown };
+          for (const type of ['focusin', 'focusout', 'react-aria-focus-scope-restore']) {
+            document.addEventListener(type, event => {
+              trace.push({ event: type, target: classify(event.target), atMs: Math.round(performance.now()) });
+              if (trace.length > 40) trace.shift();
+            }, true);
+          }
+          state.tutorialFocusDiagnostic = () => {
+            const opener = document.getElementById('tutorialBtn') as HTMLButtonElement | null;
+            const box = opener?.getBoundingClientRect();
+            return { active: classify(document.activeElement), documentFocused: document.hasFocus(),
+              opener: { connected: !!opener?.isConnected, hidden: opener?.hidden, disabled: opener?.disabled,
+                inert: !!opener?.closest('[inert]'), width: box?.width, height: box?.height },
+              dialogs: document.querySelectorAll('.peach-guide-center').length, trace };
+          };
+        });
+        const expectTutorialFocus = async () => {
+          try {
+            await page.waitForFunction(() => document.activeElement === document.getElementById('tutorialBtn'));
+          } catch (error) {
+            const focus = await page.evaluate(() => (window as unknown as { tutorialFocusDiagnostic: () => unknown }).tutorialFocusDiagnostic());
+            throw new Error(`教程关闭后未恢复入口焦点：${JSON.stringify(focus)}\n${(error as Error).message}`);
+          }
+        };
+        const reopenAfterGuide = async () => {
+          await page.locator('.peach-guide-popover').waitFor({ state: 'hidden' });
+          assert.equal(await dialog.isVisible(), false, '关闭或结束导览后不自动重开教程目录');
+          await opener.click();
+          await dialog.waitFor();
+        };
+        await opener.click();
         await dialog.waitFor();
         for (const name of ['开始使用', '界面导览', '设置导览']) {
           await dialog.locator('label').filter({ has: page.getByRole('radio', { name, exact: true }) }).click();
@@ -636,7 +679,7 @@ describe('设计决定：作品卡、管理页与复核', () => {
         await dialog.getByRole('heading', { name: '没有匹配的教程', exact: true }).waitFor();
         await dialog.getByRole('button', { name: '关闭新手教程', exact: true }).click();
         await dialog.waitFor({ state: 'hidden' });
-        await page.waitForFunction(() => document.activeElement === document.getElementById('tutorialBtn'));
+        await expectTutorialFocus();
         await opener.click();
         await dialog.waitFor();
         const inside = (await dialog.locator('header').boundingBox())!;
@@ -647,7 +690,7 @@ describe('设计决定：作品卡、管理页与复核', () => {
         assert.ok(await dialog.isVisible(), '从正文拖到遮罩不应关闭教程');
         await page.mouse.click(2, 2);
         await dialog.waitFor({ state: 'hidden' });
-        await page.waitForFunction(() => document.activeElement === document.getElementById('tutorialBtn'));
+        await expectTutorialFocus();
         await opener.click();
         await dialog.waitFor();
         await dialog.locator('label').filter({ has: page.getByRole('radio', { name: '界面导览', exact: true }) }).click();
@@ -674,7 +717,7 @@ describe('设计决定：作品卡、管理页与复核', () => {
         await playbackGuide.getByRole('button', { name: '完成本章', exact: true }).click();
         await page.locator('#stage[open]').waitFor({ state: 'hidden' });
         assert.deepEqual(streams, [], '导览请求了视频正片');
-        await dialog.waitFor();
+        await reopenAfterGuide();
         await dialog.getByRole('button', { name: '开始快速导览', exact: true }).click();
         const guide = page.locator('.peach-guide-popover');
         await guide.waitFor();
@@ -693,15 +736,15 @@ describe('设计决定：作品卡、管理页与复核', () => {
         await page.setViewportSize({ width: viewport.width, height: viewport.height });
         await page.mouse.click(2, viewport.height - 2);
         await guide.waitFor({ state: 'hidden' });
-        await dialog.waitFor();
+        await reopenAfterGuide();
         await dialog.getByRole('button', { name: '继续快速导览', exact: true }).click();
         await guide.waitFor();
         await page.keyboard.press('Escape');
         await guide.waitFor({ state: 'hidden' });
-        await dialog.waitFor();
+        await reopenAfterGuide();
         await dialog.getByRole('button', { name: '继续快速导览', exact: true }).click();
         await guide.getByRole('button', { name: '跳过本章', exact: true }).click();
-        await dialog.waitFor();
+        await reopenAfterGuide();
         assert.equal(await guide.isVisible(), false, '跳过本章后仍停在步骤中');
         assert.equal(await dialog.locator('[data-guide-banner][data-guide-completed]').count(), 0, '跳过误记为完成');
         await dialog.locator('label').filter({ has: page.getByRole('radio', { name: '设置导览', exact: true }) }).click();
@@ -709,7 +752,7 @@ describe('设计决定：作品卡、管理页与复核', () => {
         await guide.waitFor();
         for (let step = 0; step < 4; step += 1) await guide.getByRole('button', { name: '下一步', exact: true }).click();
         await guide.getByRole('button', { name: '完成本章', exact: true }).click();
-        await dialog.waitFor();
+        await reopenAfterGuide();
         await page.locator('#settingsPanel').waitFor({ state: 'hidden' });
         assert.equal(new URL(page.url()).pathname, '/', '设置导览完成后未返回开始前的页面');
         assert.ok(await dialog.getByRole('radio', { name: '设置导览', exact: true }).isChecked());
@@ -718,24 +761,26 @@ describe('设计决定：作品卡、管理页与复核', () => {
         await guide.waitFor();
         for (let step = 0; step < 8; step += 1) await guide.getByRole('button', { name: '下一步', exact: true }).click();
         await guide.getByRole('button', { name: '完成本章', exact: true }).click();
-        await dialog.waitFor();
+        await reopenAfterGuide();
         assert.equal(new URL(page.url()).pathname, '/', '页面导览完成后未返回开始前的页面');
         assert.ok(await dialog.getByRole('searchbox', { name: '搜索教程' }).isVisible());
         await dialog.locator('label').filter({ has: page.getByRole('radio', { name: '界面导览', exact: true }) }).click();
         await dialog.getByRole('button', { name: '继续快速导览', exact: true }).click();
         for (let step = 0; step < 3; step += 1) await guide.getByRole('button', { name: '下一步', exact: true }).click();
         await guide.getByRole('button', { name: '完成本章', exact: true }).click();
-        await dialog.waitFor();
-        await opener.waitFor({ state: 'hidden' });
+        await reopenAfterGuide();
+        assert.equal(await opener.evaluate(node => (node as HTMLElement).hidden), false, '完成导览后保留主动帮助入口');
         assert.ok(await dialog.getByRole('button', { name: '再看一遍', exact: true }).isVisible());
         assert.equal(await dialog.locator('[data-guide-banner][data-guide-completed]').count(), 1);
         await page.reload();
         await page.locator('#grid').waitFor();
-        assert.equal(await opener.isVisible(), false, '完成快速导览后刷新又显示了教程按钮');
+        assert.equal(await opener.isVisible(), true, '刷新后仍可主动打开教程');
+        assert.equal(await dialog.isVisible(), false, '刷新不自动打开教程目录');
+        assert.equal(await page.locator('.peach-guide-popover, .driver-overlay').count(), 0);
         await page.goto(new URL('/settings/maintenance', page.url()).href);
         await page.getByRole('region', { name: '新手教程', exact: true }).getByRole('button', { name: '重新打开', exact: true }).click();
         await dialog.waitFor();
-        assert.equal(await opener.evaluate(node => (node as HTMLElement).hidden), false, '设置重新打开后没有恢复右上角入口');
+        assert.equal(await opener.evaluate(node => (node as HTMLElement).hidden), false, '设置打开教程时保留右上角帮助入口');
         assert.deepEqual(writes, [], '只读教程触发了业务写入');
         assert.deepEqual(opened.problems, []);
       } finally { await opened.close() }

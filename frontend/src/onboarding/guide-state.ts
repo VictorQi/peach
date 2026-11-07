@@ -29,7 +29,7 @@ export function recordGuideStep(progress: GuideProgress, chapter: string, step: 
   return { ...progress, chapters: { ...progress.chapters, [chapter]: { next, read: [...read], skipped: [...skip] } } };
 }
 
-export interface GuideRequest { chapter?: string; invitation?: boolean; reopen?: boolean }
+export interface GuideRequest { chapter?: string }
 let pending: GuideRequest | null = null;
 const listeners = new Set<(request: GuideRequest) => void>();
 export function openGuide(request: GuideRequest = {}): void {

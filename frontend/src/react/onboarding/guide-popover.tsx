@@ -12,16 +12,15 @@ import { GuideFieldDetails } from './guide-help';
 
 interface Props {
   step: GuideStep; position: number; total: number; missing: boolean;
-  invitation?: boolean;
   next(skipped?: boolean): void; previous(): void; close(): void;
 }
-function GuidePopover({ step, position, total, missing, next, previous, close, invitation }: Props) {
+function GuidePopover({ step, position, total, missing, next, previous, close }: Props) {
   const body = useOverlayScrollbar<HTMLDivElement>();
   const entry = guideEntry(step);
   return <div className="peach-guide-popover-content" onPointerDown={event => event.stopPropagation()}>
     <header className="flex shrink-0 items-center justify-between gap-3 px-4 pt-4 pb-3">
       <h3 id="driver-popover-title" className="text-body-medium text-text-primary">{step.title}</h3>
-      <SettingsDialogClose label={invitation ? '关闭教程提示' : '结束导览'} onPress={close} />
+      <SettingsDialogClose label="结束导览" onPress={close} />
     </header>
     <div className="peach-guide-step-frame"><div ref={body} className="peach-guide-step-body flex flex-col gap-3 px-4 pb-4">
       {entry ? <section aria-label="打开方式" className="flex flex-col gap-2 rounded-xl bg-background-secondary-default p-3">
@@ -40,14 +39,9 @@ function GuidePopover({ step, position, total, missing, next, previous, close, i
       {missing ? <Note tone="neutral">{step.surface ? '尚未取得可演示的视频或对应控件。请先添加视频，或跳过后稍后重看。' : '当前页面未显示这个入口，可能尚无内容、没有配置权限或仍在加载。可以跳过，稍后重看。'}</Note> : null}
     </div></div>
     <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-separator-border px-4 py-3">
-      {invitation ? <>
-        <Button variant="ghost" size="small" className="ml-auto" onClick={close}>稍后再说</Button>
-        <Button size="small" data-guide-next="" onClick={() => next()}>打开教程</Button>
-      </> : <>
       <span className="mr-auto text-body-2-regular tabular-nums text-text-secondary">{position + 1} / {total} 步</span>
       <Button variant="ghost" size="small" onClick={close}>跳过本章</Button>
       <Button variant="secondary" size="small" disabled={position === 0} onClick={previous}>上一步</Button><Button size="small" data-guide-next="" onClick={() => next(missing)}>{position === total - 1 ? '完成本章' : '下一步'}</Button>
-      </>}
     </footer>
   </div>;
 }

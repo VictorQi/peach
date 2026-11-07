@@ -16,7 +16,7 @@ from typing import Mapping
 
 from . import error_reporting, follow_providers
 from .follow import FollowHistoryEnd, FollowSourceError, FollowSourceRateLimited
-from .follow_secrets import CredentialError
+from .follow_secrets import CREDENTIAL_GUIDE, CredentialError
 from .follow_sources import SourceFetch, enrichment_mark, history_window, published_stamp
 from .follow_store import RecordOutcome
 
@@ -66,9 +66,20 @@ def plan_check(store, credentials, *, source_id: int | None = None,
     rows = [dict(row) for row in store.sources(enabled_only=True)
             if (source_id is None or row["id"] == source_id)
             and (not older or row["provider"] in backfill_providers)]
+    ready = []
     for row in rows:
+        try:
+            credential = credentials.load(row['provider'])
+            guide = CREDENTIAL_GUIDE.get(row['provider'], {})
+            if guide.get('requirement') == 'required':
+                if credential is None:
+                    continue
+                credential.require(*guide.get('fields', ()))
+        except CredentialError:
+            # 缺失或不完整的来源会话不进入联网队列；公开来源继续检查。
+            continue
         row["force_media_reparse"] = (
-            not older and credentials.load(row["provider"]) is not None
+            not older and credential is not None
             and store.source_needs_media_reparse(row["id"])
         )
         # 第二阶段跳过谁：细节已经补齐的条目。重取媒体时不跳过任何一条——
@@ -77,7 +88,8 @@ def plan_check(store, credentials, *, source_id: int | None = None,
         row["enrich_skip"] = (
             frozenset() if row["force_media_reparse"] or not mark
             else store.enriched_external_ids(row["id"], mark))
-    return rows
+        ready.append(row)
+    return ready
 
 
 def build_connector_for(provider: str, credentials, connector_factory, *,

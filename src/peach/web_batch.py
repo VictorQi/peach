@@ -57,6 +57,9 @@ from .junk import (
     promo_residue as promo_residue,
 )
 
+#: 垃圾评分实际读取的表；无关任务提交不使评分失效，相关表提交后仍同步重算。
+JUNK_SCORE_TABLES = ("asset", "review_decision", "download_task")
+
 # Linux 容器可从 mountinfo 识别媒体实际所在的 FUSE 文件系统。
 MOUNTINFO_PATH = Path("/proc/self/mountinfo")
 
@@ -105,7 +108,7 @@ def q_ads(contract: WebContract, limit=200, offset=0, kind="", status="pending")
     if status not in {"pending", "dismissed"}:
         raise ValueError("invalid junk status")
     out, dismissed_ids = contract.cached_until_changed(
-        "junk-scored", lambda: _scored_junk(contract))
+        "junk-scored", lambda: _scored_junk(contract), tables=JUNK_SCORE_TABLES)
     pending = [item for item in out if item["id"] not in dismissed_ids]
     dismissed = [item for item in out if item["id"] in dismissed_ids]
     pool = dismissed if status == "dismissed" else pending

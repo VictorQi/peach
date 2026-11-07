@@ -263,14 +263,15 @@ class WebDataTests(unittest.TestCase):
 
         calls = 0
 
-        def counted_extra(name, path, **kwargs):
+        def counted_extra(name, path, roots):
             nonlocal calls
             calls += 1
-            return catalog_rules.is_local_extra(name, path, **kwargs)
+            return catalog_rules.sql_is_local_extra(name, path, roots)
 
-        with mock.patch("peach.repository.is_local_extra", counted_extra):
+        with mock.patch("peach.repository.sql_is_local_extra", counted_extra):
             actual = rm_web.q_facets(self.contract, filters=filters)
         # 工作量断言不依赖机器执行速度。
+        self.assertGreater(calls, 0)
         self.assertLess(calls, asset_count * 40, f"asset predicate calls: {calls}")
         for key in expected:
             with self.subTest(field=key):
@@ -1511,6 +1512,7 @@ class WebDataTests(unittest.TestCase):
         self.assertEqual(set(rm_web.GET_HANDLERS), {
             "/api/tag-management",
             "/api/tasks",
+            "/api/result-updates",
             "/api/library-processing",
             "/api/library-processing/issues",
             "/api/media-processing",
@@ -3936,14 +3938,14 @@ class TopsRotationTests(unittest.TestCase):
             with self.subTest(**scope):
                 calls = 0
 
-                def counted_extra(name, path, **kwargs):
+                def counted_extra(name, path, roots):
                     nonlocal calls
                     calls += 1
-                    return catalog_rules.is_local_extra(name, path, **kwargs)
+                    return catalog_rules.sql_is_local_extra(name, path, roots)
 
                 # 新契约使用冷缓存和新连接，确保执行的是修改统计后的查询。
                 contract = rm_web.WebContract(Path(self.db_path), **roots)
-                with mock.patch('peach.repository.is_local_extra', counted_extra):
+                with mock.patch('peach.repository.sql_is_local_extra', counted_extra):
                     actual = rm_web.q_tops(contract, 8, seed='111', **scope)
                 self.assertTrue(wanted['performers'])
                 self.assertGreater(calls, 0)

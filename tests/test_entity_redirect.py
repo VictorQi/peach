@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from PIL import Image, ImageDraw
 
-from peach.entities import merge_entity, resolve_entity_id
+from peach.entities import merge_entity, resolve_entity, resolve_entity_id
 from peach.web_review import _use_canonical_entity_names
 
 from support.ledger import fresh_ledger
@@ -62,6 +62,24 @@ class EntityRedirectTests(unittest.TestCase):
     def redirects(self) -> list[tuple]:
         return self.con.execute(
             "SELECT old_id,target_id FROM entity_redirect ORDER BY old_id").fetchall()
+
+    def test_exact_name_resolution_uses_normalized_indexes(self):
+        add_person(self.con, 20, "Mia")
+        self.con.execute("INSERT INTO entity_alias(entity_id,alias,normalized_alias,source,confidence)"
+                         " VALUES(20,'MIA Nanasawa','mia nanasawa','test',1.0)")
+        queries = []
+        self.con.set_trace_callback(queries.append)
+        try:
+            found = [resolve_entity(self.con, "performer", name)
+                     for name in ("Mia", "mia", "MIA Nanasawa", "mia nanasawa")]
+        finally:
+            self.con.set_trace_callback(None)
+        self.assertEqual([row[0] if row else None for row in found], [20, None, 20, None])
+        plans = [detail for sql in queries
+                 for *_, detail in self.con.execute("EXPLAIN QUERY PLAN " + sql)]
+        self.assertFalse([detail for detail in plans if detail.startswith("SCAN")], plans)
+        for key in ("normalized_name=?", "normalized_alias=?"):
+            self.assertTrue(any(key in detail for detail in plans), plans)
 
     def test_the_merged_id_resolves_to_the_target(self):
         merge(self.con, 11, 10, "新ありな")

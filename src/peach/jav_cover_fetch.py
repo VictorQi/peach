@@ -57,7 +57,7 @@ from peach.scripting import USER_AGENT, open_readonly
 from peach.config import COVER_DIR, DATABASE_PATH, GENERATED_DIR, SOURCES_DIR
 from peach.http import HttpRequest, HttpTransport, HttpxTransport
 from peach.scripting import HostLimiter
-from peach.scraping_access import SOURCES, SourceBudgetExhausted, SourcePaused, SourceTransport, source_for
+from peach.scraping_access import SourceBudgetExhausted, SourcePaused, SourceTransport
 from peach.config import SECRETS_DIR
 from peach.jobs import DiskGuard, JobPolicyError
 from peach.task_runs import TaskRunHandle, cli_run, inert_handle
@@ -210,10 +210,44 @@ class HostLimitedTransport:
                                               clock=clock, sleeper=sleeper)
 
     def __call__(self, request: HttpRequest, timeout: float, limit: int):
+        from collections import OrderedDict
+
+        key = self._image_probe_key(request, limit)
+        cache = self.__dict__.setdefault('_image_probe_cache', OrderedDict())
+        if key is not None and key in cache:
+            expires, response = cache.pop(key)
+            if expires > self.clock():
+                from peach.processing_control import checkpoint
+                checkpoint('network')
+                cache[key] = (expires, response)
+                return response
         self.limiter.wait(request.url)
-        return self.inner(request, timeout, limit)
+        response = self.inner(request, timeout, limit)
+        if (key is not None and response.status in (200, 206) and len(response.body) <= PROBE_BYTES
+                and not PLACEHOLDER.search(getattr(response, 'url', '') or request.url)):
+            try:
+                with Image.open(io.BytesIO(response.body)):
+                    pass
+            except (OSError, ValueError):
+                pass
+            else:
+                cache[key] = (self.clock() + 600.0, response)
+                while len(cache) > 128:
+                    cache.popitem(last=False)
+        return response
+
+    @staticmethod
+    def _image_probe_key(request: HttpRequest, limit: int):
+        """短时复用同一请求身份的图片头，完整图片和失败答复仍走来源传输。"""
+        headers = tuple(sorted((str(k).lower(), str(v)) for k, v in request.headers.items()))
+        if (request.method != 'GET' or request.body is not None
+                or dict(headers).get('range') != f'bytes=0-{PROBE_BYTES - 1}'
+                or not re.search(r'\.(?:jpe?g|png|webp)(?:\?|$)', request.url, re.I)):
+            return None
+        return request.url, headers, limit
 
     def renew(self) -> None:
+        self.__dict__.pop('_image_probe_cache', None)
         if hasattr(self.inner, "renew"):
             self.inner.renew()
             return
@@ -264,18 +298,8 @@ def _sleep_within(delay: float, deadline: float | None) -> None:
 
 #: 一条请求给传输的时限上限。
 REQUEST_TIMEOUT = 30.0
-#: 由本机浏览器过验证的来源（`scraping_access.SOURCES` 里登记了 `browser`）一条请求的时限，
-#: 不按剩余预算往下裁。浏览器自动过验证最多等 `browser_transport.AUTO_SECONDS`（40 秒），
-#: 2026-09-25 实测 JAVten 最慢 25 秒；时限给到 30 秒以下，自动阶段没等完就被掐断，那一站白问一次。
-BROWSER_REQUEST_TIMEOUT = 45.0
-
-
 def request_timeout(url: str, remaining: float | None) -> float:
-    """这一条请求给传输多少秒：普通来源不超过剩余预算与 `REQUEST_TIMEOUT`，浏览器来源固定
-    `BROWSER_REQUEST_TIMEOUT`——等浏览器过验证的那一段不归单项预算管（ADR-0065 第二条）。"""
-    source = source_for(url)
-    if source and SOURCES[source].get("browser"):
-        return BROWSER_REQUEST_TIMEOUT
+    """每条请求遵守传输上限与调用方剩余预算。"""
     return REQUEST_TIMEOUT if remaining is None else max(1.0, min(REQUEST_TIMEOUT, remaining))
 
 
@@ -450,8 +474,11 @@ def proxyable_cover_url(url: str) -> bool:
 
 
 def content_id_images(content_id: str) -> list[Candidate]:
+    """数字版猜测路径补足五位；来源明确给出的图址由原图入口保留。"""
     candidates: list[Candidate] = []
     for cid in cid_variants(content_id):
+        if re.fullmatch(r'[a-z]+\d{1,4}', cid):
+            continue
         candidates.extend([
             candidate_for(AWS_MODERN.format(kind="digital/video", cid=cid)),
             candidate_for(AWS_LEGACY_DIGITAL.format(cid=cid)),
