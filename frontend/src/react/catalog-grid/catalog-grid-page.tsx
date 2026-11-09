@@ -117,7 +117,12 @@ function GridBody(props: CatalogGridProps) {
   const { helpers, actions, layout } = props;
   const entity = props.mode === 'entity';
   const trash = !entity && props.filters?.state === 'trash';
-  const query = entity ? entityQuery(props) : catalogQuery(props);
+  const requested = entity ? entityQuery(props) : catalogQuery(props);
+  const covered = useCoveredPause(requested.queryKey);
+  /* 覆盖期间保留已画出的查询代次；换成未订阅的新键会让已有卡片退回无限等待的骨架。 */
+  const visibleQuery = useRef(requested);
+  if (!covered) visibleQuery.current = requested;
+  const query = visibleQuery.current;
   /* 资料页的第一页由壳和页头一起取来：同步落进这一代的缓存，首帧就是卡片，不再发一遍。 */
   const [retained] = useState(() => props.wall ? latestCatalogPages(query.queryKey) : undefined);
   const queryIdentity = JSON.stringify(query.queryKey);
@@ -126,7 +131,6 @@ function GridBody(props: CatalogGridProps) {
   const initialData = restored || retained || (entity && props.initial
     ? { pages: [{ ...props.initial, items: props.initial.items || [], offset: 0 }], pageParams: [0] }
     : undefined);
-  const covered = useCoveredPause(query.queryKey);
   const result = useInfiniteQuery<GridPage, Error, InfiniteData<GridPage, number>, QueryKey, number>({
     queryKey: query.queryKey,
     queryFn: ({ pageParam, signal }) => query.queryFn({ pageParam, signal }),
@@ -135,7 +139,7 @@ function GridBody(props: CatalogGridProps) {
     initialData,
     staleTime: entity || props.restoreNavigation ? Infinity : 0,
     refetchOnMount: entity && retained ? 'always' : false,
-    subscribed: !covered,
+    subscribed: !covered || !queryClient.getQueryData(query.queryKey),
   });
   usePlaybackProgress();
 

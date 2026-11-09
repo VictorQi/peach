@@ -205,6 +205,49 @@ describe('续页', () => {
     queryClient.removeQueries({ queryKey: ['catalog-grid'] });
   });
 
+  it('详情覆盖期间目录换代保留已有卡片，揭开后读取最新一代', async () => {
+    vi.stubGlobal('IntersectionObserver', FakeObserver);
+    const server = catalogServer();
+    let revise!: (value: number) => void;
+    function Grid() {
+      const [revision, setRevision] = useState(0);
+      revise = setRevision;
+      return <CatalogGridPage {...props({ sort: 'seed', q: '覆盖期间换代' })} revision={revision} />;
+    }
+    const host = await mount(<QueryClientProvider client={queryClient}><Grid /></QueryClientProvider>);
+    try {
+      await until(() => cards(host) === 3, '第一页');
+      await act(async () => { peachHistory.push('/assets/1') });
+      await act(async () => { revise(1) });
+      await settle();
+      expect(cards(host), '覆盖期间保留已有内容').toBe(3);
+      expect(server.offsets()).toHaveLength(1);
+      await act(async () => { revise(2) });
+      await act(async () => { peachHistory.push('/') });
+      await until(() => server.offsets().length === 2 && cards(host) === 3, '揭开后读取最新一代');
+      expect(server.offsets()).toHaveLength(2);
+    } finally {
+      await act(async () => { peachHistory.push('/') });
+      queryClient.removeQueries({ queryKey: ['catalog-grid'] });
+    }
+  });
+
+  it('直接打开详情时底下的目录仍完成首次读取', async () => {
+    vi.stubGlobal('IntersectionObserver', FakeObserver);
+    const server = catalogServer();
+    await act(async () => { peachHistory.push('/assets/1') });
+    try {
+      const host = await mount(<QueryClientProvider client={queryClient}>
+        <CatalogGridPage {...props({ sort: 'seed', q: '详情首次挂载' })} />
+      </QueryClientProvider>);
+      await until(() => cards(host) === 3, '首次读取');
+      expect(server.offsets()).toHaveLength(1);
+    } finally {
+      await act(async () => { peachHistory.push('/') });
+      queryClient.removeQueries({ queryKey: ['catalog-grid'] });
+    }
+  });
+
   it('心跳回执广播的观看进度改写缓存里那张卡', async () => {
     vi.stubGlobal('IntersectionObserver', FakeObserver);
     catalogServer();
