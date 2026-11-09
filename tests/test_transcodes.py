@@ -213,6 +213,40 @@ class TranscodeServiceTests(unittest.TestCase):
             self.assertEqual(service.media_duration(root / "missing.mp4"), 0.0)
             self.assertEqual(TranscodeService(_Resolver(None), root / "cache").media_duration(source), 0.0)
 
+    def test_a_failed_probe_is_remembered_and_concurrent_callers_share_one(self):
+        """探测不到的片子一次起播会从好几处问画像，每处各等满 20 秒；失败要记一段时间，同时的只跑一个。"""
+        from peach import transcodes
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            source = root / "broken.mp4"
+            source.write_bytes(b"source")
+            service = TranscodeService(_Resolver(root / "ffmpeg.exe", root / "ffprobe.exe"),
+                                       root / "cache", prefer_hardware=False)
+            started, release = threading.Event(), threading.Event()
+            calls = []
+
+            def probe(*_args):
+                calls.append(1)
+                started.set()
+                release.wait(5)
+                return None
+            with patch.object(service, "_probe", side_effect=probe):
+                first = threading.Thread(target=service.requires_conversion, args=(source,))
+                first.start()
+                started.wait(5)
+                second = threading.Thread(target=service.media_duration, args=(source,))
+                second.start()
+                release.set()
+                first.join(5)
+                second.join(5)
+                self.assertTrue(service.requires_conversion(source))
+                self.assertEqual(service.media_duration(source), 0.0)
+                self.assertEqual(len(calls), 1)
+                later = transcodes.time.monotonic() + transcodes.PROBE_FAILURE_SECONDS + 1
+                with patch.object(transcodes.time, "monotonic", return_value=later):
+                    service.media_duration(source)
+                self.assertEqual(len(calls), 2, "冷却过了再探一次")
+
     def test_avi_is_transcoded_once_and_cached(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -22,6 +22,21 @@ def sample_bytes(samples: int) -> bytes:
     return bytes((index * 7 + 11) % 251 for index in range(samples * SAMPLE_SIZE))
 
 
+def multi_mdat_mp4(samples: int = 13) -> bytes:
+    """每个样本各占一个 mdat，样本表仍指向各自真实载荷。"""
+    original = minimal_mp4(timescale=1000, sample_delta=400, samples=samples, keyframe_every=6)
+    start = original.index(b'mdat') - 4
+    prefix = bytearray(original[:start])
+    offsets = prefix.index(b'stco') + 12
+    for index in range(samples):
+        position = offsets + index * 4
+        before = struct.unpack_from('>I', prefix, position)[0]
+        struct.pack_into('>I', prefix, position, before + index * 8)
+    payload = original[start + 8:]
+    return bytes(prefix) + b''.join(box(b'mdat', payload[index * SAMPLE_SIZE:(index + 1) * SAMPLE_SIZE])
+                                  for index in range(samples))
+
+
 def minimal_mp4(
     *,
     timescale: int,

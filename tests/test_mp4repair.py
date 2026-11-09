@@ -19,6 +19,162 @@ from peach.mp4repair import (
 )
 
 from support.mp4 import SAMPLE_SIZE, minimal_mp4, sample_bytes
+from support.mp4 import box, multi_mdat_mp4
+
+
+class MdatLayoutTests(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.folder = tempfile.TemporaryDirectory()
+        self.addCleanup(self.folder.cleanup)
+        self.root = Path(self.folder.name).resolve()
+        self.source = self.root / 'many.mp4'
+        self.original = multi_mdat_mp4()
+        self.source.write_bytes(self.original)
+
+    def test_virtual_header_preserves_every_sample_address_and_payload(self):
+        from peach.mp4layout import inspect
+        layout = inspect(self.source)
+        self.assertIsNotNone(layout)
+        header = layout.header()
+        virtual = header.prefix + self.original[header.payload_start:header.payload_end]
+        self.assertEqual(len(virtual), len(self.original))
+        self.assertEqual([kind for kind, _, _ in _iter_boxes(virtual, 0, len(virtual))],
+                         [b'ftyp', b'moov', b'mdat'])
+        self.assertEqual(virtual[:layout.offset], self.original[:layout.offset])
+        self.assertEqual(virtual[layout.offset + 4:], self.original[layout.offset + 4:])
+        offsets = self.original.index(b'stco') + 12
+        for index in range(13):
+            position = struct.unpack_from('>I', virtual, offsets + index * 4)[0]
+            self.assertEqual(virtual[position:position + SAMPLE_SIZE],
+                             sample_bytes(13)[index * SAMPLE_SIZE:(index + 1) * SAMPLE_SIZE])
+
+    def test_unsupported_or_incomplete_layouts_are_unchanged(self):
+        from peach.mp4layout import inspect
+        regular = minimal_mp4(timescale=1000, sample_delta=400, samples=13, keyframe_every=6)
+        for blob in (regular, self.original + b'bad', self.original + box(b'moof', b''),
+                     self.original + box(b'moov', b''), self.original[:-1]):
+            with self.subTest(tail=blob[-8:]):
+                self.source.write_bytes(blob)
+                self.assertIsNone(inspect(self.source))
+                self.assertEqual(self.source.read_bytes(), blob)
+        self.source.write_bytes(self.original)
+        with patch('peach.mp4layout.BOX_LIMIT', 3):
+            self.assertIsNone(inspect(self.source))
+        with patch('peach.mp4layout.HEADER_LIMIT', 10):
+            self.assertIsNone(inspect(self.source))
+
+    def test_ingestion_changes_only_the_length_field_and_keeps_a_small_recovery_record(self):
+        import json
+        import os
+        from peach.mp4layout import inspect, prepare_local
+        os.utime(self.source, ns=(1500000000000000000, 1500000000000000000))
+        stamp = self.source.stat().st_mtime_ns
+        layout = inspect(self.source)
+        journal_root = self.root / 'records'
+        with prepare_local(self.source, journal_root) as changed:
+            self.assertTrue(changed)
+            self.assertEqual(self.source.read_bytes()[layout.offset:layout.offset + 4], bytes(4))
+        self.assertEqual(self.source.read_bytes(), layout.header().prefix + self.original[len(layout.prefix):])
+        self.assertNotEqual(self.source.stat().st_mtime_ns, stamp, '修改时间使旧头部与身份缓存失效')
+        records = list(journal_root.glob('*.json'))
+        self.assertEqual(len(records), 1)
+        self.assertLess(records[0].stat().st_size, 2048)
+        self.assertEqual(json.loads(records[0].read_text())['status'], 'complete')
+        with prepare_local(self.source, journal_root) as changed:
+            self.assertFalse(changed)
+
+    def test_failed_media_validation_restores_the_exact_original(self):
+        import json
+        from peach.mp4layout import prepare_local
+        with self.assertRaisesRegex(ValueError, '探测失败'):
+            with prepare_local(self.source, self.root / 'records'):
+                raise ValueError('探测失败')
+        self.assertEqual(self.source.read_bytes(), self.original)
+        record = next((self.root / 'records').glob('*.json'))
+        self.assertEqual(json.loads(record.read_text())['status'], 'rolled-back')
+
+    def test_an_interrupted_write_is_recovered_before_the_next_probe(self):
+        import json
+        from peach.mp4layout import prepare_local
+        root = self.root / 'records'
+        with prepare_local(self.source, root):
+            pass
+        journal = next(root.glob('*.json'))
+        record = json.loads(journal.read_text())
+        record['status'] = 'pending'
+        journal.write_text(json.dumps(record))
+        with self.source.open('r+b') as handle:
+            handle.seek(record['offset'])
+            handle.write(b'\x00\x01\x00\x00')
+        with self.assertRaises(RuntimeError):
+            with prepare_local(self.source, root) as changed:
+                self.assertTrue(changed)
+                raise RuntimeError('探测失败')
+        self.assertEqual(self.source.read_bytes(), self.original)
+
+    def test_recovery_does_not_overwrite_a_replaced_file(self):
+        import json
+        from peach.mp4layout import prepare_local
+        root = self.root / 'records'
+        with prepare_local(self.source, root):
+            pass
+        journal = next(root.glob('*.json'))
+        record = json.loads(journal.read_text())
+        record['status'] = 'pending'
+        journal.write_text(json.dumps(record))
+        replaced = b'other file'
+        self.source.write_bytes(replaced)
+        with self.assertRaisesRegex(ValueError, '已变更'):
+            with prepare_local(self.source, root):
+                self.fail('替换后的文件不能改写')
+        self.assertEqual(self.source.read_bytes(), replaced)
+
+    def test_range_cache_reuses_the_profile_and_rechecks_a_changed_source(self):
+        from peach import mp4layout
+        cache = mp4layout.LayoutCache()
+        with patch.object(mp4layout, 'inspect', wraps=mp4layout.inspect) as inspect:
+            self.assertIsNotNone(cache.header(self.source))
+            self.assertIsNotNone(cache.header(self.source))
+            self.assertEqual(inspect.call_count, 1)
+            self.source.write_bytes(b'new source')
+            self.assertIsNone(cache.header(self.source))
+            self.assertEqual(inspect.call_count, 2)
+
+    def test_layout_sidecar_survives_a_process_restart_without_rescanning(self):
+        store = HeaderRepairStore(self.root / 'headers', None)
+        header = store.optimized_layout(42, self.source, stat=self.source.stat())
+        self.assertIsNotNone(header)
+        restarted = HeaderRepairStore(self.root / 'headers', None)
+        with patch('peach.mp4layout.inspect', side_effect=AssertionError('重新逐盒跳读')):
+            self.assertEqual(restarted.lookup(42, self.source), header)
+            self.assertEqual(restarted.optimized_layout(42, self.source), header)
+        self.assertEqual(self.source.read_bytes(), self.original)
+
+    def test_layout_uses_memory_when_sidecar_storage_is_unavailable(self):
+        store = HeaderRepairStore(self.root / 'headers', None)
+        with patch.object(mp4repair, 'write_sidecar', side_effect=PermissionError('只读缓存')):
+            header = store.optimized_layout(42, self.source)
+        self.assertIsNotNone(header)
+        self.assertEqual(store.lookup(42, self.source), header)
+        self.assertEqual(self.source.read_bytes(), self.original)
+
+    def test_independent_sidecar_writers_publish_complete_headers(self):
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+        barrier = threading.Barrier(2)
+        real_write = Path.write_bytes
+        def ready(path, payload):
+            result = real_write(path, payload)
+            barrier.wait(timeout=5)
+            return result
+        destination = self.root / 'shared.mp4hdr'
+        headers = [RepairedHeader(value * 32, 0, 1) for value in (b'A', b'B')]
+        with patch.object(Path, 'write_bytes', ready), ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(write_sidecar, destination, header) for header in headers]
+            for future in futures:
+                future.result(timeout=15)
+        self.assertIn(read_sidecar(destination), headers)
 
 #: 解码序 I P B B P B B …，显示序 I B B P B B P …；每组三帧里 P 要等两帧才显示。
 DECODE_TO_DISPLAY = (0, 3, 1, 2, 6, 4, 5, 9, 7, 8, 12, 10, 11)

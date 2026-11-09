@@ -141,10 +141,10 @@ def _attachment_disposition(title: str, url: str) -> str:
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
 
 
-def _repaired_header(state, asset_id: int, source: Path):
+def _repaired_header(state, asset_id: int, source: Path, stat=None):
     """已经修好的 MP4 头；没有就是 None。只查不算，算是 `_needs_conversion` 的事。"""
     store = getattr(state, "header_repairs", None)
-    return None if store is None else store.lookup(asset_id, source)
+    return None if store is None else store.lookup(asset_id, source, stat=stat)
 
 
 def _needs_conversion(state, asset_id: int, source: Path, session: str) -> bool:
@@ -156,10 +156,13 @@ def _needs_conversion(state, asset_id: int, source: Path, session: str) -> bool:
     HLS 那两个端点不问：一次播放的分片计划要在整段会话里保持同一个形状，边车中途落地
     会让固定 6 秒的计划换成按关键帧切的，剩下的分片索引全对不上。
     """
+    store = getattr(state, "header_repairs", None)
+    # 边车已确认能直放，计划与 /stream 共用这一结果；否则重启后的 ffprobe 又会逐盒跳读冷盘。
+    if store is not None and store.lookup(asset_id, source) is not None:
+        return False
     if not state.transcode_service.requires_conversion(
             source, session=session, registry=state.stream_sessions):
         return False
-    store = getattr(state, "header_repairs", None)
     if store is None or not state.transcode_service.decode_order_timestamps(
             source, session=session, registry=state.stream_sessions):
         return True
@@ -194,6 +197,20 @@ def _hls_plan(state, asset_id: int, session: str = "", conversion: bool | None =
         return None
     plan = state.hls_service.plan(source, duration)
     return None if not plan else (asset, source, plan, False)
+
+
+def _session_plan(state, asset_id: int, session: str):
+    """这次播放的分片计划：播放列表算出来记在会话上，分片端点直接取（`SessionPlans`）。
+
+    重启后续播的分片没有记录，当场再算一次并记下。
+    """
+    plans = getattr(state, "hls_session_plans", None)
+    if plans is not None and (known := plans.get(session, asset_id)) is not None:
+        return known
+    resolved = _hls_plan(state, asset_id, session)
+    if plans is not None and resolved is not None:
+        plans.put(session, asset_id, resolved)
+    return resolved
 
 
 @router.post("/api/external-playback")
@@ -300,13 +317,15 @@ def stream(request: Request, id: int, session: str = "", args: dict[str, str] = 
     local_event('playback-request', asset_id=id, method=request.method,
                 range=request.headers.get('range', '')[:80], user_agent=request.headers.get('user-agent', '')[:512])
     asset = state.media_engine.asset(id)
-    path = state.media_engine.filesystem.file_for(asset, thumbnail=False)
+    # 拖一次进度条就是一串 Range 请求，片源在网盘上时每次 stat 都是一趟网络往返：确认存在时
+    # 取到的那一次 stat 一路传给头修复查询、画像缓存和文件响应，一个请求只问一次。
+    path, source_stat = state.media_engine.filesystem.located(asset)
     from . import strm, strm_stream
     if strm.is_pointer(path):
         return strm_stream.proxy(request, id, path, session)
     if path.suffix.lower() in strm.DISC_SUFFIXES:
         return JSONResponse({'error': 'ISO 原盘请使用作品详情中的外部播放器打开'}, status_code=415)
-    header = _repaired_header(state, id, path)
+    header = _repaired_header(state, id, path, source_stat)
     if header is not None:
         return SplicedMp4Response(
             path, header, session=session, registry=state.stream_sessions,
@@ -315,6 +334,7 @@ def stream(request: Request, id: int, session: str = "", args: dict[str, str] = 
         # 不带会话的只有卡片悬停预览：取消不了，也看不到浏览器断开，不能为它起整片转码。
         path, transcoded = state.transcode_service.browser_path(
             id, path, session=session, registry=state.stream_sessions, convert=bool(session),
+            stat=source_stat,
         )
     except TranscodeCancelled:
         return Response(status_code=410, headers={"Cache-Control": "no-store"})
@@ -324,16 +344,22 @@ def stream(request: Request, id: int, session: str = "", args: dict[str, str] = 
     except TranscodeUnavailable:
         LOGGER.exception("browser transcode failed for asset %s", id)
         return JSONResponse({"error": "transcode unavailable"}, status_code=503)
+    if not transcoded and (store := getattr(state, 'header_repairs', None)) is not None:
+        header = store.optimized_layout(id, path, stat=source_stat)
+        if header is not None:
+            return SplicedMp4Response(path, header, session=session, registry=state.stream_sessions)
     media_type = "video/mp4" if transcoded else None
     from .smb_media import SmbResource
     if isinstance(path, SmbResource):
         from .smb_response import SmbResponse
         return SmbResponse(path, session=session, registry=state.stream_sessions, media_type=media_type)
+    known = None if transcoded else source_stat
     response = (
         CancellableFileResponse(
             path, session=session, registry=state.stream_sessions, media_type=media_type,
+            stat_result=known,
         )
-        if session else BufferedFileResponse(path, media_type=media_type)
+        if session else BufferedFileResponse(path, media_type=media_type, stat_result=known)
     )
     if transcoded:
         response.headers["X-Peach-Transcoded"] = "1"
@@ -429,7 +455,7 @@ def hls_playlist(request: Request, id: int, session: str = "", args: dict[str, s
     if state.stream_sessions.is_cancelled(session):
         return PlainTextResponse("stream cancelled", status_code=410)
     try:
-        resolved = _hls_plan(state, id, session)
+        resolved = _session_plan(state, id, session)
     except (MediaUnavailable, TranscodeUnavailable):
         return PlainTextResponse("hls unavailable", status_code=404)
     if resolved is None:
@@ -459,10 +485,12 @@ async def hls_segment(request: Request, id: int, index: int, session: str = "", 
 async def _hls_segment(request: Request, id: int, index: int, session: str):
     state = request.app.state
     try:
-        loop = asyncio.get_running_loop()
-        resolved = await loop.run_in_executor(
-            state.hls_plan_executor, partial(_hls_plan, state, id, session),
-        )
+        plans = getattr(state, "hls_session_plans", None)
+        resolved = plans.get(session, id) if plans is not None else None
+        if resolved is None:
+            resolved = await asyncio.get_running_loop().run_in_executor(
+                state.hls_plan_executor, partial(_session_plan, state, id, session),
+            )
         if resolved is None:
             return JSONResponse({"error": "hls unavailable"}, status_code=404)
         _, source, plan, conversion = resolved
@@ -510,6 +538,9 @@ async def stream_cancel(request: Request, session: str, args: dict[str, str] = D
     if not session or len(session) > 128:
         return JSONResponse({"error": "invalid session"}, status_code=400)
     cancelled = request.app.state.stream_sessions.cancel(session)
+    plans = getattr(request.app.state, "hls_session_plans", None)
+    if plans is not None:
+        plans.forget(session)
     return JSONResponse({"ok": True, "cancelled": cancelled})
 
 
@@ -769,10 +800,14 @@ async def cover_crop(request: Request, args: dict[str, str] = Depends(require_au
     手工框就是删掉这份 sidecar，下一次取景重新按折痕判据算。
 
     `box` 是源图像素的 `{x0,y0,x1,y1}`，右下开区间；`box` 为 null 表示恢复默认。
+    读图、算折痕与写 sidecar 都在线程里做：这是异步端点，同步读写会停住整个服务的送流。
     """
-    state = request.app.state.web_contract
     sent = await request.json()
     payload = sent if isinstance(sent, dict) else {}
+    return await asyncio.to_thread(_apply_cover_crop, request.app.state.web_contract, payload)
+
+
+def _apply_cover_crop(state, payload: dict):
     code = str(payload.get("code") or "")
     path = state.cover_path(code)
     if path is None:
