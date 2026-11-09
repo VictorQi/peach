@@ -548,6 +548,8 @@ class HeaderRepairStore:
         self._guard = threading.Lock()
         self.runs = runs
         self._jobs = {}
+        from .mp4layout import LayoutCache
+        self.layouts = LayoutCache()
 
     def _name(self, asset_id: int, source: Path, stat=None) -> str | None:
         if stat is None:

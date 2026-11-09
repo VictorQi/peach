@@ -3428,6 +3428,27 @@ class FastApiContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.content, (b"NEWHEADER" + bytes(range(64)))[5:13])
         self.assertEqual(response.headers["content-type"], "video/mp4")
 
+    async def test_a_multi_mdat_stream_uses_a_virtual_header_without_modifying_the_source(self):
+        from support.mp4 import multi_mdat_mp4
+        original = multi_mdat_mp4()
+        source = self.media_root / 'many-mdats.mp4'
+        source.write_bytes(original)
+        con = sqlite3.connect(self.db)
+        con.execute('UPDATE asset SET path=? WHERE id=1', (str(source),))
+        con.commit()
+        con.close()
+        offset = original.index(b'mdat') - 4
+        with patch.object(self.app.state.transcode_service, 'browser_path', return_value=(source, False)):
+            response = await self.client.get('/stream?id=1&t=secret',
+                                             headers={'Range': f'bytes={offset - 2}-{offset + 10}'})
+            head = await self.client.head('/stream?id=1&t=secret')
+        expected = bytearray(original)
+        expected[offset:offset + 4] = bytes(4)
+        self.assertEqual(response.status_code, 206)
+        self.assertEqual(response.content, bytes(expected[offset - 2:offset + 11]))
+        self.assertEqual(head.headers['content-length'], str(len(original)))
+        self.assertEqual(source.read_bytes(), original)
+
     async def test_a_broken_timestamp_file_without_a_header_still_slices_and_asks_for_one(self):
         """头还没算出来时照旧走 HLS，同时在后台补一份，下次播就换成 Range。"""
         con = sqlite3.connect(self.db)

@@ -48,6 +48,47 @@ class ProbeUnmeasuredTests(unittest.TestCase):
         self.probed.append(PureWindowsPath(path).name)
         return 1800.0, 1920, 1080, "h264", 30.0, None
 
+    def test_local_ingestion_prepares_the_source_before_measuring_it(self):
+        from support.mp4 import multi_mdat_mp4
+        native = Path(self.tmp.name) / 'new.mp4'
+        original = multi_mdat_mp4()
+        native.write_bytes(original)
+        asset_id = self.add(ROOT + r'\new.mp4')
+        offset = original.index(b'mdat') - 4
+        def probe(_tool, path, _timeout):
+            self.assertEqual(Path(path).read_bytes()[offset:offset + 4], bytes(4))
+            return 1800.0, 1920, 1080, 'h264', 30.0, None
+        with mock.patch.object(media_probe, 'probe_file', probe), \
+                mock.patch.object(media_probe, 'resolve_case_insensitive', return_value=str(native)):
+            self.assertEqual(media_probe.probe_unmeasured(self.db, 'ffprobe', 'local', ROOT), 1)
+        self.assertEqual(self.row(asset_id)[0], 1800.0)
+        expected = bytearray(original)
+        expected[offset:offset + 4] = bytes(4)
+        self.assertEqual(native.read_bytes(), expected)
+
+    def test_failed_ingestion_probe_restores_the_original_container(self):
+        from support.mp4 import multi_mdat_mp4
+        native = Path(self.tmp.name) / 'bad.mp4'
+        original = multi_mdat_mp4()
+        native.write_bytes(original)
+        asset_id = self.add(ROOT + r'\bad.mp4')
+        with mock.patch.object(media_probe, 'probe_file', side_effect=ValueError('探测失败')), \
+                mock.patch.object(media_probe, 'resolve_case_insensitive', return_value=str(native)):
+            self.assertEqual(media_probe.probe_unmeasured(self.db, 'ffprobe', 'local', ROOT), 1)
+        self.assertEqual(self.row(asset_id)[0], -1)
+        self.assertEqual(native.read_bytes(), original)
+
+    def test_remote_ingestion_does_not_modify_the_source(self):
+        from support.mp4 import multi_mdat_mp4
+        native = Path(self.tmp.name) / 'remote.mp4'
+        original = multi_mdat_mp4()
+        native.write_bytes(original)
+        self.add(ROOT + r'\remote.mp4', location='115')
+        with mock.patch.object(media_probe, 'probe_file', self.fake_probe), \
+                mock.patch.object(media_probe, 'resolve_case_insensitive', return_value=str(native)):
+            self.assertEqual(media_probe.probe_unmeasured(self.db, 'ffprobe', '115', ROOT), 1)
+        self.assertEqual(native.read_bytes(), original)
+
     def probe(self, location="local", root=ROOT, ffprobe="ffprobe"):
         with mock.patch.object(media_probe, "probe_file", self.fake_probe), \
                 mock.patch.object(media_probe, "resolve_case_insensitive", str):
