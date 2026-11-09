@@ -44,6 +44,25 @@ class MdatLayout:
         return hashlib.sha256(self.header().prefix).hexdigest()
 
 
+def _box_span(handle, position: int, total: int):
+    """校验一个顶层盒子的头，返回类型、载荷起点与终点。"""
+    handle.seek(position)
+    raw = handle.read(16)
+    if len(raw) < 8:
+        return None
+    length, kind = int.from_bytes(raw[:4], 'big'), raw[4:8]
+    width = 16 if length == 1 else 8
+    if length == 1:
+        if len(raw) < 16:
+            return None
+        length = int.from_bytes(raw[8:16], 'big')
+    elif length == 0:
+        length = total - position
+    if length < width or position + length > total:
+        return None
+    return kind, position + width, position + length
+
+
 def inspect(source: Path, *, known_stat=None) -> MdatLayout | None:
     """有界读取盒子头；不读媒体载荷，不支持的布局照原路播放。"""
     if not isinstance(source, Path) or source.suffix.lower() not in {'.mp4', '.m4v'}:
@@ -64,34 +83,24 @@ def inspect(source: Path, *, known_stat=None) -> MdatLayout | None:
             for _ in range(BOX_LIMIT):
                 if position == found.st_size:
                     break
-                handle.seek(position)
-                raw = handle.read(16)
-                if len(raw) < 8:
+                span = _box_span(handle, position, found.st_size)
+                if span is None:
                     return None
-                length, kind = int.from_bytes(raw[:4], 'big'), raw[4:8]
-                width = 16 if length == 1 else 8
-                if length == 1:
-                    if len(raw) < 16:
-                        return None
-                    length = int.from_bytes(raw[8:16], 'big')
-                elif length == 0:
-                    length = found.st_size - position
-                if length < width or position + length > found.st_size:
-                    return None
+                kind, body, end = span
                 if kind == b'mdat':
                     if first is None:
-                        first = (position, position + width)
+                        first = (position, body)
                     mdats += 1
                 elif first is not None:
                     if kind not in PADDING:
                         return None
                 elif kind == b'moov' and moov is None:
-                    moov = (position + width, position + length)
+                    moov = (body, end)
                 elif kind == b'ftyp' and position == 0:
                     ftyp = True
                 elif kind not in PADDING:
                     return None
-                position += length
+                position = end
             if (position != found.st_size or not ftyp or moov is None or first is None
                     or mdats < 2 or first[1] > HEADER_LIMIT):
                 return None
