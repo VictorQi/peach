@@ -59,6 +59,11 @@ class TranscodeNeedsSession(TranscodeUnavailable):
     """片源要整片转码，但请求没带可取消的流会话，也没有现成缓存。"""
 
 
+def _source_stat(source: Path, known):
+    """片源的 stat：调用方刚取过（`known`）就用它，网盘上每次 stat 都是一趟网络往返；没取过再问。"""
+    return source.stat() if known is None else known
+
+
 class TranscodeService:
     """Create immutable browser-playable MP4 cache entries without touching sources."""
 
@@ -125,9 +130,12 @@ class TranscodeService:
             return 0.0
         return profile.duration if profile is not None else 0.0
 
-    def _profile_for(self, source: Path, session: str, registry) -> _MediaProfile | None:
-        """按 (路径, 大小, mtime) 缓存探测结果；同一个文件只问 ffprobe 一次。"""
-        stat = source.stat()
+    def _profile_for(self, source: Path, session: str, registry, stat=None) -> _MediaProfile | None:
+        """按 (路径, 大小, mtime) 缓存探测结果；同一个文件只问 ffprobe 一次。
+
+        `stat` 是调用方刚取过的片源 stat：网盘上每次 stat 都是一趟网络往返，给了就不再问。
+        """
+        stat = _source_stat(source, stat)
         key = (str(source), stat.st_size, stat.st_mtime_ns)
         with self._locks_guard:
             profile = self._native_profiles.get(key)
@@ -143,19 +151,20 @@ class TranscodeService:
 
     def browser_path(
         self, asset_id: int, source: Path, *, session: str = "", registry=None,
-        convert: bool = True,
+        convert: bool = True, stat=None,
     ) -> tuple[Path, bool]:
         """浏览器能直接放的路径，以及它是不是转码产物。
 
         `convert=False` 时只交现成的整片缓存，缺缓存就抛 `TranscodeNeedsSession`。
         没有会话的请求取消不了，浏览器断开后整片 FFmpeg 还会跑到结束。
+        `stat` 是调用方刚取过的片源 stat，给了就不再问网盘。
         """
         profile = None
         if not self.needs_transcode(source):
             if self.resolver.ffprobe() is None:
                 return source, False
             try:
-                profile = self._profile_for(source, session, registry)
+                profile = self._profile_for(source, session, registry, stat)
             except OSError as exc:
                 raise TranscodeUnavailable("source unavailable") from exc
             if profile is not None and self._decodes_in_browser(source, profile):
@@ -166,7 +175,7 @@ class TranscodeService:
             raise TranscodeUnavailable("ffmpeg unavailable")
 
         try:
-            stat = source.stat()
+            stat = _source_stat(source, stat)
         except OSError as exc:
             raise TranscodeUnavailable("source unavailable") from exc
 

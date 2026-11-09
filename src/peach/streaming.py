@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 from collections.abc import Awaitable, MutableSet
 from pathlib import Path
@@ -249,8 +250,9 @@ class CancellableFileResponse(BufferedFileResponse):
         session: str,
         registry: StreamSessionRegistry,
         media_type: str | None = None,
+        stat_result: os.stat_result | None = None,
     ) -> None:
-        super().__init__(path, media_type=media_type)
+        super().__init__(path, media_type=media_type, stat_result=stat_result)
         self.session = session
         self.registry = registry
 

@@ -141,10 +141,10 @@ def _attachment_disposition(title: str, url: str) -> str:
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
 
 
-def _repaired_header(state, asset_id: int, source: Path):
+def _repaired_header(state, asset_id: int, source: Path, stat=None):
     """已经修好的 MP4 头；没有就是 None。只查不算，算是 `_needs_conversion` 的事。"""
     store = getattr(state, "header_repairs", None)
-    return None if store is None else store.lookup(asset_id, source)
+    return None if store is None else store.lookup(asset_id, source, stat=stat)
 
 
 def _needs_conversion(state, asset_id: int, source: Path, session: str) -> bool:
@@ -300,13 +300,15 @@ def stream(request: Request, id: int, session: str = "", args: dict[str, str] = 
     local_event('playback-request', asset_id=id, method=request.method,
                 range=request.headers.get('range', '')[:80], user_agent=request.headers.get('user-agent', '')[:512])
     asset = state.media_engine.asset(id)
-    path = state.media_engine.filesystem.file_for(asset, thumbnail=False)
+    # 拖一次进度条就是一串 Range 请求，片源在网盘上时每次 stat 都是一趟网络往返：确认存在时
+    # 取到的那一次 stat 一路传给头修复查询、画像缓存和文件响应，一个请求只问一次。
+    path, source_stat = state.media_engine.filesystem.located(asset)
     from . import strm, strm_stream
     if strm.is_pointer(path):
         return strm_stream.proxy(request, id, path, session)
     if path.suffix.lower() in strm.DISC_SUFFIXES:
         return JSONResponse({'error': 'ISO 原盘请使用作品详情中的外部播放器打开'}, status_code=415)
-    header = _repaired_header(state, id, path)
+    header = _repaired_header(state, id, path, source_stat)
     if header is not None:
         return SplicedMp4Response(
             path, header, session=session, registry=state.stream_sessions,
@@ -315,6 +317,7 @@ def stream(request: Request, id: int, session: str = "", args: dict[str, str] = 
         # 不带会话的只有卡片悬停预览：取消不了，也看不到浏览器断开，不能为它起整片转码。
         path, transcoded = state.transcode_service.browser_path(
             id, path, session=session, registry=state.stream_sessions, convert=bool(session),
+            stat=source_stat,
         )
     except TranscodeCancelled:
         return Response(status_code=410, headers={"Cache-Control": "no-store"})
@@ -329,11 +332,13 @@ def stream(request: Request, id: int, session: str = "", args: dict[str, str] = 
     if isinstance(path, SmbResource):
         from .smb_response import SmbResponse
         return SmbResponse(path, session=session, registry=state.stream_sessions, media_type=media_type)
+    known = None if transcoded else source_stat
     response = (
         CancellableFileResponse(
             path, session=session, registry=state.stream_sessions, media_type=media_type,
+            stat_result=known,
         )
-        if session else BufferedFileResponse(path, media_type=media_type)
+        if session else BufferedFileResponse(path, media_type=media_type, stat_result=known)
     )
     if transcoded:
         response.headers["X-Peach-Transcoded"] = "1"

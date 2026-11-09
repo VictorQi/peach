@@ -2529,6 +2529,22 @@ class FastApiContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(head.content, b"")
         self.assertEqual(head.headers["content-length"], "10")
 
+    async def test_a_range_request_stats_the_source_once(self):
+        """片源在网盘上时每次 stat 都是一趟网络往返：确认存在的那一次一路传到文件响应。"""
+        real_stat = os.stat
+        seen = []
+
+        def counting(path, *args, **kwargs):
+            if os.fspath(path) == str(self.media_file):
+                seen.append(path)
+            return real_stat(path, *args, **kwargs)
+        with patch("os.stat", counting):
+            partial = await self.client.get(
+                "/stream?id=1&session=detail-stat", headers={"X-Token": "secret", "Range": "bytes=2-5"})
+        self.assertEqual(partial.status_code, 206)
+        self.assertEqual(partial.content, b"2345")
+        self.assertEqual(len(seen), 1)
+
     async def test_follow_qualities_lists_every_tier_the_source_offers(self):
         """档位数量由来源决定，不由我们写死。
 
