@@ -342,7 +342,7 @@ def stream(request: Request, id: int, session: str = "", args: dict[str, str] = 
         LOGGER.exception("browser transcode failed for asset %s", id)
         return JSONResponse({"error": "transcode unavailable"}, status_code=503)
     if not transcoded and (store := getattr(state, 'header_repairs', None)) is not None:
-        header = store.layouts.header(path, known_stat=source_stat)
+        header = store.optimized_layout(id, path, stat=source_stat)
         if header is not None:
             return SplicedMp4Response(path, header, session=session, registry=state.stream_sessions)
     media_type = "video/mp4" if transcoded else None

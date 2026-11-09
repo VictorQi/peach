@@ -141,6 +141,41 @@ class MdatLayoutTests(unittest.TestCase):
             self.assertIsNone(cache.header(self.source))
             self.assertEqual(inspect.call_count, 2)
 
+    def test_layout_sidecar_survives_a_process_restart_without_rescanning(self):
+        store = HeaderRepairStore(self.root / 'headers', None)
+        header = store.optimized_layout(42, self.source, stat=self.source.stat())
+        self.assertIsNotNone(header)
+        restarted = HeaderRepairStore(self.root / 'headers', None)
+        with patch('peach.mp4layout.inspect', side_effect=AssertionError('重新逐盒跳读')):
+            self.assertEqual(restarted.lookup(42, self.source), header)
+            self.assertEqual(restarted.optimized_layout(42, self.source), header)
+        self.assertEqual(self.source.read_bytes(), self.original)
+
+    def test_layout_uses_memory_when_sidecar_storage_is_unavailable(self):
+        store = HeaderRepairStore(self.root / 'headers', None)
+        with patch.object(mp4repair, 'write_sidecar', side_effect=PermissionError('只读缓存')):
+            header = store.optimized_layout(42, self.source)
+        self.assertIsNotNone(header)
+        self.assertEqual(store.lookup(42, self.source), header)
+        self.assertEqual(self.source.read_bytes(), self.original)
+
+    def test_independent_sidecar_writers_publish_complete_headers(self):
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+        barrier = threading.Barrier(2)
+        real_write = Path.write_bytes
+        def ready(path, payload):
+            result = real_write(path, payload)
+            barrier.wait(timeout=5)
+            return result
+        destination = self.root / 'shared.mp4hdr'
+        headers = [RepairedHeader(value * 32, 0, 1) for value in (b'A', b'B')]
+        with patch.object(Path, 'write_bytes', ready), ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(write_sidecar, destination, header) for header in headers]
+            for future in futures:
+                future.result(timeout=15)
+        self.assertIn(read_sidecar(destination), headers)
+
 #: 解码序 I P B B P B B …，显示序 I B B P B B P …；每组三帧里 P 要等两帧才显示。
 DECODE_TO_DISPLAY = (0, 3, 1, 2, 6, 4, 5, 9, 7, 8, 12, 10, 11)
 
