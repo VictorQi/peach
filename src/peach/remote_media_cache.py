@@ -7,7 +7,7 @@ import re
 import time
 from pathlib import Path
 
-from filelock import FileLock
+from filelock import FileLock, Timeout
 from starlette.background import BackgroundTask
 from starlette.responses import FileResponse, Response, StreamingResponse
 
@@ -15,6 +15,8 @@ from .fsutil import atomic_path, atomic_write_text
 
 AVATAR_REFRESH_SECONDS = 90 * 86400
 FAVICON_REFRESH_SECONDS = 365 * 86400
+#: 同一段已有下载者时最多等它这么久，过了就直通上游、不落盘。
+FETCH_WAIT_SECONDS = 15
 MEDIA_HEADERS = ("content-type", "content-length", "content-range", "accept-ranges", "content-encoding")
 MEDIA_SECURITY_HEADERS = {
     'content-security-policy': "sandbox; default-src 'none'; frame-ancestors 'none'",
@@ -89,13 +91,22 @@ class RemoteMediaCache:
             return hit
         folder = self.folder(key)
         folder.mkdir(parents=True, exist_ok=True)
-        lock = FileLock(folder / "fetch.lock", thread_local=False)
-        lock.acquire(timeout=120)
+        # 锁按请求的范围分：同一段同时只放一个下载者，后到的等它落盘后直接命中。原先整个条目
+        # 一把锁、持到整段送完，在线播放时拖动或读尾部 moov 的第二个 Range 要排在一整段后面，
+        # 等满 120 秒就 502。等不到锁就直通上游，这一次不落盘。
+        lock = FileLock(self._slot(key, request.headers.get("range", "")).with_suffix(".lock"),
+                        thread_local=False)
+        try:
+            lock.acquire(timeout=FETCH_WAIT_SECONDS)
+            owned = True
+        except Timeout:
+            owned = False
         upstream = None
         def close():
             if upstream is not None:
                 upstream.close()
-            lock.release()
+            if owned:
+                lock.release()
         try:
             hit = self.response(key, request, headers=headers)
             if hit is not None:
@@ -108,7 +119,7 @@ class RemoteMediaCache:
                                 headers={'cache-control':'no-store',**MEDIA_SECURITY_HEADERS})
             forwarded = {name: upstream.headers[name] for name in MEDIA_HEADERS if name in upstream.headers}
             forwarded.update({'cache-control':'private, no-cache', **(headers or {}), **MEDIA_SECURITY_HEADERS})
-            accepted = upstream.status_code in (200,206)
+            accepted = owned and upstream.status_code in (200,206)
             content_range = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", forwarded.get("content-range", ""))
             if upstream.status_code == 206 and not content_range:
                 accepted = False
