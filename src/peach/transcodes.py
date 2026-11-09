@@ -21,7 +21,18 @@ BROWSER_NATIVE_SUFFIXES = frozenset({".mp4", ".m4v", ".webm", ".ogv", ".ogg"})
 DIRECT_MP4_PIXEL_FORMATS = frozenset({"yuv420p", "yuvj420p"})
 TRANSCODE_TIMEOUT_SECONDS = 3600
 PROBE_TIMEOUT_SECONDS = 20
+#: 探测失败记多久。键里有大小和修改时间，文件换了自然重探；冷却只挡同一份文件反复白等。
+PROBE_FAILURE_SECONDS = 300
+PROFILE_CACHE_LIMIT = 512
+_UNKNOWN = object()
 logger = logging.getLogger(__name__)
+
+
+def _remember(cache: dict, key, value) -> None:
+    """有界写入：满了丢最早的那一条。"""
+    if key not in cache and len(cache) >= PROFILE_CACHE_LIMIT:
+        cache.pop(next(iter(cache)))
+    cache[key] = value
 
 
 @dataclass(frozen=True)
@@ -84,6 +95,9 @@ class TranscodeService:
         self._locks_guard = threading.Lock()
         self._slots = threading.Semaphore(max(1, max_concurrent))
         self._native_profiles: dict[tuple[str, int, int], _MediaProfile] = {}
+        #: 探测失败的文件到冷却结束的时刻（`time.monotonic()`），键同上。
+        self._failed_probes: dict[tuple[str, int, int], float] = {}
+        self._probing: dict[tuple[str, int, int], threading.Lock] = {}
 
     @staticmethod
     def needs_transcode(source: Path) -> bool:
@@ -138,16 +152,42 @@ class TranscodeService:
         stat = _source_stat(source, stat)
         key = (str(source), stat.st_size, stat.st_mtime_ns)
         with self._locks_guard:
-            profile = self._native_profiles.get(key)
-        if profile is None:
-            profile = self._probe(source, session, registry,
-                                  time.monotonic() + PROBE_TIMEOUT_SECONDS)
-            if profile is not None:
+            if (known := self._known_profile(key)) is not _UNKNOWN:
+                return known
+            gate = self._probing.setdefault(key, threading.Lock())
+        # 一次起播会从好几处问同一个文件的画像（能否直放、是否只缺 ctts、时长、分片计划）：
+        # 同一时刻只放一个 ffprobe，失败也记下来一段时间。否则探测不到的片子每处各等满 20 秒，
+        # 起播前就耗掉一分多钟。取消与容量暂停是抛出的，不算失败。
+        with gate:
+            with self._locks_guard:
+                if (known := self._known_profile(key)) is not _UNKNOWN:
+                    return known
+            try:
+                profile = self._probe(source, session, registry,
+                                      time.monotonic() + PROBE_TIMEOUT_SECONDS)
                 with self._locks_guard:
-                    if len(self._native_profiles) >= 512:
-                        self._native_profiles.pop(next(iter(self._native_profiles)))
-                    self._native_profiles[key] = profile
+                    if profile is None:
+                        _remember(self._failed_probes, key, time.monotonic() + PROBE_FAILURE_SECONDS)
+                    else:
+                        self._failed_probes.pop(key, None)
+                        _remember(self._native_profiles, key, profile)
+            finally:
+                with self._locks_guard:
+                    if self._probing.get(key) is gate:
+                        del self._probing[key]
         return profile
+
+    def _known_profile(self, key):
+        """已缓存的画像；探测失败还在冷却期内是 None，都没有是 `_UNKNOWN`。调用方持 `_locks_guard`。"""
+        profile = self._native_profiles.get(key)
+        if profile is not None:
+            return profile
+        until = self._failed_probes.get(key)
+        if until is not None:
+            if until > time.monotonic():
+                return None
+            del self._failed_probes[key]
+        return _UNKNOWN
 
     def browser_path(
         self, asset_id: int, source: Path, *, session: str = "", registry=None,

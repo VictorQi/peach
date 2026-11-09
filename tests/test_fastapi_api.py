@@ -3366,11 +3366,38 @@ class FastApiContractTests(unittest.IsolatedAsyncioTestCase):
                     "/stream/hls/1/1.ts?session=hls-test&t=secret",
                 )
         submit.assert_called_once()
-        self.assertEqual(self.app.state.hls_plan_executor._max_workers, 2)
+        self.assertEqual(self.app.state.hls_plan_executor._max_workers, 8)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content, b"one segment")
         self.assertEqual(response.headers["content-type"], "video/mp2t")
         self.assertTrue(segment.exists(), "片段要留在缓存里，重复请求不该再跑一次 FFmpeg")
+
+    async def test_segments_reuse_the_plan_the_playlist_resolved_for_the_session(self):
+        """播放列表算好的计划记在会话上：之后每个分片不再读账本、问画像、排进计划执行器。"""
+        from peach import routes_media
+        con = sqlite3.connect(self.db)
+        con.execute("UPDATE asset SET location='115', duration=13.5, path=? WHERE id=1",
+                    (str(self.hls_file),))
+        con.commit()
+        con.close()
+        segment = self.root / "segment.ts"
+        segment.write_bytes(b"one segment")
+
+        async def generate(source, start, duration, **_kwargs):
+            return segment
+
+        playlist = await self.client.get("/stream/hls/1/index.m3u8?session=plan-once&t=secret")
+        self.assertEqual(playlist.status_code, 200)
+        with patch.object(self.app.state.hls_service, "generate", new=generate), \
+                patch.object(routes_media, "_hls_plan", side_effect=AssertionError("每片重算计划")), \
+                patch.object(self.app.state.hls_plan_executor, "submit",
+                             side_effect=AssertionError("排进计划执行器")):
+            for index in range(3):
+                response = await self.client.get(f"/stream/hls/1/{index}.ts?session=plan-once&t=secret")
+                self.assertEqual(response.status_code, 200)
+        cancelled = await self.client.post("/api/stream-cancel?session=plan-once&t=secret")
+        self.assertEqual(cancelled.status_code, 200)
+        self.assertIsNone(self.app.state.hls_session_plans.get("plan-once", 1))
 
     async def test_a_repaired_header_takes_a_broken_timestamp_file_off_the_transcode_path(self):
         """时间戳错乱的片子一旦有了修好的头，就该按 Range 无损播，不再实时转码。"""

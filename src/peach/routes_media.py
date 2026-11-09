@@ -196,6 +196,20 @@ def _hls_plan(state, asset_id: int, session: str = "", conversion: bool | None =
     return None if not plan else (asset, source, plan, False)
 
 
+def _session_plan(state, asset_id: int, session: str):
+    """这次播放的分片计划：播放列表算出来记在会话上，分片端点直接取（`SessionPlans`）。
+
+    重启后续播的分片没有记录，当场再算一次并记下。
+    """
+    plans = getattr(state, "hls_session_plans", None)
+    if plans is not None and (known := plans.get(session, asset_id)) is not None:
+        return known
+    resolved = _hls_plan(state, asset_id, session)
+    if plans is not None and resolved is not None:
+        plans.put(session, asset_id, resolved)
+    return resolved
+
+
 @router.post("/api/external-playback")
 def external_playback(request: Request, id: int, args: dict[str, str] = Depends(require_auth)):
     from .external_playback import TTL_SECONDS, issue
@@ -434,7 +448,7 @@ def hls_playlist(request: Request, id: int, session: str = "", args: dict[str, s
     if state.stream_sessions.is_cancelled(session):
         return PlainTextResponse("stream cancelled", status_code=410)
     try:
-        resolved = _hls_plan(state, id, session)
+        resolved = _session_plan(state, id, session)
     except (MediaUnavailable, TranscodeUnavailable):
         return PlainTextResponse("hls unavailable", status_code=404)
     if resolved is None:
@@ -464,10 +478,12 @@ async def hls_segment(request: Request, id: int, index: int, session: str = "", 
 async def _hls_segment(request: Request, id: int, index: int, session: str):
     state = request.app.state
     try:
-        loop = asyncio.get_running_loop()
-        resolved = await loop.run_in_executor(
-            state.hls_plan_executor, partial(_hls_plan, state, id, session),
-        )
+        plans = getattr(state, "hls_session_plans", None)
+        resolved = plans.get(session, id) if plans is not None else None
+        if resolved is None:
+            resolved = await asyncio.get_running_loop().run_in_executor(
+                state.hls_plan_executor, partial(_session_plan, state, id, session),
+            )
         if resolved is None:
             return JSONResponse({"error": "hls unavailable"}, status_code=404)
         _, source, plan, conversion = resolved
@@ -515,6 +531,9 @@ async def stream_cancel(request: Request, session: str, args: dict[str, str] = D
     if not session or len(session) > 128:
         return JSONResponse({"error": "invalid session"}, status_code=400)
     cancelled = request.app.state.stream_sessions.cancel(session)
+    plans = getattr(request.app.state, "hls_session_plans", None)
+    if plans is not None:
+        plans.forget(session)
     return JSONResponse({"ok": True, "cancelled": cancelled})
 
 

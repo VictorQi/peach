@@ -6,6 +6,7 @@ import logging
 import math
 import os
 import subprocess
+import threading
 import uuid
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -21,6 +22,7 @@ HLS_SEGMENT_SECONDS = 6
 # 片段缓存上限。超了按最后访问时间淘汰；片段可再生，丢了只是重跑一次 FFmpeg。
 DEFAULT_CACHE_BYTES = 2 << 30
 PLAN_CACHE_LIMIT = 256
+SESSION_PLAN_LIMIT = 64
 CODEC_CACHE_LIMIT = 256
 PROBE_TIMEOUT_SECONDS = 20
 GENERATION_TIMEOUT_SECONDS = 120
@@ -37,6 +39,39 @@ def _probe_video_codec(ffprobe: Path, source: Path) -> str:
     except (OSError, subprocess.SubprocessError):
         return ""
     return result.stdout.decode("utf-8", "replace").strip().lower() if result.returncode == 0 else ""
+
+
+class SessionPlans:
+    """一次播放（流会话 × 资产）解析好的分片计划，播放列表算一次，之后每个分片直接取用。
+
+    分片端点原先每片都重算一遍：读账本、找片源、问画像，片源要转码时还可能跑 ffprobe，而这一步
+    排在只有几个线程的执行器里。计划本来就要在整段会话里保持同一个形状（`_hls_plan`），按会话
+    记住它是同一个约束。会话取消时摘掉，总量有界。
+    """
+
+    def __init__(self, limit: int = SESSION_PLAN_LIMIT):
+        self._limit = limit
+        self._plans: OrderedDict[tuple[str, int], tuple] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, session: str, asset_id: int) -> tuple | None:
+        with self._lock:
+            plan = self._plans.get((session, asset_id))
+            if plan is not None:
+                self._plans.move_to_end((session, asset_id))
+            return plan
+
+    def put(self, session: str, asset_id: int, plan: tuple) -> None:
+        with self._lock:
+            self._plans[(session, asset_id)] = plan
+            self._plans.move_to_end((session, asset_id))
+            while len(self._plans) > self._limit:
+                self._plans.popitem(last=False)
+
+    def forget(self, session: str) -> None:
+        with self._lock:
+            for key in [key for key in self._plans if key[0] == session]:
+                del self._plans[key]
 
 
 class SegmentUnavailable(RuntimeError):
