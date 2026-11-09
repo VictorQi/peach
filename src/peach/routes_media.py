@@ -156,10 +156,13 @@ def _needs_conversion(state, asset_id: int, source: Path, session: str) -> bool:
     HLS 那两个端点不问：一次播放的分片计划要在整段会话里保持同一个形状，边车中途落地
     会让固定 6 秒的计划换成按关键帧切的，剩下的分片索引全对不上。
     """
+    store = getattr(state, "header_repairs", None)
+    # 边车已确认能直放，计划与 /stream 共用这一结果；否则重启后的 ffprobe 又会逐盒跳读冷盘。
+    if store is not None and store.lookup(asset_id, source) is not None:
+        return False
     if not state.transcode_service.requires_conversion(
             source, session=session, registry=state.stream_sessions):
         return False
-    store = getattr(state, "header_repairs", None)
     if store is None or not state.transcode_service.decode_order_timestamps(
             source, session=session, registry=state.stream_sessions):
         return True

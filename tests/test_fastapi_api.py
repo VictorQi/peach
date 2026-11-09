@@ -3412,8 +3412,8 @@ class FastApiContractTests(unittest.IsolatedAsyncioTestCase):
         con.close()
         service = self.app.state.transcode_service
 
-        with patch.object(service, "requires_conversion", return_value=True), \
-                patch.object(service, "decode_order_timestamps", return_value=True), \
+        with patch.object(service, "requires_conversion", side_effect=AssertionError("已有可播头仍探测冷盘")), \
+                patch.object(service, "decode_order_timestamps", side_effect=AssertionError("重复探测时间戳")), \
                 patch.object(service, "browser_path",
                              side_effect=AssertionError("whole movie conversion")), \
                 patch.object(self.app.state.header_repairs, "lookup", return_value=header), \
