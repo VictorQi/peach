@@ -6,6 +6,7 @@
 """
 import json
 import os
+import re
 import sqlite3
 import tempfile
 import unittest
@@ -27,6 +28,8 @@ from support.ledger import fresh_ledger
 
 #: 不挂触发器的表，理由见 `migrations/0038_ledger_revision.sql` 开头。
 EXEMPT = {"ledger_revision", "schema_migration", "task_run"}
+#: 播放心跳写的观看进度列，不推 asset 的版本（migration 0054）。
+PLAYBACK_PROGRESS = {"play_seconds", "leave_ratio", "max_reached", "seek_count", "last_played"}
 
 
 def insert_asset(db_path: Path, asset_id: int) -> None:
@@ -93,6 +96,32 @@ class LedgerRevisionTests(unittest.TestCase):
                          if f"rev_{table}_{event}" not in triggers)
         self.assertEqual(missing, [], "新表要在同一个迁移里补上版本号触发器和 ledger_revision 预置行")
         self.assertEqual(sorted(tracked - rows), [])
+
+    def test_asset_revision_follows_every_column_except_playback_progress(self):
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(asset)")}
+            sql = connection.execute(
+                "SELECT sql FROM sqlite_master WHERE name='rev_asset_update'").fetchone()[0]
+        listed = {name.strip() for name in re.search(r"\bOF\b(.*?)\bON\s+asset\b", sql, re.S)[1].split(",")}
+        self.assertEqual(listed, columns - PLAYBACK_PROGRESS,
+                         "给 asset 加列要同步改 rev_asset_update 的列名单（migration 0054）")
+
+    def test_playback_heartbeats_keep_versions_and_caches_while_starts_refresh_them(self):
+        from peach import web_activity
+        insert_asset(self.db_path, 1)
+        tables = ("asset",)
+        self.contract.cached_until_changed("tops", self.compute, tables=tables)
+        self.contract.cached("plain", self.compute)
+        before = self.contract.ledger_revision(tables)
+        web_activity.w_activity(self.contract, {"id": 1, "position": 30, "duration": 60, "delta": 10, "seeks": 1})
+        self.assertEqual(self.contract.ledger_revision(tables), before)
+        self.assertEqual(self.contract.cached_until_changed("tops", self.compute, tables=tables), 1)
+        self.assertEqual(self.contract.cached("plain", self.compute), 2)
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            self.assertEqual(connection.execute(
+                "SELECT play_seconds,max_reached,seek_count FROM asset WHERE id=1").fetchone(), (10.0, 0.5, 1))
+        web_activity.w_play(self.contract, {"id": 1})
+        self.assertGreater(self.contract.ledger_revision(tables), before)
 
     def test_a_write_from_another_connection_recomputes_and_nothing_else_does(self):
         self.assertEqual(self.contract.cached_until_changed("taste", self.compute), 1)
