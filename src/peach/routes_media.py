@@ -793,10 +793,14 @@ async def cover_crop(request: Request, args: dict[str, str] = Depends(require_au
     手工框就是删掉这份 sidecar，下一次取景重新按折痕判据算。
 
     `box` 是源图像素的 `{x0,y0,x1,y1}`，右下开区间；`box` 为 null 表示恢复默认。
+    读图、算折痕与写 sidecar 都在线程里做：这是异步端点，同步读写会停住整个服务的送流。
     """
-    state = request.app.state.web_contract
     sent = await request.json()
     payload = sent if isinstance(sent, dict) else {}
+    return await asyncio.to_thread(_apply_cover_crop, request.app.state.web_contract, payload)
+
+
+def _apply_cover_crop(state, payload: dict):
     code = str(payload.get("code") or "")
     path = state.cover_path(code)
     if path is None:

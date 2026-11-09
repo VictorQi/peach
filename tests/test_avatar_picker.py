@@ -1384,6 +1384,26 @@ class CoverCropRouteTests(unittest.TestCase):
         self.assertNotEqual(self.sidecar()["box"]["method"], MANUAL)
         self.assertNotIn("source", self.sidecar())
 
+    def test_reading_and_writing_the_cover_happens_off_the_event_loop(self):
+        """异步端点里同步读图会停住整个服务的送流：读封面、写边车都在线程里。"""
+        import asyncio
+        from peach import images
+        measure = images.measure_image_size
+        seen = []
+
+        def off_loop(data):
+            try:
+                asyncio.get_running_loop()
+                seen.append("loop")
+            except RuntimeError:
+                seen.append("thread")
+            return measure(data)
+        with mock.patch.object(images, "measure_image_size", side_effect=off_loop):
+            response = self.client.post("/api/cover-crop?t=secret", json={
+                "code": "ABW-232", "box": {"x0": 300, "y0": 20, "x1": 700, "y1": 520}})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(seen, ["thread"])
+
     def test_the_endpoint_needs_the_token(self):
         response = self.client.post("/api/cover-crop", json={"code": "ABW-232"})
         self.assertEqual(response.status_code, 401)

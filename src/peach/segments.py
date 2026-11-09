@@ -136,6 +136,9 @@ class HlsSegmentService:
         # 同一分片常被并发请求：播放器预取、重连、多设备同看都会撞上同一个目标文件。
         # 同目标只放一个生成者，后到者等它完事后直接用缓存，不再各起一个 FFmpeg 重读网盘。
         self._generation_locks: dict[Path, _Generation] = {}
+        # 淘汰要把缓存目录整个列一遍：按新写入的字节攒够一截才跑一次，放在线程里，同一时刻只跑一次。
+        self._written_since_evict = 0
+        self._evicting = False
 
     def _gate(self) -> asyncio.Semaphore:
         if self._semaphore is None:
@@ -155,7 +158,7 @@ class HlsSegmentService:
         只有重编码路径问这一句，用来决定敢不敢把解码交给显卡。探测本身在线程里跑：
         片源在挂载网盘上时 ffprobe 要几百毫秒，占着事件循环会卡住同时在放的其它片。
         """
-        key = self.fingerprint(source)
+        key = await asyncio.to_thread(self.fingerprint, source)
         cached = self._codecs.get(key)
         if cached is not None:
             self._codecs.move_to_end(key)
@@ -215,6 +218,26 @@ class HlsSegmentService:
             if total <= self.cache_bytes:
                 return
 
+    async def _evict_after(self, written: int) -> None:
+        """记下新写入的字节，攒够缓存上限的十六分之一才在线程里淘汰一次。"""
+        self._written_since_evict += written
+        if self._evicting or self._written_since_evict < max(1, self.cache_bytes // 16):
+            return
+        self._evicting = True
+        self._written_since_evict = 0
+        try:
+            await asyncio.to_thread(self._evict)
+        finally:
+            self._evicting = False
+
+    def _cached_target(self, source: Path, asset_id: int, index: int, transcode: bool) -> tuple[Path, bool]:
+        """分片缓存的位置与是否已有；命中即续期。要 stat 片源（可能在网盘上），只在线程里调。"""
+        target = self.cached_path(source, asset_id, index, transcode=transcode)
+        if target.is_file() and target.stat().st_size:
+            os.utime(target, None)      # 命中即续期，淘汰按最后访问时间
+            return target, True
+        return target, False
+
     async def generate(
         self,
         source: Path,
@@ -227,9 +250,9 @@ class HlsSegmentService:
         registry: StreamSessionRegistry,
         transcode: bool = False,
     ) -> Path:
-        target = self.cached_path(source, asset_id, index, transcode=transcode)
-        if target.is_file() and target.stat().st_size:
-            os.utime(target, None)      # 命中即续期，淘汰按最后访问时间
+        # 缓存位置要 stat 片源：网盘忙时一次 stat 能卡几秒，放在事件循环上会停住整个服务的发送。
+        target, hit = await asyncio.to_thread(self._cached_target, source, asset_id, index, transcode)
+        if hit:
             return target
         consumer = asyncio.current_task()
         if consumer is None or not registry.register(session, consumer):
@@ -291,10 +314,10 @@ class HlsSegmentService:
                 temporary = target.with_name(f"{uuid.uuid4().hex}.tmp.ts")
                 try:
                     returncode, stderr = await self._run(build(temporary), session, registry)
-                    if returncode == 0 and temporary.is_file() and temporary.stat().st_size:
+                    if returncode == 0 and temporary.is_file() and (written := temporary.stat().st_size):
                         temporary.replace(target)
                         logger.info("HLS 分片完成：%s", name)
-                        self._evict()
+                        await self._evict_after(written)
                         return target
                     if registry.is_cancelled(session):
                         raise SegmentCancelled(session)
