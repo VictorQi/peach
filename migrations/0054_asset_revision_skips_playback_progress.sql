@@ -1,4 +1,4 @@
--- 播放心跳只更新观看进度，asset 的编目版本保持不变。
+-- 播放心跳不推 asset 的版本号。
 --
 -- 详情页播放时每十秒一次 `/api/activity`，改的是 play_seconds、leave_ratio、max_reached、
 -- seek_count 与 last_played。0038 的 rev_asset_update 不分列，于是每次心跳都推高 asset 版本：
