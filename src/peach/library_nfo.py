@@ -8,6 +8,9 @@ from .catalog_rules import release_code_from_filename, release_code_from_text, s
 from .scan import VIDEO
 
 
+NFO_PARSER_VERSION = 1
+
+
 def directory_files(directory: Path) -> dict[str, Path]:
     """目录里的普通文件，按 casefold 文件名索引。
 
@@ -90,6 +93,31 @@ def sidecars(video: Path, files: dict[str, Path] | None = None):
     return SidecarIndex(files).for_video(video)
 
 
+def _nfo_root(raw: bytes):
+    """解析失败时补全裸 & 的转义，保留文本区块中的 &。"""
+    if raw.startswith((b'\xff\xfe', b'\xfe\xff')):
+        document = raw.decode('utf-16')
+    elif raw.startswith((b'<\x00', b' \x00', b'\t\x00', b'\r\x00', b'\n\x00')):
+        document = raw.decode('utf-16-le')
+    elif raw.startswith((b'\x00<', b'\x00 ', b'\x00\t', b'\x00\r', b'\x00\n')):
+        document = raw.decode('utf-16-be')
+    else:
+        document = raw
+    try:
+        return ET.fromstring(document)
+    except ET.ParseError:
+        pattern = (r'(<!\[CDATA\[.*?(?:\]\]>|\Z)|<!--.*?(?:-->|\Z)'
+                   r'|<\?.*?(?:\?>|\Z))'
+                   r'|&(?!(?:amp|lt|gt|apos|quot|#\d+|#x[0-9a-fA-F]+);)')
+        if isinstance(document, str):
+            sanitized = re.sub(pattern, lambda match: match.group(1) or '&amp;',
+                               document, flags=re.DOTALL)
+        else:
+            sanitized = re.sub(pattern.encode('ascii'), lambda match: match.group(1) or b'&amp;',
+                               document, flags=re.DOTALL)
+        return ET.fromstring(sanitized)
+
+
 def read_nfo(path: Path):
     """保留完整原文；拒绝 DTD，并限制 XML 的输入体积。"""
     with path.open('rb') as handle:
@@ -100,7 +128,7 @@ def read_nfo(path: Path):
     declarations = raw.replace(b'\x00', b'').upper()
     if len(raw) > 1024 * 1024 or b'<!DOCTYPE' in declarations or b'<!ENTITY' in declarations:
         raise ValueError('NFO 文件过大或包含实体声明')
-    root = ET.fromstring(raw)
+    root = _nfo_root(raw)
     if root.tag not in {'movie', 'episodedetails', 'musicvideo'}:
         raise ValueError('NFO 不是影片或单集资料')
     def text(*keys):

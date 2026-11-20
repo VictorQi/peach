@@ -819,6 +819,20 @@ class LibraryNfoTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             read_nfo(path)
 
+    def test_nfo_recovers_ampersands_without_changing_cdata_or_source_bytes(self):
+        path = self.root / 'film.nfo'
+        document = (' \n<movie><title>A & B &amp; C &#38; D</title>'
+                    '<studio><![CDATA[Maker & Co]]></studio></movie>')
+        for encoding in ('utf-8', 'utf-16', 'utf-16-le', 'utf-16-be'):
+            with self.subTest(encoding=encoding):
+                original = document.encode(encoding)
+                path.write_bytes(original)
+                payload, raw = read_nfo(path)
+                self.assertEqual(payload['title'], 'A & B & C & D')
+                self.assertEqual(payload['maker'], 'Maker & Co')
+                self.assertEqual(raw, original)
+                self.assertEqual(path.read_bytes(), original)
+
     def test_art_cannot_escape_media_directory(self):
         folder = self.root / 'film'
         folder.mkdir()
