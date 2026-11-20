@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
 import m3u8
@@ -39,12 +40,19 @@ class PreviewCache:
     def __init__(self, cache):
         self.cache = cache
 
+    def _source_paths(self, code: str, ref: str) -> tuple[Path, Path]:
+        """来源记录使用短目录，升级前的记录仍可按旧路径读取。"""
+        name = ref + ".source.json"
+        compact = self.cache.root / "p" / hashlib.sha256(code.encode()).hexdigest()[:16] / name
+        legacy = self.cache.folder("preview:" + code) / name
+        return compact, legacy
+
     def register(self, code: str, url: str, *, identity: str = "", playlist: bool | None = None,
                  media_type: str = "") -> str:
         if not public_https_url(url):
             raise ValueError("预览来源不可用")
         ref = hashlib.sha256((identity or url).encode()).hexdigest()
-        path = self.cache.folder("preview:" + code) / (ref + ".source.json")
+        path, _ = self._source_paths(code, ref)
         value = {"url": url, "playlist": playlist if playlist is not None else urlsplit(url).path.lower().endswith(".m3u8")}
         if media_type == 'video/mp4':
             value['media_type'] = media_type
@@ -60,8 +68,11 @@ class PreviewCache:
         ref = ref.removesuffix(".m3u8")
         if len(ref) != 64 or any(char not in "0123456789abcdef" for char in ref):
             raise ValueError("预览对象不存在")
-        path = self.cache.folder("preview:" + code) / (ref + ".source.json")
-        return json.loads(path.read_text(encoding="utf-8"))
+        compact, legacy = self._source_paths(code, ref)
+        try:
+            return json.loads(compact.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return json.loads(legacy.read_text(encoding="utf-8"))
 
     def playlist(self, code: str, ref: str, fetch) -> bytes:
         url = self.source(code, ref)["url"]

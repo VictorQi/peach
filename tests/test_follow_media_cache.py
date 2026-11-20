@@ -204,6 +204,22 @@ class RemoteMediaCacheTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PreviewCacheTests(unittest.TestCase):
+    def test_preview_source_uses_short_path_and_reads_existing_records(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = RemoteMediaCache(Path(directory).resolve())
+            previews = PreviewCache(cache)
+            code, identity = 'EXM-001', 'first'
+            first = previews.register(code, 'https://cdn.example/first.mp4', identity=identity)
+            legacy_path = cache.folder('preview:' + code) / (first + '.source.json')
+            new_path, = cache.root.rglob('*.source.json')
+            self.assertLess(len(str(new_path)), len(str(legacy_path)) - 40)
+            legacy_path.parent.mkdir()
+            new_path.rename(legacy_path)
+            self.assertEqual(previews.source(code, first)['url'], 'https://cdn.example/first.mp4')
+            self.assertEqual(previews.register(code, 'https://cdn.example/current.mp4', identity=identity), first)
+            self.assertEqual(previews.source(code, first)['url'], 'https://cdn.example/current.mp4')
+            self.assertTrue(new_path.is_file())
+
     def test_nested_playlists_keys_and_init_segments_are_local_and_persistent(self):
         with tempfile.TemporaryDirectory() as directory:
             cache = RemoteMediaCache(Path(directory).resolve())
