@@ -142,14 +142,38 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: 补齐上游已发布客户端标签
-        if: github.repository != 'peach-mitao/peach' && matrix.runtime_tools
-        shell: bash
-        run: git fetch --no-tags https://github.com/peach-mitao/peach.git 'refs/tags/v*:refs/tags/v*'
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
           check-latest: true
+      - name: 补齐比 Fork 更早的已发布客户端标签
+        if: github.repository != 'peach-mitao/peach' && matrix.runtime_tools
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import subprocess
+
+          from scripts.version_bump import read_version
+
+          remote = "https://github.com/peach-mitao/peach.git"
+          current = tuple(map(int, read_version(Path.cwd()).split(".")))
+          existing = set(subprocess.check_output(
+              ["git", "for-each-ref", "--format=%(refname)", "refs/tags"], encoding="utf-8",
+          ).splitlines())
+          refs = subprocess.check_output(
+              ["git", "ls-remote", "--refs", "--tags", remote, "refs/tags/v*"], encoding="utf-8",
+          )
+          older = []
+          for line in refs.splitlines():
+              _, ref = line.split("\t", 1)
+              match = re.fullmatch(r"refs/tags/v(\d+)\.(\d+)\.(\d+)", ref)
+              if match and ref not in existing and tuple(map(int, match.groups())) < current:
+                  older.append(f"{ref}:{ref}")
+          if older:
+              subprocess.run(["git", "fetch", "--no-tags", remote, *older], check=True)
+          PY
       - uses: astral-sh/setup-uv@v10.3.2
         with:
           enable-cache: true
