@@ -20,11 +20,15 @@ describe(`全屏画面比例：${stylesheet}`, () => {
       const page = await browser.newPage({ viewport });
       try {
         const css = readFileSync(new URL(stylesheet, import.meta.url), 'utf8');
-        await page.setContent(`<style>${css}</style><div data-stage-media>
+        const html = `<style>${css}</style><div data-stage-media>
           <div class="video-js"><video-player><media-container>
             <video class="vjs-tech" width="1920" height="1080"></video>
             <button style="position:relative;z-index:1">全屏</button>
-          </media-container></video-player></div></div>`);
+          </media-container></video-player></div></div>`;
+        // macOS Chrome 要求页面位于可信来源才能进入原生全屏。
+        await page.route('http://localhost/**', route => route.fulfill({ contentType: 'text/html', body: html }));
+        await page.goto('http://localhost/fullscreen-fixture');
+        assert.equal(await page.evaluate(() => isSecureContext), true, '原生全屏夹具需要可信来源');
         await page.locator('button').evaluate(button => {
           button.addEventListener('click', () => button.parentElement!.requestFullscreen());
         });
