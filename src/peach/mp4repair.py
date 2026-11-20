@@ -429,13 +429,13 @@ def has_tail_moov(source: Path) -> bool:
 def write_sidecar(path: Path, header: RepairedHeader) -> None:
     """边车只存头和那段 mdat 的坐标；几十 KB，和原片放两处互不影响。"""
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".tmp")
-    temporary.write_bytes(
-        SIDECAR_MAGIC
-        + struct.pack(">QQQQ", len(header.prefix), len(header.suffix),
-                      header.payload_start, header.payload_end)
-        + header.prefix + header.suffix)
-    temporary.replace(path)
+    from .fsutil import atomic_path
+    with atomic_path(path) as temporary:
+        temporary.write_bytes(
+            SIDECAR_MAGIC
+            + struct.pack(">QQQQ", len(header.prefix), len(header.suffix),
+                          header.payload_start, header.payload_end)
+            + header.prefix + header.suffix)
 
 
 def _time_runs(payload: bytes) -> list[tuple[int, int]]:
@@ -548,17 +548,21 @@ class HeaderRepairStore:
         self._guard = threading.Lock()
         self.runs = runs
         self._jobs = {}
+        from .mp4layout import LayoutCache
+        self.layouts = LayoutCache()
+        self._layout_writes = {}
 
-    def _name(self, asset_id: int, source: Path) -> str | None:
-        try:
-            stat = source.stat()
-        except OSError:
-            return None
+    def _name(self, asset_id: int, source: Path, stat=None) -> str | None:
+        if stat is None:
+            try:
+                stat = source.stat()
+            except OSError:
+                return None
         return f"{asset_id}-{stat.st_size}-{stat.st_mtime_ns}{SIDECAR_SUFFIX}"
 
-    def lookup(self, asset_id: int, source: Path) -> RepairedHeader | None:
-        """已经算好的头；没有就返回 None，不去算。"""
-        name = self._name(asset_id, source)
+    def lookup(self, asset_id: int, source: Path, *, stat=None) -> RepairedHeader | None:
+        """已经算好的头；没有就返回 None，不去算。`stat` 是调用方刚取过的片源 stat，给了就不再问网盘。"""
+        name = self._name(asset_id, source, stat)
         if not name:
             return None
         with self._guard:
@@ -572,6 +576,34 @@ class HeaderRepairStore:
                     self._cached.pop(next(iter(self._cached)))
                 self._cached[name] = header
         return header
+
+    def optimized_layout(self, asset_id: int, source: Path, *, stat=None) -> RepairedHeader | None:
+        """编码已确认可直放后准备布局头；沿用边车，重启后不再逐盒跳读原片。"""
+        name = self._name(asset_id, source, stat)
+        if name is None:
+            return None
+        with self._guard:
+            gate = self._layout_writes.setdefault(name, threading.Lock())
+        try:
+            with gate:
+                if (known := self.lookup(asset_id, source, stat=stat)) is not None:
+                    return known
+                header = self.layouts.header(source, known_stat=stat)
+                if header is None:
+                    return None
+                try:
+                    write_sidecar(self.root / name, header)
+                except OSError as exc:
+                    LOGGER.info('mp4 layout sidecar unavailable: asset=%s error=%s', asset_id, type(exc).__name__)
+                with self._guard:
+                    if len(self._cached) >= self._cache_size:
+                        self._cached.pop(next(iter(self._cached)))
+                    self._cached[name] = header
+                return header
+        finally:
+            with self._guard:
+                if self._layout_writes.get(name) is gate:
+                    del self._layout_writes[name]
 
     def has_invalid_sidecar(self, asset_id: int, source: Path) -> bool:
         """已有损坏边车仍可重建；区别于没有产物的既有解码失败。"""

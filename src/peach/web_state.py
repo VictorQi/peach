@@ -324,7 +324,8 @@ class WebContract:
         """账本版本号：`ledger_revision` 各行之和（migration 0038）。
 
         每张账本表的增删改都由触发器给自己那一行加一，不论写的是服务、CLI 脚本还是
-        账本同步，所以这个数变了就是账本变了。任务中心的心跳不挂触发器。库还没迁移到
+        账本同步，所以这个数变了就是账本变了。任务中心的心跳不挂触发器；播放心跳只改的
+        观看进度列不推 asset 的版本（migration 0054）。库还没迁移到
         0038（或根本没有库）时返回 None。
         `tables` 非空时只累计这些表的版本。
         """
@@ -412,8 +413,9 @@ class WebContract:
     def read_connection(self):
         return self.database.read_connection()
 
-    def write_transaction(self):
-        return self.database.write_transaction()
+    def write_transaction(self, *, notify: bool = True):
+        """`notify=False` 的写入不清缓存，给只改观看进度的播放心跳用（`LedgerDatabase.write_transaction`）。"""
+        return self.database.write_transaction(notify=notify)
 
     def has_snapshot(self, raw_path: str | None) -> bool:
         return self.snapshot_file(raw_path) is not None

@@ -294,6 +294,18 @@ Peach 负责独立数据目录、首启、构建身份和资源清单。arm64 �
 
 macOS 复用 FFmpeg 的 VideoToolbox H.264 编码及 H.264、HEVC、AV1 解码，沿用现有 `HardwareTranscoder` 的合成帧探测、命令尝试顺序和软件回退；不新增视频框架或 Python 运行依赖。`-allow_sw 0` 要求编码器实际使用硬件，AV1 硬解显式选择 FFmpeg 原生解码器，软件回退继续使用 dav1d。依据 [FFmpeg 硬件解码选项](https://ffmpeg.org/ffmpeg.html#Advanced-Video-options)和当前固定源码中的 `videotoolbox_av1.c`、`videotoolboxenc.c`；具体可用能力依赖设备与系统，不按 Intel 或 M 系列名称推断。抽帧的编码格式探测复用 `media_probe.probe_file`，按文件世代有界缓存，失败后在同一超时预算内软解。两种加速偏好复用 `media-processing.json`、`FileLock` 与原子写入，抽帧与播放各自保存；服务端新任务读取本机偏好，不调整浏览器解码器，不更改 ledger。桌面和手机自动化回归验证独立切换与保存恢复，合成片分别验收硬件可用路径及失败回退。
 
+## 播放请求的资源隔离
+
+播放请求采用主仓 [PR #497](https://github.com/peach-mitao/peach/pull/497) 的读取专用线程、片源状态复用、画像探测单飞与失败冷却、会话分片计划、事件循环外磁盘读写、预览配对缓存和按 Range 分锁。继续使用标准库执行器、Starlette、FFmpeg 与现有媒体响应，不新增依赖。Fork 保留首块快速发送、单块预读、断开取消和预览引用的真实路径边界。
+
+观看进度经迁移 `0054_asset_revision_skips_playback_progress` 排除在编目版本之外；起播次数和编目字段仍更新版本。迁移只替换触发器，保留资产行。卡片进度从播放心跳回执更新，详情或队列覆盖的背景网格暂停订阅，返回时补取已失效的查询。进程内优化随代码重启生效，触发器优化需应用迁移；不自动重封装或修复媒体。来源提交及适配范围记录在各提交的 `Source-PR`、`Original-Commit` 中。
+
+## 普通 MP4 的多媒体盒布局整理
+
+`mp4layout` 复用现有盒子读取、`RepairedHeader` 与 `SplicedMp4Response`，沿用标准库文件读写、摘要和持久化恢复记录。对单个前置索引且后续只有媒体与填充盒子的完整 MP4，把首个 `mdat` 声明为延伸到 EOF，样本地址和压缩数据不变；入库媒体探测只在本地源文件原位改四字节，失败恢复，存量播放仅拼接响应头。布局读取有界，结果按文件版本缓存，不新增依赖。对比完整样本已核对压缩流哈希及隔离 Chromium 首帧、中段跳转；协议边界和恢复要求见 [ADR-0138](adr/0138-mp4-layout-normalization.md)。FFmpeg 的 [`faststart`](https://ffmpeg.org/ffmpeg-formats.html#Options-9) 需要搬移索引，整片复制的 I/O 和临时空间不符合这类片源只改长度字段的约束，因此不作为默认路径。
+
+存量布局头沿用 `HeaderRepairStore` 的 `.mp4hdr` 格式、文件版本键与清理路径持久保存，冷盘首次检查后的跳读成本不会在每次重启重复发生。内存缓存最多四份头；并发准备按资产版本合并，跨进程写入复用 `fsutil.atomic_path` 的独立临时文件和原子替换，缓存不可写时本次仍可使用内存中的头。
+
 ## HLS 请求断开清理
 
 断开监听与子进程回归采用 [PR #122](https://github.com/peach-mitao/peach/pull/122) 的固定提交 `b49806a8685e128088a3c4825891fd425e279db1`，沿用本仓库 AGPL-3.0-or-later 许可与原作者署名。Peach 保留主线的会话校验、硬件后端和转码异常契约。

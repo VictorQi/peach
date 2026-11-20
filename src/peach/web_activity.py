@@ -11,7 +11,7 @@ DEFAULT_PROFILE_ID = "local-default"
 
 class ActivityContract(Protocol):
     def cache_bust(self) -> None: ...
-    def write_transaction(self): ...
+    def write_transaction(self, *, notify: bool = True): ...
 
 
 def w_activity(contract: ActivityContract, body):
@@ -21,7 +21,9 @@ def w_activity(contract: ActivityContract, body):
     add = float(body.get("delta", 0))
     ended = bool(body.get("ended"))
     seeks = int(body.get("seeks", 0))
-    with contract.write_transaction() as connection:
+    # 十秒一次的心跳只改观看进度：不清缓存，触发器也不推 asset 版本（migration 0054），
+    # 否则看片期间首页、统计与背景网格每十秒整份重算一轮。
+    with contract.write_transaction(notify=False) as connection:
         row = connection.execute(
             "SELECT play_seconds,max_reached,seek_count FROM asset WHERE id=?", (aid,),
         ).fetchone()

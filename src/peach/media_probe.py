@@ -18,7 +18,7 @@ import sqlite3
 import subprocess
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
-from contextlib import closing
+from contextlib import closing, nullcontext
 from contextvars import copy_context
 from pathlib import PureWindowsPath
 
@@ -101,11 +101,16 @@ def probe_file(ffprobe: str, path: str, timeout: float = TIMEOUT_SECONDS) -> tup
     )
 
 
-def measure(ffprobe: str, asset_id: int, path: str, timeout: float = TIMEOUT_SECONDS) -> tuple:
+def measure(ffprobe: str, asset_id: int, path: str, timeout: float = TIMEOUT_SECONDS, *, layout_root=None) -> tuple:
     """这一行的 `UPDATE` 参数。探不出来的一律是 -1 那一行，不抛。"""
     try:
-        duration, width, height, codec, fps, audio = probe_file(
-            ffprobe, resolve_case_insensitive(path), timeout)
+        native = resolve_case_insensitive(path)
+        from pathlib import Path
+        from .mp4layout import prepare_local
+        with prepare_local(Path(native), layout_root) if layout_root is not None else nullcontext(False) as changed:
+            duration, width, height, codec, fps, audio = probe_file(ffprobe, native, timeout)
+            if changed and duration <= 0:
+                raise ValueError('MP4 整理后未取得有效时长，已恢复原文件头')
     except InterruptedError:
         raise
     except Exception as error:  # 超时、文件读不到、输出不是 JSON：对这一行都是「没拿到」
@@ -148,7 +153,7 @@ def probe_unmeasured(
     rows = [row for row in rows if cost_for(location, row[1], config) == 'free']
     roots = tuple(value for values in config.locations.values() for value in values) if config else (root,)
     return _record(db_path, ffprobe, rows, report, protected_ids=protected_ids, on_junk=on_junk,
-                   library_roots=roots)
+                   library_roots=roots, normalize_local=location == 'local')
 
 
 def probe_path(db_path, ffprobe: str | None, location: str, path: str, *, config=None) -> int:
@@ -161,20 +166,24 @@ def probe_path(db_path, ffprobe: str | None, location: str, path: str, *, config
             f"SELECT id,path FROM asset WHERE {_UNMEASURED} AND path=?",
             (location, str(PureWindowsPath(path)))).fetchall()
     roots = tuple(value for values in config.locations.values() for value in values) if config else ()
-    return _record(db_path, ffprobe, rows, lambda done, total: None, library_roots=roots)
+    return _record(db_path, ffprobe, rows, lambda done, total: None, library_roots=roots,
+                   normalize_local=location == 'local')
 
 
 def _record(db_path, ffprobe: str, rows: Sequence, report: Callable[[int, int], None], *,
-            protected_ids=(), on_junk=lambda result: None, library_roots=()) -> int:
+            protected_ids=(), on_junk=lambda result: None, library_roots=(), normalize_local=False) -> int:
     """探完一条写一条。`report` 抛出来（任务被停）时，还没开始的那些不再探。"""
     rows = [row for row in rows if not skip_background_read(row[1])
             and not is_local_extra(PureWindowsPath(row[1]).name, row[1], library_roots=library_roots)]
     if not rows:
         return 0
     done = 0
+    from pathlib import Path
+    from .update_tasks import state_for
+    layout_root = state_for(Path(db_path)).parent / 'mp4-layout' if normalize_local else None
     with closing(sqlite3.connect(db_path, timeout=120)) as connection:
         report(0, len(rows))
-        for measured in _measure_batches(ffprobe, rows):
+        for measured in _measure_batches(ffprobe, rows, layout_root=layout_root):
             connection.execute(UPDATE, measured)
             connection.commit()
             done += 1
@@ -185,7 +194,7 @@ def _record(db_path, ffprobe: str, rows: Sequence, report: Callable[[int, int], 
     return done
 
 
-def _measure_batches(ffprobe, rows):
+def _measure_batches(ffprobe, rows, *, layout_root=None):
     """安全停点按档位领取探测，空闲后补位；退出时等待在途进程返回。"""
     start = 0
     futures = set()
@@ -196,7 +205,8 @@ def _measure_batches(ffprobe, rows):
             workers = {'low': 1, 'standard': 2, 'high': WORKERS}[control.mode] if control else WORKERS
             while start < len(rows) and len(futures) < workers:
                 row = rows[start]
-                futures.add(executor.submit(copy_context().run, measure, ffprobe, row[0], row[1]))
+                options = {'layout_root': layout_root} if layout_root is not None else {}
+                futures.add(executor.submit(copy_context().run, measure, ffprobe, row[0], row[1], **options))
                 start += 1
             completed, futures = wait(futures, return_when=FIRST_COMPLETED)
             for future in completed:

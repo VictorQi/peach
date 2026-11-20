@@ -7,20 +7,25 @@
  * 网格每接一页经 `onCount` 报一次总数与显示的卡数，读数画在首页筛选条（`catalog-filter` 岛）的
  * 下排。无限滚动见下面的 `LoadMore`：哨兵进入视口下方一屏
  * 内自动取下一页，点它等于手动取；失败在哨兵后面留一条可重试的 Note，之后只有手动才重试。 */
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import {
+  Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode,
+  type RefObject,
+} from 'react';
 import { useInfiniteQuery, type InfiniteData, type QueryKey } from '@tanstack/react-query';
 import { cardArtwork, frameArtwork, mixFace as mixArtwork, mixLabel, relayoutCovers, type Artwork } from '@peach/card-art';
+import { isOverlayPath, peachHistory } from '@peach/history';
 import { requestErrorMessage } from '@peach/legacy/core';
 import { LOAD_MORE_STATUS, loadingDotsHtml } from '@peach/legacy/ui';
 
 import { apiGet } from '../../api';
+import { PLAYBACK_PROGRESS_EVENT, type PlaybackProgress } from '../../player/telemetry';
 import { LOAD_MORE_MARGIN, RetryNote } from '../components/grid-reveal';
 import { SkeletonContent } from '../components/skeleton-content';
 import { cardRatio, MediaCard, type MediaCardVariant } from '../components/media-card';
 import { MIX_FLIP_FACES, MixCard } from '../components/mix-card';
 import {
   SHORTS_BATCH, arrangeTiles, catalogParams, catalogQuery, collapseGroups, entityQuery, latestCatalogPages, mixHasPicture,
-  shortsBoundaries, shortsParams, splitSections, type GridPage, type ShortsCut, type Tile,
+  replaceCatalogItem, shortsBoundaries, shortsParams, splitSections, type GridPage, type ShortsCut, type Tile,
 } from './catalog-grid';
 import type { CatalogGridProps, MediaCardLayout, MediaCardHelpers, MediaItem, MediaPage } from './types';
 import { VideoWall } from '../video-wall/video-wall';
@@ -77,12 +82,47 @@ function ItemsGrid(props: CatalogGridProps) {
   return <MediaGrid selectMode={props.selectMode}>{cards}</MediaGrid>;
 }
 
+const readCovered = () => isOverlayPath(peachHistory.navigation.location.pathname);
+const listenCovered = (notify: () => void) => peachHistory.listen(notify);
+
+/** 详情或队列压在网格上时（真实地址是覆盖地址）网格停订：结果版本变了也不在背后把已加载的每一页重取一遍，
+ *  看片期间后台任务每写一次账本就是一整轮。揭开那一刻，期间被失效过才重取一次。 */
+function useCoveredPause(queryKey: QueryKey): boolean {
+  const covered = useSyncExternalStore(listenCovered, readCovered);
+  const was = useRef(covered);
+  useEffect(() => {
+    const uncovered = was.current && !covered;
+    was.current = covered;
+    if (uncovered && queryClient.getQueryState(queryKey)?.isInvalidated) {
+      void queryClient.refetchQueries({ queryKey, exact: true });
+    }
+  }, [covered, queryKey]);
+  return covered;
+}
+
+/** 心跳回执里的观看进度改写缓存里那张卡：心跳不推账本版本，网格不会为它重取。 */
+function usePlaybackProgress(): void {
+  useEffect(() => {
+    const update = (event: Event) => {
+      const { id, ...progress } = (event as CustomEvent<PlaybackProgress>).detail;
+      replaceCatalogItem(id, progress);
+    };
+    document.addEventListener(PLAYBACK_PROGRESS_EVENT, update);
+    return () => { document.removeEventListener(PLAYBACK_PROGRESS_EVENT, update) };
+  }, []);
+}
+
 /** 一次查询的整个生命周期：骨架、首屏、续页、竖屏带与读数。 */
 function GridBody(props: CatalogGridProps) {
   const { helpers, actions, layout } = props;
   const entity = props.mode === 'entity';
   const trash = !entity && props.filters?.state === 'trash';
-  const query = entity ? entityQuery(props) : catalogQuery(props);
+  const requested = entity ? entityQuery(props) : catalogQuery(props);
+  const covered = useCoveredPause(requested.queryKey);
+  /* 覆盖期间保留已画出的查询代次；换成未订阅的新键会让已有卡片退回无限等待的骨架。 */
+  const visibleQuery = useRef(requested);
+  if (!covered) visibleQuery.current = requested;
+  const query = visibleQuery.current;
   /* 资料页的第一页由壳和页头一起取来：同步落进这一代的缓存，首帧就是卡片，不再发一遍。 */
   const [retained] = useState(() => props.wall ? latestCatalogPages(query.queryKey) : undefined);
   const queryIdentity = JSON.stringify(query.queryKey);
@@ -99,7 +139,9 @@ function GridBody(props: CatalogGridProps) {
     initialData,
     staleTime: entity || props.restoreNavigation ? Infinity : 0,
     refetchOnMount: entity && retained ? 'always' : false,
+    subscribed: !covered || !queryClient.getQueryData(query.queryKey),
   });
+  usePlaybackProgress();
 
   /* 一次取数落定就告诉壳一次，成功、为空、失败都算：壳里 `await` 这次重读的调用方据此放行。 */
   const settledRevision = useRef<number | null>(null);

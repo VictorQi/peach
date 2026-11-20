@@ -15,6 +15,8 @@ import type { MediaCardActions, MediaCardHelpers, MediaCardLayout, MediaItem } f
 
 import { click, mount, settle } from './render';
 import { queryClient } from '../../src/react/query';
+import { peachHistory } from '../../src/history';
+import { PLAYBACK_PROGRESS_EVENT } from '../../src/player/telemetry';
 
 const SMALL: MediaCardLayout = { active: false, size: 'small', portrait: false, javImage: 'cover' };
 
@@ -177,6 +179,87 @@ describe('续页', () => {
     expect(server.offsets().filter((offset) => offset === '6')).toHaveLength(1);
     server.release();
     await settle();
+    queryClient.removeQueries({ queryKey: ['catalog-grid'] });
+  });
+
+  it('详情压在网格上时结果版本变了不重取；关掉详情才把被失效的那一份取一次', async () => {
+    vi.stubGlobal('IntersectionObserver', FakeObserver);
+    const server = catalogServer();
+    const filters = { sort: 'seed', q: '详情覆盖停订' };
+    const host = await mount(<QueryClientProvider client={queryClient}><CatalogGridPage {...props(filters)} /></QueryClientProvider>);
+    await until(() => cards(host) === 3, '第一页');
+    const reads = () => server.offsets().filter((offset) => offset === '0').length;
+    expect(reads()).toBe(1);
+    await act(async () => { peachHistory.push('/assets/1') });
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: ['catalog-grid'] }, { cancelRefetch: false }) });
+    await settle();
+    expect(reads(), '被详情盖住的网格不在背后重取').toBe(1);
+    await act(async () => { peachHistory.push('/') });
+    await until(() => reads() === 2, '揭开后重取被失效的那一份');
+    await settle();
+    expect(reads()).toBe(2);
+    await act(async () => { peachHistory.push('/assets/1') });
+    await act(async () => { peachHistory.push('/') });
+    await settle();
+    expect(reads(), '期间没有失效就不重取').toBe(2);
+    queryClient.removeQueries({ queryKey: ['catalog-grid'] });
+  });
+
+  it('详情覆盖期间目录换代保留已有卡片，揭开后读取最新一代', async () => {
+    vi.stubGlobal('IntersectionObserver', FakeObserver);
+    const server = catalogServer();
+    let revise!: (value: number) => void;
+    function Grid() {
+      const [revision, setRevision] = useState(0);
+      revise = setRevision;
+      return <CatalogGridPage {...props({ sort: 'seed', q: '覆盖期间换代' })} revision={revision} />;
+    }
+    const host = await mount(<QueryClientProvider client={queryClient}><Grid /></QueryClientProvider>);
+    try {
+      await until(() => cards(host) === 3, '第一页');
+      await act(async () => { peachHistory.push('/assets/1') });
+      await act(async () => { revise(1) });
+      await settle();
+      expect(cards(host), '覆盖期间保留已有内容').toBe(3);
+      expect(server.offsets()).toHaveLength(1);
+      await act(async () => { revise(2) });
+      await act(async () => { peachHistory.push('/') });
+      await until(() => server.offsets().length === 2 && cards(host) === 3, '揭开后读取最新一代');
+      expect(server.offsets()).toHaveLength(2);
+    } finally {
+      await act(async () => { peachHistory.push('/') });
+      queryClient.removeQueries({ queryKey: ['catalog-grid'] });
+    }
+  });
+
+  it('直接打开详情时底下的目录仍完成首次读取', async () => {
+    vi.stubGlobal('IntersectionObserver', FakeObserver);
+    const server = catalogServer();
+    await act(async () => { peachHistory.push('/assets/1') });
+    try {
+      const host = await mount(<QueryClientProvider client={queryClient}>
+        <CatalogGridPage {...props({ sort: 'seed', q: '详情首次挂载' })} />
+      </QueryClientProvider>);
+      await until(() => cards(host) === 3, '首次读取');
+      expect(server.offsets()).toHaveLength(1);
+    } finally {
+      await act(async () => { peachHistory.push('/') });
+      queryClient.removeQueries({ queryKey: ['catalog-grid'] });
+    }
+  });
+
+  it('心跳回执广播的观看进度改写缓存里那张卡', async () => {
+    vi.stubGlobal('IntersectionObserver', FakeObserver);
+    catalogServer();
+    const host = await mount(<QueryClientProvider client={queryClient}><CatalogGridPage {...props({ sort: 'seed', q: '进度广播' })} /></QueryClientProvider>);
+    await until(() => cards(host) === 3, '第一页');
+    await act(async () => {
+      document.dispatchEvent(new CustomEvent(PLAYBACK_PROGRESS_EVENT, { detail: { id: 2, play_seconds: 30, leave_ratio: 0.5 } }));
+    });
+    const cached = queryClient.getQueriesData<{ pages: GridPage[] }>({ queryKey: ['catalog-grid'] })
+      .flatMap(([, data]) => data?.pages?.flatMap((one) => one.items) || []);
+    expect(cached.find((one) => one.id === 2)).toMatchObject({ play_seconds: 30, leave_ratio: 0.5 });
+    expect(cached.find((one) => one.id === 1)?.play_seconds).toBeUndefined();
     queryClient.removeQueries({ queryKey: ['catalog-grid'] });
   });
 

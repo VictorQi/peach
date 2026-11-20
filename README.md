@@ -53,6 +53,8 @@ Movie demo data; see [asset credits and licenses](https://peach.video/en/credits
 
 Background collection does not open or control a browser. Restricted content is skipped when optional source credentials are missing, while your existing library remains available. Optional library updates after an upgrade start when you choose and can be stopped. Version information and update actions stay in settings.
 
+When reading media information for a newly imported local video, Peach can optimize supported MP4 layouts in place without re-encoding or creating another video copy. It keeps a small recovery record and restores the original header if validation fails. Existing videos can use the same optimization during playback without changing the file. [Scope and recovery](docs/adr/0138-mp4-layout-normalization.md).
+
 ## Download and use
 
 On the desktop, choose a video folder to start browsing. New libraries use local metadata by default; folders added to an existing library keep its settings.

@@ -288,7 +288,8 @@ class MediaResponseLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def shared_client_leaves(self, *, explicit):
         joined = asyncio.Event()
-        generate = self.service.generate
+        sessions = self.app.state.stream_sessions
+        register = sessions.register
         release = self.root / "release-segment"
         attempts = [("controlled output", lambda out: [
             getattr(sys, '_base_executable', sys.executable), "-c",
@@ -297,15 +298,17 @@ class MediaResponseLifecycleTests(unittest.IsolatedAsyncioTestCase):
             "Path(sys.argv[2]).write_bytes(b'segment')",
             str(release), str(out)])]
 
-        async def observed(*args, **kwargs):
-            if kwargs["session"] == "two":
+        # 第二个客户端登记后、下一次让出之前就挂到了共享生成上；刚进 generate 时还没有。
+        def observed(session, task):
+            registered = register(session, task)
+            if session == "two":
                 joined.set()
-            return await generate(*args, **kwargs)
+            return registered
 
         with mock.patch.object(routes_media, "_hls_plan", return_value=(
                 None, self.source, [(0, 6)], False)), \
                 mock.patch.object(self.service, "_attempts", return_value=attempts), \
-                mock.patch.object(self.service, "generate", observed), \
+                mock.patch.object(sessions, "register", observed), \
                 mock.patch("peach.segments.asyncio.create_subprocess_exec", self.owned_spawn):
             first, messages, _ = self.request("/stream/hls/1/0.ts", b"session=one&t=secret")
             await asyncio.wait_for(self.spawned.wait(), 2)

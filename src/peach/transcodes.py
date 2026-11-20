@@ -21,7 +21,18 @@ BROWSER_NATIVE_SUFFIXES = frozenset({".mp4", ".m4v", ".webm", ".ogv", ".ogg"})
 DIRECT_MP4_PIXEL_FORMATS = frozenset({"yuv420p", "yuvj420p"})
 TRANSCODE_TIMEOUT_SECONDS = 3600
 PROBE_TIMEOUT_SECONDS = 20
+#: 探测失败记多久。键里有大小和修改时间，文件换了自然重探；冷却只挡同一份文件反复白等。
+PROBE_FAILURE_SECONDS = 300
+PROFILE_CACHE_LIMIT = 512
+_UNKNOWN = object()
 logger = logging.getLogger(__name__)
+
+
+def _remember(cache: dict, key, value) -> None:
+    """有界写入：满了丢最早的那一条。"""
+    if key not in cache and len(cache) >= PROFILE_CACHE_LIMIT:
+        cache.pop(next(iter(cache)))
+    cache[key] = value
 
 
 @dataclass(frozen=True)
@@ -59,6 +70,11 @@ class TranscodeNeedsSession(TranscodeUnavailable):
     """片源要整片转码，但请求没带可取消的流会话，也没有现成缓存。"""
 
 
+def _source_stat(source: Path, known):
+    """片源的 stat：调用方刚取过（`known`）就用它，网盘上每次 stat 都是一趟网络往返；没取过再问。"""
+    return source.stat() if known is None else known
+
+
 class TranscodeService:
     """Create immutable browser-playable MP4 cache entries without touching sources."""
 
@@ -79,6 +95,9 @@ class TranscodeService:
         self._locks_guard = threading.Lock()
         self._slots = threading.Semaphore(max(1, max_concurrent))
         self._native_profiles: dict[tuple[str, int, int], _MediaProfile] = {}
+        #: 探测失败的文件到冷却结束的时刻（`time.monotonic()`），键同上。
+        self._failed_probes: dict[tuple[str, int, int], float] = {}
+        self._probing: dict[tuple[str, int, int], threading.Lock] = {}
 
     @staticmethod
     def needs_transcode(source: Path) -> bool:
@@ -125,37 +144,67 @@ class TranscodeService:
             return 0.0
         return profile.duration if profile is not None else 0.0
 
-    def _profile_for(self, source: Path, session: str, registry) -> _MediaProfile | None:
-        """按 (路径, 大小, mtime) 缓存探测结果；同一个文件只问 ffprobe 一次。"""
-        stat = source.stat()
+    def _profile_for(self, source: Path, session: str, registry, stat=None) -> _MediaProfile | None:
+        """按 (路径, 大小, mtime) 缓存探测结果；同一个文件只问 ffprobe 一次。
+
+        `stat` 是调用方刚取过的片源 stat：网盘上每次 stat 都是一趟网络往返，给了就不再问。
+        """
+        stat = _source_stat(source, stat)
         key = (str(source), stat.st_size, stat.st_mtime_ns)
         with self._locks_guard:
-            profile = self._native_profiles.get(key)
-        if profile is None:
-            profile = self._probe(source, session, registry,
-                                  time.monotonic() + PROBE_TIMEOUT_SECONDS)
-            if profile is not None:
+            if (known := self._known_profile(key)) is not _UNKNOWN:
+                return known
+            gate = self._probing.setdefault(key, threading.Lock())
+        # 一次起播会从好几处问同一个文件的画像（能否直放、是否只缺 ctts、时长、分片计划）：
+        # 同一时刻只放一个 ffprobe，失败也记下来一段时间。否则探测不到的片子每处各等满 20 秒，
+        # 起播前就耗掉一分多钟。取消与容量暂停是抛出的，不算失败。
+        with gate:
+            with self._locks_guard:
+                if (known := self._known_profile(key)) is not _UNKNOWN:
+                    return known
+            try:
+                profile = self._probe(source, session, registry,
+                                      time.monotonic() + PROBE_TIMEOUT_SECONDS)
                 with self._locks_guard:
-                    if len(self._native_profiles) >= 512:
-                        self._native_profiles.pop(next(iter(self._native_profiles)))
-                    self._native_profiles[key] = profile
+                    if profile is None:
+                        _remember(self._failed_probes, key, time.monotonic() + PROBE_FAILURE_SECONDS)
+                    else:
+                        self._failed_probes.pop(key, None)
+                        _remember(self._native_profiles, key, profile)
+            finally:
+                with self._locks_guard:
+                    if self._probing.get(key) is gate:
+                        del self._probing[key]
         return profile
+
+    def _known_profile(self, key):
+        """已缓存的画像；探测失败还在冷却期内是 None，都没有是 `_UNKNOWN`。调用方持 `_locks_guard`。"""
+        profile = self._native_profiles.get(key)
+        if profile is not None:
+            return profile
+        until = self._failed_probes.get(key)
+        if until is not None:
+            if until > time.monotonic():
+                return None
+            del self._failed_probes[key]
+        return _UNKNOWN
 
     def browser_path(
         self, asset_id: int, source: Path, *, session: str = "", registry=None,
-        convert: bool = True,
+        convert: bool = True, stat=None,
     ) -> tuple[Path, bool]:
         """浏览器能直接放的路径，以及它是不是转码产物。
 
         `convert=False` 时只交现成的整片缓存，缺缓存就抛 `TranscodeNeedsSession`。
         没有会话的请求取消不了，浏览器断开后整片 FFmpeg 还会跑到结束。
+        `stat` 是调用方刚取过的片源 stat，给了就不再问网盘。
         """
         profile = None
         if not self.needs_transcode(source):
             if self.resolver.ffprobe() is None:
                 return source, False
             try:
-                profile = self._profile_for(source, session, registry)
+                profile = self._profile_for(source, session, registry, stat)
             except OSError as exc:
                 raise TranscodeUnavailable("source unavailable") from exc
             if profile is not None and self._decodes_in_browser(source, profile):
@@ -166,7 +215,7 @@ class TranscodeService:
             raise TranscodeUnavailable("ffmpeg unavailable")
 
         try:
-            stat = source.stat()
+            stat = _source_stat(source, stat)
         except OSError as exc:
             raise TranscodeUnavailable("source unavailable") from exc
 

@@ -5,7 +5,9 @@
 """
 import json
 import sqlite3
+import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
 
 from . import timeline_sheets, timeline_sources
@@ -78,35 +80,76 @@ def q_timeline(contract, args):
     return cached or {}
 
 
+class _TimedCache:
+    """有界、按时间过期、不随账本提交清掉的缓存；`None` 也记。
+
+    视频旁的预览文件不在账本里，提交与它无关。`WebContract.cached_lru` 每次提交都清空，后台
+    任务几秒提交一次时它等于没有缓存，而在网盘上配对一次要列目录、读索引，慢时上分钟。
+    """
+
+    def __init__(self, *, maxsize: int, ttl: float):
+        self._maxsize, self._ttl = maxsize, ttl
+        self._items: OrderedDict = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, key, compute):
+        now = time.monotonic()
+        with self._lock:
+            hit = self._items.get(key)
+            if hit is not None and now - hit[0] < self._ttl:
+                self._items.move_to_end(key)
+                return hit[1]
+        value = compute()
+        with self._lock:
+            self._items[key] = (now, value)
+            self._items.move_to_end(key)
+            while len(self._items) > self._maxsize:
+                self._items.popitem(last=False)
+        return value
+
+    def clear(self) -> None:
+        with self._lock:
+            self._items.clear()
+
+
+#: 视频旁新放进去的预览最多晚这么久出现；键里有账本路径与时长，换了文件当场重配。
+SIDECAR_TTL = 600
+_SIDECARS = _TimedCache(maxsize=1024, ttl=SIDECAR_TTL)
+_FRAMES = _TimedCache(maxsize=256, ttl=SIDECAR_TTL)
+
+
 def external_timeline(contract, asset_id: int) -> timeline_sources.Timeline | None:
-    """已有预览只读配对到具体资产；短时缓存索引，不读取视频内容。"""
+    """已有预览只读配对到具体资产；按资产长缓存索引，不读取视频内容。"""
+    try:
+        with contract.read_connection() as connection:
+            row = connection.execute(
+                "SELECT path, duration FROM asset WHERE id=? AND medium='video' AND disposal IS NULL",
+                (asset_id,)).fetchone()
+    except sqlite3.Error:
+        return None
+    if row is None or not row[0]:
+        return None
+    raw, duration = str(row[0]), float(row[1] or 0)
+
     def read():
         try:
-            with contract.read_connection() as connection:
-                row = connection.execute(
-                    "SELECT path, duration FROM asset WHERE id=? AND medium='video' AND disposal IS NULL",
-                    (asset_id,)).fetchone()
-            if row is None:
-                return None
-            from .media import resolve_case_insensitive
-            source = Path(resolve_case_insensitive(row[0]))
-            return timeline_sources.discover(source, float(row[1] or 0))
-        except (OSError, sqlite3.Error, TypeError, ValueError):
+            from .media import normalized_path
+            source = normalized_path(raw)
+            # SMB 来源没有本机目录可列，旁边的预览文件读不到。
+            return timeline_sources.discover(source, duration) if isinstance(source, Path) else None
+        except (OSError, TypeError, ValueError):
             return None
-    result = contract.cached_lru(f'timeline-sidecar:{asset_id}', read, ttl=15)
+    result = _SIDECARS.get((asset_id, raw, duration), read)
     return result if isinstance(result, timeline_sources.Timeline) else None
 
 
 def external_frame(contract, timeline: timeline_sources.Timeline, number: int) -> bytes | None:
+    """一帧裁好的图。跟索引同一个寿命，不再每次 stat 预览图（它和视频一样在网盘上）。"""
     if not 0 <= number < len(timeline.frames):
         return None
     frame = timeline.frames[number]
-    try:
-        stat = frame.path.stat()
-    except OSError:
-        return None
-    key = ('timeline-frame', str(frame.path), stat.st_mtime_ns, stat.st_size, frame.box, frame.bif_number)
-    return contract.cached_lru(key, lambda: timeline_sources.frame_bytes(timeline, number), ttl=15)
+    key = (str(frame.path), frame.start, frame.box, frame.bif_number)
+    return _FRAMES.get(key, lambda: timeline_sources.frame_bytes(timeline, number))
 
 
 def q_thumbnail_jobs(contract, _args):
