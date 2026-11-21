@@ -2,7 +2,7 @@
 (function() {
 	try {
 		var e = typeof globalThis < "u" ? globalThis : typeof window < "u" ? window : typeof global < "u" ? global : typeof self < "u" ? self : {}, t = new e.Error().stack;
-		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "79f9f928-7923-45ec-a90a-89492d3051a1", e._sentryDebugIdIdentifier = "sentry-dbid-79f9f928-7923-45ec-a90a-89492d3051a1");
+		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "70db31e8-a876-4579-8514-929084688518", e._sentryDebugIdIdentifier = "sentry-dbid-70db31e8-a876-4579-8514-929084688518");
 	} catch {}
 })();
 var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescriptor, r = Object.getOwnPropertyNames, i = Object.getPrototypeOf, a = Object.prototype.hasOwnProperty, o = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e = null), t.exports), s = (e, i, o, s) => {
@@ -6967,6 +6967,8 @@ var Ge = "peach.settings.v1", Ke = {
 		backupCleaned: "Pre-repair backup removed",
 		changedCount_one: "{{count, number}} change",
 		changedCount_other: "{{count, number}} changes",
+		coverAutomatic: "Repair covers automatically on startup",
+		coverAutomaticHelp: "Automatic repair starts with the next launch. You can also start it manually.",
 		deferReasonCount: "{{reason}} ({{count, number}})",
 		deferReasons: {
 			mount: "directory unreadable",
@@ -7747,7 +7749,7 @@ var Ge = "peach.settings.v1", Ke = {
 				title: "Metadata and code cleanup"
 			},
 			"cover-artwork": {
-				summary: "After an upgrade, re-crops covers saved by earlier versions in the background and switches to DVD sleeves of similar quality. Originals are backed up first.",
+				summary: "Re-crops older covers using the current rules and uses DVD sleeves of similar quality where appropriate. Originals are backed up first.",
 				title: "Layout of installed covers"
 			},
 			"dangling-candidates": {
@@ -14460,6 +14462,8 @@ var Ge = "peach.settings.v1", Ke = {
 		awaitingConfirmation: "等你确认",
 		backupCleaned: "修复前的备份已清理",
 		changedCount: "改动 {{count, number}} 项",
+		coverAutomatic: "启动后自动补修封面",
+		coverAutomaticHelp: "开启后从下次启动起自动执行。也可随时手动开始。",
 		deferReasonCount: "{{reason}} {{count, number}} 部",
 		deferReasons: {
 			mount: "所在目录读不到",
@@ -15225,7 +15229,7 @@ var Ge = "peach.settings.v1", Ke = {
 				title: "资料与番号整理"
 			},
 			"cover-artwork": {
-				summary: "升级后在后台按新规则重新切旧版本装的封面，换用清晰度相近的 DVD 封套，原图先备份",
+				summary: "按当前规则重新裁切旧封面，适合时换用清晰度相近的 DVD 封套。修改前备份原图。",
 				title: "已装封面的版式"
 			},
 			"dangling-candidates": {
@@ -40393,4 +40397,4 @@ Pt();
 var sx = document.getElementById("peach-page"), cx = sx ? ox[sx.dataset.page ?? ""] : void 0;
 sx && cx && (0, Ut.createRoot)(sx).render(/* @__PURE__ */ (0, V.jsx)(ax, { children: /* @__PURE__ */ (0, V.jsx)(cx, { data: { ...sx.dataset } }) }));
 
-//# debugId=79f9f928-7923-45ec-a90a-89492d3051a1
+//# debugId=70db31e8-a876-4579-8514-929084688518

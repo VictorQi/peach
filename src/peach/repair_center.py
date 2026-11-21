@@ -31,7 +31,7 @@ GROUPS = (
 )
 #: 等用户确认才做的项：要读网盘（流量与网盘缓存）、删了不能恢复，或判据不是百分之百、要解除关联或合并实体
 #: （`legacy_repairs.CONFIRMS`）。其余判据确定、只改自动写入的值、回执记着原值，升级后自动做。
-CONFIRM = frozenset({'display-cloud', 'follow-evidence', *(rule.item for rule in legacy_repairs.CONFIRMS)})
+CONFIRM = frozenset({'display-cloud', 'follow-evidence', 'cover-artwork', *(rule.item for rule in legacy_repairs.CONFIRMS)})
 #: `(id, 模式, 组)`，顺序就是页面的默认顺序。
 ITEMS = tuple((item, 'confirm' if item in CONFIRM else 'auto', group) for group, items in GROUPS for item in items)
 #: 组内先列要用户处理或正在进行的：等确认、在跑、要重试、排队、延后，然后才是做完的。
@@ -149,7 +149,7 @@ def _follow_evidence(status: dict | None, rows) -> dict:
 
 
 def _cover_artwork(status: dict | None, rows) -> dict:
-    """封面补修：在做就报进度，估算出有待处理的封面就报排队（服务起来后自动开工），做过且没剩下的报上一次改了多少张。"""
+    """有待处理的封面时提供手动开始，处理后显示上一次改动的数量。"""
     status = status or {}
     phase = status.get('phase')
     if phase == 'running':
@@ -159,7 +159,7 @@ def _cover_artwork(status: dict | None, rows) -> dict:
     if phase == 'estimating':
         return {'state': 'pending', 'estimating': True}
     if phase == 'ready' and status.get('covers'):
-        return {'state': 'pending', 'covers': status['covers']}
+        return {'state': 'waiting', 'covers': status['covers']}
     last = next((result for row_id, _, result in rows if row_id.startswith(cover_repair.RECEIPT_PREFIX)), None)
     return ({'state': 'done', 'changed': sum(_count(last.get(key)) for key in ('judged', 'recropped', 'faces'))}
             if last else {'state': 'none'})
@@ -248,7 +248,8 @@ def _confirmed(rows, prefix: str, pending: int) -> dict:
 
 def snapshot(connection, receipt: dict, *, cloud_pending: int, backup_directories=(),
              follow_evidence_status: dict | None = None, confirm_pending: dict | None = None,
-             follow_backfill_status: dict | None = None, cover_repair_status: dict | None = None) -> dict:
+             follow_backfill_status: dict | None = None, cover_repair_status: dict | None = None,
+             cover_automatic: bool = False) -> dict:
     rows = sorted(((row[0], float(row[1] or 0), json.loads(row[2] or '{}')) for row in connection.execute(
         'SELECT id, applied_at, result_json FROM ledger_upgrade_repair')), key=lambda row: row[1], reverse=True)
     local = receipt.get('local', {})
@@ -281,9 +282,11 @@ def snapshot(connection, receipt: dict, *, cloud_pending: int, backup_directorie
            for rule in legacy_repairs.CONFIRMS},
         'cover-artwork': _cover_artwork(cover_repair_status, rows),
     }
+    if cover_repair_status is not None:
+        facts['cover-artwork']['automatic'] = cover_automatic
     items = [{'id': key, 'group': group, 'title': interface_text.text(f'server:repairCenter.items.{key}.title'),
               'summary': interface_text.text(f'server:repairCenter.items.{key}.summary'), 'mode': mode, **facts[key]}
-             for key, mode, group in ITEMS if _touched(facts[key])]
+             for key, mode, group in ITEMS if _touched(facts[key]) or 'automatic' in facts[key]]
     groups = [group for group, _ in GROUPS]
     items.sort(key=lambda item: (groups.index(item['group']), _STATE_ORDER.get(item['state'], len(_STATE_ORDER))))
     return {'items': items, 'history': _history(rows, backup_directories)}

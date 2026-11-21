@@ -1048,7 +1048,8 @@ def _repair_center(request: Request) -> dict:
                                         if service.available else {},
                                         follow_backfill_status=backfill.snapshot(connection)
                                         if backfill and service.available else None,
-                                        cover_repair_status=covers.status() if covers and service.available else None)
+                                        cover_repair_status=covers.status() if covers and service.available else None,
+                                        cover_automatic=covers.automatic_enabled() if covers and service.available else False)
     return {**result, 'available': service.available}
 
 
@@ -1087,6 +1088,34 @@ def reclaim_follow_evidence(request: Request, _args=Depends(require_auth)):
         return _repair_center(request)
     except ValueError as exc:
         raise HTTPException(409, error_detail(exc)) from exc
+
+
+@router.put('/api/configuration/repairs/cover-artwork/automatic')
+def set_cover_repair_automatic(request: Request, enabled: bool = Body(..., embed=True, strict=True),
+                               _args=Depends(require_auth)):
+    local_only(request)
+    same_origin(request)
+    try:
+        if not request.app.state.upgrade_repairs.available:
+            raise UserValueError('api.configuration.primaryOnly')
+        request.app.state.cover_repair.set_automatic(enabled)
+        return _repair_center(request)
+    except (ValueError, OSError, Timeout) as exc:
+        raise HTTPException(409, error_detail(exc)) from exc
+
+
+@router.post('/api/configuration/repairs/cover-artwork')
+def start_cover_repair(request: Request, _args=Depends(require_auth)):
+    from .api import _installation_in_progress
+
+    local_only(request)
+    same_origin(request)
+    if not request.app.state.upgrade_repairs.available:
+        raise HTTPException(409, message_fields('api.configuration.primaryOnly'))
+    if _installation_in_progress(request.app.state.settings.db_path):
+        raise HTTPException(409, message_fields('api.configuration.updateInstalling'))
+    request.app.state.cover_repair.begin()
+    return _repair_center(request)
 
 
 @router.post('/api/configuration/repairs/{item}')

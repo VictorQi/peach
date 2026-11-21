@@ -16,6 +16,8 @@ export interface RepairItem {
   online?: boolean;
   /** 封面版式补修：等确认时待处理的封面数。 */
   covers?: number;
+  /** 有此字段时，可以调整本机启动后的自动封面补修。 */
+  automatic?: boolean;
   /** 补测类：延后的部数按原因码（mount / cooldown / cost，旧版没记原因的是空串）；`failed` 为等你重试的失败部数。 */
   deferred?: Record<string, number>; failed?: number;
 }

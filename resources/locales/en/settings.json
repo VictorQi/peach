@@ -996,6 +996,8 @@
     "backupCleaned": "Pre-repair backup removed",
     "changedCount_one": "{{count, number}} change",
     "changedCount_other": "{{count, number}} changes",
+    "coverAutomatic": "Repair covers automatically on startup",
+    "coverAutomaticHelp": "Automatic repair starts with the next launch. You can also start it manually.",
     "deferReasonCount": "{{reason}} ({{count, number}})",
     "deferReasons": {
       "mount": "directory unreadable",
