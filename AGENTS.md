@@ -5,7 +5,7 @@
 
 ## 产品行为底线
 
-- 本 Fork 面向不同技术背景的普通消费者，以易用、可预期和用户控制为先；既有实现与上游偏好须按本节复核，详细判据见 `docs/adr/0134-consumer-control-and-privacy.md`。
+- 本 Fork 面向不同技术背景的普通消费者，以易用、可预期和用户控制为先；既有实现与上游偏好须按本节复核，详细判据见 `docs/adr/0174-consumer-control-and-privacy.md`。
 - 首次空页面提供可立即执行的核心动作，尽量在当前位置完成并显示结果；已有内容的用户直接浏览，首屏不等待可选统计、采集或帮助状态。不能用教程、设置跳转或更长的骨架等待替代这两种体验。
 - 基础功能不依赖用户理解 Cookie、Token 或后台实现；高级能力由用户按需配置，缺少凭据就跳过受限部分，失败留在对应来源或任务中，不弹窗索要、不反复催促。
 - 教程与功能介绍由用户主动打开；不得阻断正常使用、抢焦点，或在升级、刷新和返回页面时反复出现。升级信息与操作留在设置页，不常驻顶部催更。
@@ -29,7 +29,7 @@
 
 ## 术语
 
-- **你**：改动 Peach 的智能体；**我 / 用户**：部署、使用并维护 Peach 的人，每个部署只有一人。 <!-- copy-lint-disable-line -->
+- **你**：改动 Peach 的智能体；**我 / 用户**：在本机部署、使用并维护这份检出的人，每个部署只有一人；外部贡献者照本文件工作时，「我」、ledger、生产与主检出都指贡献者自己的环境。 <!-- copy-lint-disable-line -->
 - **ledger / 账本**：当前实例数据根 `database/ledger.db` 的本地工作副本，唯一真相源；**真相字段**：直接构成 ledger 断言的列。
 - **候选 candidate**：带来源与置信度、未经用户复核的断言；**复核产物**：承载逐项结论、可重放的 CSV 等文件。
 - **实体 entity**：女优、厂牌、创作者、系列的规范身份；扁平 `asset_tag`、creator/studio 字段是兼容投影。
@@ -39,6 +39,7 @@
 ## 按任务读取
 
 部署读 `docs/OPERATIONS.md`，复用读 `docs/REUSE.md`，采集读 `docs/SOURCING.md`，架构取舍读相关 ADR。只展开本任务需要的章节。
+源码入口和对应测试见 [代码导航](docs/CODEBASE_MAP.md)。
 
 | 触发条件 | 技能 |
 | --- | --- |
@@ -58,7 +59,7 @@
 ## 验证与交付门槛
 
 - 测试只用当前隔离工作树的 Windows `& .\scripts\test.ps1` 或 macOS/Linux `./scripts/test.sh`。`auto` 按域选测；实际依赖、共享设施和未知影响面用 `full`；环境、登记与记录契约见 `docs/TESTING.md`。`ready` / `integrate` 拒收无有效记录的交付，禁止手工 merge 绕过入口。健康检查只用 `/healthz`。
-- 不用 `git add .`、`git add -A`、目录或 glob；逐文件暂存并核对 `git diff --cached --name-status`。实现与对应测试原子提交，署名与 README 影响按 `peach-worktree`。
+- 不用 `git add .`、`git add -A`、目录或 glob；逐文件暂存并核对 `git diff --cached --name-status`。实现与对应测试原子提交，署名按 `peach-worktree`。
 - 预览使用独立真实小样本，启动前通过 `scripts/check_ui_preview.py`；确认与普通、编辑链接按界面技能。HTTPS 验证使用项目 CA 严格校验，失败就报告原始错误与未取得的验收面。
 - 入口与技能的结构、行数、字节数、单行长度由 `scripts/check_context_budget.py` 强制；职责与清退按 `peach-context-rules`。工作树残留与公开文档中的私有信息由 `tests/test_repo_hygiene.py` 检查。
 - 文案、注释、docstring、测试名描述当前行为；检查与事故例外见 `docs/WRITING.md`。源码文本断言只减不增；行为与设计测试分工见 `docs/TESTING.md`。

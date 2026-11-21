@@ -9,13 +9,14 @@
 [![Release](https://img.shields.io/github/v/release/VictorQi/peach?include_prereleases&sort=semver&label=release&logo=github)](https://github.com/VictorQi/peach/releases)
 [![CI 流水线](https://img.shields.io/github/actions/workflow/status/VictorQi/peach/test.yml?branch=master&label=CI&logo=githubactions&logoColor=white)](https://github.com/VictorQi/peach/actions/workflows/test.yml)
 [![许可证](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue?logo=gnu&logoColor=white)](LICENSE)
+[![翻译进度](https://hosted.weblate.org/widget/peach/svg-badge.svg)](https://hosted.weblate.org/engage/peach/)
 [![Windows x64](https://img.shields.io/badge/Windows-x64-0078D4)](docs/TESTING_DESKTOP.md)
 [![macOS DMG](https://img.shields.io/badge/macOS-DMG-555555?logo=apple&logoColor=white)](docs/OPERATIONS.md#macos-独立测试包)
 [![年龄限制](https://img.shields.io/badge/age-18%2B-555555)](#许可证)
 
 ## 截图
 
-[![影片馆藏：搜索、筛选与海报墙](https://peach.video/assets/screenshots/home-wide-20261025-2-1280.webp)](https://peach.video/assets/screenshots/home-wide-20261025-2.png)
+[![影片馆藏：搜索、筛选与海报墙](https://peach.video/assets/screenshots/home-wide-20261118-2-1280.webp)](https://peach.video/assets/screenshots/home-wide-20261118-2.png)
 
 电影演示资料，来源与许可见[素材说明](https://peach.video/credits/)。
 
@@ -24,19 +25,19 @@
 
 **人物与作品**
 
-[![查理·卓别林的资料与作品](https://peach.video/assets/screenshots/profile-wide-20261025-2-1280.webp)](https://peach.video/assets/screenshots/profile-wide-20261025-2.png)
+[![查理·卓别林的资料与作品](https://peach.video/assets/screenshots/profile-wide-20261118-2-1280.webp)](https://peach.video/assets/screenshots/profile-wide-20261118-2.png)
 
 **创作者关注**
 
-[![创作者关注与作品更新](https://peach.video/assets/screenshots/follow-wide-20261025-2-1280.webp)](https://peach.video/assets/screenshots/follow-wide-20261025-2.png)
+[![创作者关注与作品更新](https://peach.video/assets/screenshots/follow-wide-20261118-2-1280.webp)](https://peach.video/assets/screenshots/follow-wide-20261118-2.png)
 
 **馆藏统计**
 
-[![馆藏、存储与观看统计](https://peach.video/assets/screenshots/stats-wide-20261025-3-1280.webp)](https://peach.video/assets/screenshots/stats-wide-20261025-3.png)
+[![馆藏、存储与观看统计](https://peach.video/assets/screenshots/stats-wide-20261118-2-1280.webp)](https://peach.video/assets/screenshots/stats-wide-20261118-2.png)
 
 **播放器**
 
-[![Big Buck Bunny 播放器](https://peach.video/assets/screenshots/play-wide-20261025-2-1280.webp)](https://peach.video/assets/screenshots/play-wide-20261025-2.png)
+[![Big Buck Bunny 播放器](https://peach.video/assets/screenshots/play-wide-20261118-2-1280.webp)](https://peach.video/assets/screenshots/play-wide-20261118-2.png)
 
 </details>
 
@@ -53,7 +54,7 @@
 
 后台采集不打开或操作浏览器。缺少可选来源的登录凭据时跳过受限内容，已有馆藏继续可用；升级后的可选资料补全由你主动开始，可以停止。版本信息和更新操作留在设置页。
 
-读取新入库本地视频的媒体信息时，Peach 会对支持的 MP4 布局做原位整理，不重新编码、不生成另一份视频。写入前保存小型恢复记录，校验失败恢复原文件头；已有视频可在播放响应中使用同一优化，不修改文件。[适用范围与恢复](docs/adr/0138-mp4-layout-normalization.md)。
+读取新入库本地视频的媒体信息时，Peach 会对支持的 MP4 布局做原位整理，不重新编码、不生成另一份视频。写入前保存小型恢复记录，校验失败恢复原文件头；已有视频可在播放响应中使用同一优化，不修改文件。[适用范围与恢复](docs/adr/0178-mp4-layout-normalization.md)。
 
 ## 下载与使用
 
@@ -62,10 +63,15 @@
 
 | 方式 | 入口 |
 | --- | --- |
-| Windows x64 | [安装版](https://github.com/VictorQi/peach/releases/latest) · [免安装版](https://github.com/VictorQi/peach/releases/latest) |
-| macOS | [Apple Silicon / ARM64](https://github.com/VictorQi/peach/releases/latest) · [Intel / x86_64](https://github.com/VictorQi/peach/releases/latest) |
+| Windows x64 | [安装版][peach-windows-x64-setup.exe] · [免安装版][peach-windows-x64.zip] |
+| macOS | [Apple Silicon / ARM64][peach-macos-arm64.dmg] · [Intel / x86_64][peach-macos-x86_64.dmg] |
 | Docker / NAS | [部署说明](docs/DOCKER.md) |
 | 源码运行 | [安装步骤](docs/OPERATIONS.md#从源码运行windowsmacos)，需要 Git、uv 和 Python 3.14+ |
+
+[peach-windows-x64-setup.exe]: https://github.com/VictorQi/peach/releases
+[peach-windows-x64.zip]: https://github.com/VictorQi/peach/releases
+[peach-macos-arm64.dmg]: https://github.com/VictorQi/peach/releases
+[peach-macos-x86_64.dmg]: https://github.com/VictorQi/peach/releases
 
 安装后选择媒体目录，扫描后即可浏览与播放。桌面测试包未签名，macOS 尚未完成公证；详见 [Windows](docs/TESTING_DESKTOP.md) 与 [macOS](docs/OPERATIONS.md#macos-独立测试包) 说明。
 
@@ -78,6 +84,10 @@
 ## 问题反馈
 
 本 Fork 暂未启用公开问题区。请通过取得软件的渠道反馈问题；代码变更经 [PR](https://github.com/VictorQi/peach/pulls) 交付。反馈附版本、复现步骤与报错。公开截图使用演示资料，遮盖隐私；不要上传影片或数据库。
+
+## 参与翻译
+
+Peach 的界面翻译在 [Hosted Weblate](https://hosted.weblate.org/engage/peach/) 上进行。现有英文是 AI 初稿，欢迎提建议和投票。做法见[贡献说明](CONTRIBUTING.md#翻译)。
 
 ## 相关项目
 

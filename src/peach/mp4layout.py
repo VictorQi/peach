@@ -173,12 +173,12 @@ def _save(path: Path, record: dict) -> None:
 def _write(handle, offset: int, value: bytes) -> None:
     handle.seek(offset)
     if handle.write(value) != 4:
-        raise OSError('MP4 长度字段未完整写入')
+        raise OSError('Incomplete write of the MP4 length field')
     handle.flush()
     os.fsync(handle.fileno())
     handle.seek(offset)
     if handle.read(4) != value:
-        raise OSError('MP4 长度字段回读不符')
+        raise OSError('MP4 length field did not match after the write')
 
 
 def _restore(source: Path, journal: Path, record: dict) -> None:
@@ -190,7 +190,7 @@ def _restore(source: Path, journal: Path, record: dict) -> None:
         prefix[offset:offset + 4] = bytes(4)
         if (found.st_size != record['size'] or found.st_ino != record['inode']
                 or hashlib.sha256(prefix).hexdigest() != record['digest']):
-            raise ValueError('MP4 已变更，保留恢复记录，未覆盖文件')
+            raise ValueError('The MP4 changed. The recovery journal was kept and the file was left untouched.')
         _write(handle, offset, bytes.fromhex(record['before']))
     os.utime(source, ns=(record['atime_ns'], record['mtime_ns']))
     _save(journal, {**record, 'status': 'rolled-back'})
@@ -230,7 +230,7 @@ def prepare_local(source: Path, root: Path):
         with handle:
             found = os.fstat(handle.fileno())
             if found.st_size != layout.size or handle.read(len(layout.prefix)) != layout.prefix:
-                raise ValueError('MP4 在检查后变化，未改写')
+                raise ValueError('The MP4 changed after inspection and was left untouched.')
             record = {'path': str(source), 'offset': layout.offset, 'size': layout.size,
                       'inode': found.st_ino, 'prefix_bytes': len(layout.prefix), 'digest': layout.digest,
                       'before': layout.prefix[layout.offset:layout.offset + 4].hex(),

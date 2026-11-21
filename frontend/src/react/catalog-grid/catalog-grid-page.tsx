@@ -11,41 +11,52 @@ import {
   Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode,
   type RefObject,
 } from 'react';
-import { useInfiniteQuery, type InfiniteData, type QueryKey } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, type InfiniteData, type QueryKey } from '@tanstack/react-query';
 import { cardArtwork, frameArtwork, mixFace as mixArtwork, mixLabel, relayoutCovers, type Artwork } from '@peach/card-art';
+import { LibraryImportPanel } from './library-import-panel';
 import { isOverlayPath, peachHistory } from '@peach/history';
 import { requestErrorMessage } from '@peach/legacy/core';
-import { LOAD_MORE_STATUS, loadingDotsHtml } from '@peach/legacy/ui';
+import { activityStatusHtml, LOAD_MORE_STATUS } from '@peach/legacy/ui';
 
 import { apiGet } from '../../api';
 import { PLAYBACK_PROGRESS_EVENT, type PlaybackProgress } from '../../player/telemetry';
 import { LOAD_MORE_MARGIN, RetryNote } from '../components/grid-reveal';
 import { SkeletonContent } from '../components/skeleton-content';
+import { CatalogColumnFilterChips } from '../components/column-filter-chips';
 import { cardRatio, MediaCard, type MediaCardVariant } from '../components/media-card';
 import { MIX_FLIP_FACES, MixCard } from '../components/mix-card';
 import {
-  SHORTS_BATCH, arrangeTiles, catalogParams, catalogQuery, collapseGroups, entityQuery, latestCatalogPages, mixHasPicture,
+  SHORTS_BATCH, arrangeTiles, catalogCardProps, catalogListScope, catalogParams, catalogQuery, catalogSummary, collapseGroups, entityQuery, latestCatalogPages, mixHasPicture,
   replaceCatalogItem, shortsBoundaries, shortsParams, splitSections, type GridPage, type ShortsCut, type Tile,
 } from './catalog-grid';
 import type { CatalogGridProps, MediaCardLayout, MediaCardHelpers, MediaItem, MediaPage } from './types';
 import { VideoWall } from '../video-wall/video-wall';
 import { finiteWallFilters, wallHasCover } from '../video-wall/wall-layout';
 import { wallEmptyHtml } from '../video-wall/wall-empty';
-import { LibraryCompletionPrompt, missingPreviewIds } from '../library-processing/library-completion';
+import { LibraryCompletionPrompt, meteredPreviewIds, missingPreviewIds } from '../library-processing/library-completion';
 import { useCatalogView } from './catalog-view';
 import { queryClient } from '../query';
 import { CatalogListPage } from './catalog-list-page';
-import { LibraryImportPanel } from './library-import-panel';
+import { useCatalogListPosition } from './catalog-list-position';
+import { catalogColumns } from './catalog-table-columns';
+import { t } from '../../i18n';
 
 export function CatalogGridPage(props: CatalogGridProps) {
   const view = useCatalogView();
+  const [position, setPosition] = useCatalogListPosition(catalogListScope(props));
   if (props.mode === 'items') return <ItemsGrid {...props} />;
   const key = props.mode === 'entity'
     ? `entity:${props.entityKey || ''}:${props.revision}`
     : `catalog:${catalogParams(props.filters || {}, !!props.excludeVertical)}:${props.batchSize || 60}:${props.revision}`;
-  if (view === 'list' && !props.wall) return <CatalogListPage key={key} {...props} />;
+  if (view === 'list' && !props.wall) return <CatalogListPage key={key} {...props} position={position} setPosition={setPosition} />;
   const scope = props.mode === 'entity' ? 'entity' : `catalog:${!!props.wall}`;
-  return <GridBody key={scope} {...props} />;
+  const encoded = position.filters.column_filters;
+  return <GridBody key={scope} {...catalogCardProps(props, encoded)}
+    filterBar={!props.wall && encoded ? <CatalogColumnFilterChips encoded={encoded} columns={catalogColumns} tagLabel={props.helpers.tagLabel}
+      onChange={next => {
+        const filters: Record<string, string> = next ? { column_filters: next } : {};
+        setPosition(current => ({ ...current, filters, pagination: { ...current.pagination, pageIndex: 0 } }));
+      }} /> : undefined} />;
 }
 
 function Icon({ name }: { name: string }) {
@@ -113,7 +124,7 @@ function usePlaybackProgress(): void {
 }
 
 /** 一次查询的整个生命周期：骨架、首屏、续页、竖屏带与读数。 */
-function GridBody(props: CatalogGridProps) {
+function GridBody(props: CatalogGridProps & { filterBar?: ReactNode }) {
   const { helpers, actions, layout } = props;
   const entity = props.mode === 'entity';
   const trash = !entity && props.filters?.state === 'trash';
@@ -142,7 +153,13 @@ function GridBody(props: CatalogGridProps) {
     subscribed: !covered || !queryClient.getQueryData(query.queryKey),
   });
   usePlaybackProgress();
-
+  const progressive = !entity && !trash && !props.wall;
+  const summaryParams = catalogParams(props.filters || {}, !!props.excludeVertical);
+  const summary = useQuery({
+    queryKey: ['catalog-summary', summaryParams, props.revision || 0],
+    queryFn: ({ signal }) => catalogSummary(summaryParams, signal),
+    enabled: progressive && !!result.data,
+  });
   /* 一次取数落定就告诉壳一次，成功、为空、失败都算：壳里 `await` 这次重读的调用方据此放行。 */
   const settledRevision = useRef<number | null>(null);
   useEffect(() => {
@@ -155,26 +172,35 @@ function GridBody(props: CatalogGridProps) {
     collapse: props.groupCollapse !== false, mix: !!props.mix && !trash, javImage: layout.javImage,
   }), [result.data, props.groupCollapse, props.mix, trash, layout.javImage]);
   const shown = tiles.reduce((count, tile) => count + (tile.kind === 'card' ? 1 : 0), 0);
-  const total = Number(result.data?.pages[0]?.total || 0);
+  const total = Number(result.data?.pages[0]?.total ?? summary.data?.total ?? shown);
   const libraryEmpty = !entity && !trash && !!result.data?.pages[0]?.libraryEmpty;
   const finiteWall = entity || finiteWallFilters(props.filters);
   const wallAvailable = !trash && !props.selectMode && !!actions.wallPlayer && !!actions.wallDetails;
   const wallItems = tiles.flatMap(tile => tile.kind === 'card' && wallHasCover(tile.item) ? [tile.item] : []);
   const wallPool = wallItems;
-  const missing = trash ? [] : missingPreviewIds(
-    tiles.flatMap(tile => tile.kind === 'card' ? [tile.item] : []), layout.javImage);
-
   const body = useRef<HTMLDivElement | null>(null);
   const cuts = useShortsStrips(props, result.isPlaceholderData ? undefined : result.data, tiles, pageStarts, body);
+  /* 状态条数的是这一页画出来的全部卡：主网格加上插在中间的竖屏带。竖屏格只用视频帧，
+     按帧图判断有没有图；筛竖屏时主网格本身也是竖屏格。 */
+  const shownItems = tiles.flatMap(tile => tile.kind === 'card' ? [tile.item] : []);
+  const shortItems = cuts.flatMap(cut => cut.items);
+  const portrait = !!layout.portrait;
+  const merge = (...lists: number[][]) => [...new Set(lists.flat())];
+  const missing = trash ? [] : merge(missingPreviewIds(shownItems, layout.javImage, portrait),
+    missingPreviewIds(shortItems, layout.javImage, true));
+  const metered = trash ? [] : merge(meteredPreviewIds(shownItems, layout.javImage, portrait),
+    meteredPreviewIds(shortItems, layout.javImage, true));
 
   /* 读数排到微任务里报：壳画读数会顺带重排页头与选中态，那一路可能走到批量条的 `flushSync`，
      提交阶段里它画不出来。微任务在浏览器绘制前跑完；这一代已卸下就不报。 */
   useLayoutEffect(() => {
     if (!result.data || result.isPlaceholderData) return;
+    if (progressive && !summary.data) return;
     let live = true;
     queueMicrotask(() => { if (live) props.onCount?.(total, shown) });
     return () => { live = false };
-  }, [result.data, result.isPlaceholderData, total, shown]);
+  }, [result.data, result.isPlaceholderData, total, shown, progressive, summary.data]);
+  useEffect(() => { if (progressive && summary.isError) props.onCountFailed?.() }, [progressive, summary.isError]);
   const failed = !result.isPending && !result.data;
   useLayoutEffect(() => {
     if (!failed) return;
@@ -251,8 +277,9 @@ function GridBody(props: CatalogGridProps) {
 
   return (
     <div ref={body} data-media-body="" aria-busy={result.isFetching && !result.isFetchingNextPage}>
+      {props.filterBar ? <div className="mb-3">{props.filterBar}</div> : null}
       {!entity && !trash ? <LibraryImportPanel empty={libraryEmpty} onContent={() => void result.refetch()} /> : null}
-      <LibraryCompletionPrompt assetIds={missing} />
+      <LibraryCompletionPrompt assetIds={missing} meteredIds={metered} />
       {props.wall ? content() : <SkeletonContent pending={result.isPending} skeletonHtml={props.skeletonHtml}>
         {content()}
       </SkeletonContent>}
@@ -311,10 +338,10 @@ export function LoadMore({ entity, load, enabled, children }: {
   return (
     <>
       {entity
-        ? <button ref={attach} type="button" data-entity-more="" {...aria} onClick={() => void run(true)}>{children ?? '载入更多'}</button>
+        ? <button ref={attach} type="button" data-entity-more="" {...aria} onClick={() => void run(true)}>{children ?? t('catalog:shared.loadMore')}</button>
         /* 失败时只留下面那条重试：哨兵收起但不卸下，重试接上之后照旧由它续页。 */
         : <div ref={attach} data-load-more="" {...aria} hidden={Boolean(state.error)} onClick={() => void run(true)}
-          dangerouslySetInnerHTML={{ __html: loadingDotsHtml(LOAD_MORE_STATUS) }} />}
+          dangerouslySetInnerHTML={{ __html: activityStatusHtml('linear-dots', LOAD_MORE_STATUS) }} />}
       {state.error ? <RetryNote message={state.error} onRetry={() => void run(true)} /> : null}
     </>
   );
@@ -328,8 +355,9 @@ function useShortsStrips(
   tiles: readonly Tile[], pageStarts: readonly number[], body: RefObject<HTMLElement | null>,
 ): ShortsCut[] {
   type Saved = { cuts: ShortsCut[]; offset: number; handled: number };
-  const cacheKey = ['catalog-short-layout', catalogParams(props.filters || {}, !!props.excludeVertical)];
-  const stamp = `${cacheKey[1]}:${props.revision}`;
+  const limit = props.shortsLimit || SHORTS_BATCH;
+  const cacheKey = ['catalog-short-layout', catalogParams(props.filters || {}, !!props.excludeVertical), limit];
+  const stamp = `${cacheKey[1]}:${limit}:${props.revision}`;
   const create = () => {
     const saved = props.restoreNavigation ? queryClient.getQueryData<Saved>(cacheKey) : undefined;
     const groups = { parts: new Set<string>(), editions: new Set<string>() };
@@ -356,7 +384,7 @@ function useShortsStrips(
     const controller = new AbortController();
     own.controllers.push(controller);
     const page = pages - 1;
-    apiGet<MediaPage>(`/api/items?${shortsParams(props.filters || {}, own.offset)}`, controller.signal)
+    apiGet<MediaPage>(`/api/items?${shortsParams(props.filters || {}, own.offset, limit)}`, controller.signal)
       .then((strip) => {
         if (run.current !== own || controller.signal.aborted) return;
         const items = strip.items || [];
@@ -378,7 +406,7 @@ function useShortsStrips(
     if (!boundaries.length) return;
     /* 落点定了才折叠：剪不出落点的这一批下次照原偏移量重取，不能先记成已出现。 */
     const items = collapseGroups(arrived.items, own.groups, props.groupCollapse !== false);
-    own.offset = arrived.more ? own.offset + SHORTS_BATCH : 0;
+    own.offset = arrived.more ? own.offset + limit : 0;
     if (!items.length) return;
     const at = start + (boundaries[Math.floor(Math.random() * boundaries.length)] ?? 0);
     const next = [...cuts, { at, total: arrived.total, items }];
@@ -398,9 +426,9 @@ function ShortsStrip({ cut, props, onOpen }: {
   return (
     <section data-shorts-strip="">
       <h2>
-        竖屏 <span data-shorts-count="">{`${cut.total.toLocaleString()} 个`}</span>
+        {t('catalog:shortsStrip.title')} <span data-shorts-count="">{t('catalog:shortsStrip.count', { count: cut.total })}</span>
         <button type="button" data-shorts-enter="" onClick={() => props.actions.openShorts()}>
-          <Icon name="gallery-vertical-end" /><span>进入沉浸模式</span>
+          <Icon name="gallery-vertical-end" /><span>{t('catalog:shortsStrip.enterImmersive')}</span>
         </button>
       </h2>
       <div ref={row} data-shorts-row="">
@@ -439,13 +467,13 @@ function HomeMix({ seed, layout, helpers, actions }: {
   const artwork = mixFace(seed, layout, false);
   return (
     <MixCard data-mix-seed={String(seed.id)} name={`Mix · ${label}`}
-      caption={`${helpers.displayName(seed, seed.name || '')}及相似作品`} count={0} badge="Mix" glyph wholeCard
+      caption={t('catalog:homeMix.caption', { name: helpers.displayName(seed, seed.name || '') })} count={0} badge="Mix" glyph wholeCard
       poster={null} artwork={artwork}
       artworkIdentity={size === 'small' ? artwork.html : mixFace(seed, { ...layout, size: 'small' }, false).html}
       relayoutArt={(root) => relayoutCovers(root, size)}
       ratio={cardRatio(seed, 'grid', layout)}
       flipImages={flipImages} faceHtml={(id) => faces.current.get(id) || ''} canFlip={actions.canFlip}
       faces={[]} onOpenEntity={actions.openEntity}
-      onOpen={(anchor) => actions.openMix(seed.id, anchor)} openLabel={`打开 Mix · ${label}`} />
+      onOpen={(anchor) => actions.openMix(seed.id, anchor)} openLabel={t('catalog:homeMix.open', { label })} />
   );
 }

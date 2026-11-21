@@ -1,28 +1,85 @@
-"""用户主动连接账号时使用的独立浏览器与本机 CDP 通道。"""
+"""经本机浏览器取页：Cloudflare 的验证由浏览器自己过，Peach 只让它打开地址、读回文档（ADR-0065）。
+
+FC2PPV-DB 与 JAVten 两站在 Cloudflare 的 JS 验证后面，任何不是浏览器的客户端都回 403。这里拉起
+用户机器上已装的 Chrome 或 Edge（带远程调试口、独立 profile），让它导航到要取的地址，验证页由它
+自己过掉，过了就把文档的最终地址、状态码与序列化后的 HTML 读回来。Cookie、User-Agent 与出口三者
+天然一致，不再要用户去贴 Cookie。不用页面内 `fetch()`：JAVten 搜索那一跳的 Location 是 `http://`，
+`fetch()` 跟到明文地址会被浏览器按混合内容拦下，导航则照常走。
+
+后台采集的浏览器有两种模式，在采集设置里选（`scraping_access.browser_headless`）：
+
+- 默认保留窗口：窗口开在屏幕外，自动过不了的验证登记到 `attention()`、等人点一下，但不把窗口挪上屏、
+  不顶到前台抢焦点；人从任务栏点开它（屏幕外的窗口只会被最小化），才放回屏幕内给人点。
+- 无窗口：`--headless=new`，不创建桌面窗口；验证自动过不了就清空验证页、报 `ChallengeUnsolved`，
+  由来源冷却接手，队列继续。部分站点会拒绝无窗口浏览器，那时同样按冷却处理。
+
+用户主动发起的浏览器登录（`attended`）始终开在屏幕内。
+
+不加依赖：与浏览器说话的是这里几十行的 RFC 6455 客户端，只跑本机回环、只发文本帧、不处理分片
+（CDP 的回包不分片）。浏览器进程由第一次请求拉起、空闲一段时间后关掉；一个进程只开一页，请求串行。
+macOS 是读者不采集，Linux 无显示器时 `find_browser` 返回空，来源退回带用户 Cookie 的直连路径。
+"""
 from __future__ import annotations
 
+import atexit
 import base64
 import json
+import logging
 import os
 import platform
 import shutil
 import socket
 import struct
 import subprocess
+import threading
 import time
 import urllib.request
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Mapping
 from urllib.parse import urlsplit, urlunsplit
 
+from .coded_text import Said
+from .content_words import BROWSER_CHALLENGE_MARKS
+from .http import HttpRequest, HttpResponse
+from .user_messages import UserFacingError
 
+LOGGER = logging.getLogger(__name__)
+
+#: 验证页转了多久还没自动过，就清掉该站 cookie 重载一次。Cloudflare 见到过期或判无效的 `cf_clearance`
+#: 会把浏览器扔进不给勾选框、也不放行的重试循环（页上只有转圈，`cf_chl_rc_ni` 计数涨），等多久、点哪里
+#: 都没用，删掉那两条 cookie 重载 5 秒就过（2026-09-25 用生产 profile 实测）；正常自动放行都在 10 秒内。
+RESET_SECONDS = 15.0
+#: 清 cookie 重载之后再等多久没过，就报验证未通过；调用方的 `timeout` 更短时按 `timeout`（见 `_load`）。
+#: 三次实测里最慢的一次是 25 秒（JAVten）。
+AUTO_SECONDS = 40.0
+#: 多久没有请求就关掉浏览器进程。`cf_clearance` 存在 profile 里，下次拉起接着用。
+IDLE_SECONDS = 600.0
+#: 站点的年龄门之类点一下就过的页：点完之后最多等多久跳回去。
+GATE_SECONDS = 15.0
+#: 窗口模式下后台采集窗口放的位置：屏幕外（系统会把它钳到 -16384）。自动能过的验证在那里照样过。窗口在
+#: 任务栏上有按钮，点它只会在屏幕外激活、最小化、再还原回屏幕外，所以验证页上用户把它最小化就当作要看。
+OFFSCREEN = (-32000, -32000)
+#: 窗口模式下等人点验证最多再等多久。到点就报 `ChallengeUnsolved`，来源按拒绝访问那一档冷却。
+CLICK_SECONDS = 120.0
+#: 用户主动登录、或从任务栏点开要点验证时的窗口位置与大小。
 ONSCREEN = (200, 100)
 WINDOW_SIZE = (1000, 800)
 #: 验证页的标记，前两条是 Cloudflare 的标题（英文与中文界面），后面是它脚本与文案里的固定字串。
-CHALLENGE_MARKS = ("Just a moment", "请稍候", "cf-chl-", "challenge-platform",
-                   "Verifying you are human", "Attention Required")
+CHALLENGE_MARKS = BROWSER_CHALLENGE_MARKS
+#: 导航时不下载的资源：图片、字体与媒体。要的是 HTML，验证页也不靠这些。
+BLOCKED_RESOURCES = ("*.jpg", "*.jpeg", "*.png", "*.gif", "*.webp", "*.avif", "*.ico",
+                     "*.woff", "*.woff2", "*.ttf", "*.mp4", "*.webm", "*.m3u8")
+#: 请求头里跟着进浏览器的只有两个。Accept-Language 挂在会话上，这一页之后每条请求都带（JAVten 按它决定
+#: 回日文原页还是译文页）；Referer 是解析器给的上一跳，只经 `Page.navigate` 的 `referrer` 落在主文档上：
+#: 挂在会话上的 Referer 会跟进子框架的导航，Chrome 把那种导航按 `ERR_BLOCKED_BY_CLIENT` 拦下，Turnstile
+#: 勾选框那个 iframe 就出不来，验证页只剩转圈、`cf_chl_rc_ni` 反复涨（2026-09-25 生产进程内对照实测）。
+#: Cookie、User-Agent 之类由浏览器自己填，其余的不带。
+SESSION_HEADERS = ("accept-language",)
+REFERRER_HEADER = "referer"
+
 _WINDOWS_CANDIDATES = (
-    # 优先 Chrome；账号连接始终使用 Peach 独立目录，禁用同步。
+    # Chrome 排前面：Edge 会拿 Windows 账号把新 profile 隐式登录并开同步，采集用的浏览记录会跟着
+    # 进用户的微软账号；Chrome 不会。只有 Edge 的机器用 InPrivate 拉起，见 `_Browser.start`。
     # 尾段写正斜杠：`Path` 在哪个平台都按它拆段，反斜杠在 macOS 上是文件名的一部分，测试找不到文件。
     ("ProgramFiles", "Google/Chrome/Application/chrome.exe"),
     ("ProgramFiles(x86)", "Google/Chrome/Application/chrome.exe"),
@@ -40,15 +97,31 @@ _LINUX_NAMES = ("google-chrome", "google-chrome-stable", "chromium", "chromium-b
 
 
 class BrowserUnavailable(RuntimeError):
-    """用户主动连接账号时浏览器未能启动或连接已断开。"""
+    """浏览器起不来或半路断了。调用方按连接失败重试，下一次会重新拉起。"""
+
+
+class BrowserLaunchFailed(UserFacingError, BrowserUnavailable):
+    """浏览器没能拉起来：原因写成 `errors.browserTransport.*` 的 code，登录窗口的状态会带给人看。
+
+    仍是 `BrowserUnavailable`，按它捕获的地方照旧接得住。请求半路断开、页面超时这类只进日志的
+    仍抛 `BrowserUnavailable` 或 `PageTimeout`，原文是英文。
+    """
+
+
+class ChallengeUnsolved(RuntimeError):
+    """验证页在限时内没过，人也没点。"""
+
+
+class PageTimeout(BrowserUnavailable):
+    """不是验证页的那一页在调用方给的 `timeout` 内没解析完。调用方按连接失败重试；浏览器没坏，进程留着。"""
 
 
 def find_browser(environ: dict[str, str] | None = None, system: str | None = None,
                  which: Callable[[str], str | None] = shutil.which) -> str | None:
-    """用户主动连接账号可用的 Chromium 系浏览器；没有就返回 None。
+    """这台机器上能驱动的 Chromium 系浏览器；没有就返回 None，来源退回 Cookie 那条路。
 
     `PEACH_BROWSER` 指定的可执行文件优先。Linux 上没有显示器（无 `DISPLAY` 也无 `WAYLAND_DISPLAY`）
-    时视为没有：用户需要可见窗口完成操作。
+    时视为没有：验证页要真的渲染，无头模式会被 Turnstile 认出来。
     """
     environ = os.environ if environ is None else environ
     system = platform.system() if system is None else system
@@ -100,18 +173,25 @@ class _WebSocket:
         while b"\r\n\r\n" not in head:
             chunk = self.sock.recv(4096)
             if not chunk:
-                raise ConnectionError("浏览器在握手时关闭了连接")
+                raise ConnectionError("browser closed the connection during the handshake")
             head += chunk
         if b" 101 " not in head.split(b"\r\n", 1)[0]:
-            raise ConnectionError("浏览器拒绝了调试连接")
+            raise ConnectionError("browser refused the debugging connection")
         self.buffer = head.split(b"\r\n\r\n", 1)[1]
         self.next_id = 0
+        #: 正在进行的 `call` 的期限；读取按剩余时间等。
+        self._deadline: float | None = None
 
     def _read(self, size: int) -> bytes:
         while len(self.buffer) < size:
+            if self._deadline is not None:
+                remaining = self._deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("browser did not answer the debugging command in time")
+                self.sock.settimeout(remaining)
             chunk = self.sock.recv(65536)
             if not chunk:
-                raise ConnectionError("浏览器关闭了调试连接")
+                raise ConnectionError("browser closed the debugging connection")
             self.buffer += chunk
         out, self.buffer = self.buffer[:size], self.buffer[size:]
         return out
@@ -143,20 +223,33 @@ class _WebSocket:
             if opcode == 0x1:
                 return data.decode()
             if opcode == 0x8:
-                raise ConnectionError("浏览器关闭了调试连接")
+                raise ConnectionError("browser closed the debugging connection")
 
     def call(self, method: str, timeout: float = 30.0, **params):
-        """发一条 CDP 命令，等它的回包；中途到的事件跳过。"""
+        """发一条 CDP 命令，等它的回包；中途到的事件跳过。
+
+        `timeout` 是整次调用的期限，不是单次读取的：页面一直推事件时，每次读取都等得到数据，
+        按单次读取计就永远等不到头。过期抛超时并关掉连接，连接上剩下的半截帧不能再用。
+        """
         self.next_id += 1
         wanted = self.next_id
-        self.sock.settimeout(timeout)
-        self.send(json.dumps({"id": wanted, "method": method, "params": params}))
-        while True:
-            message = json.loads(self.recv())
-            if message.get("id") == wanted:
-                if "error" in message:
-                    raise RuntimeError(f"{method}: {message['error'].get('message', message['error'])}")
-                return message.get("result", {})
+        deadline = time.monotonic() + timeout
+        try:
+            self.sock.settimeout(timeout)
+            self.send(json.dumps({"id": wanted, "method": method, "params": params}))
+            while True:
+                self._deadline = deadline
+                try:
+                    message = json.loads(self.recv())
+                finally:
+                    self._deadline = None
+                if message.get("id") == wanted:
+                    if "error" in message:
+                        raise RuntimeError(f"{method}: {message['error'].get('message', message['error'])}")
+                    return message.get("result", {})
+        except TimeoutError:
+            self.close()
+            raise
 
     def close(self) -> None:
         try:
@@ -175,59 +268,77 @@ def _targets(port: int) -> list[dict]:
 class _Browser:
     """一个浏览器进程与它唯一的那一页。
 
-    用户主动连接账号的窗口（PikPak 浏览器登录，ADR-0093）：开在屏幕内、不挡图片与字体
+    `attended` 为真时这是给人操作的窗口（PikPak 浏览器登录，ADR-0093）：开在屏幕内、不挡图片与字体
     （登录页和人机验证要靠它们渲染），Edge 也不用 InPrivate，因为登录要的 localStorage 必须落在 profile 里。
+    `headless` 只管后台采集：真时不创建窗口，假时窗口开在屏幕外。
     """
 
     def __init__(self, executable: str, profile: Path, flags: tuple[str, ...], *,
                  popen: Callable[..., subprocess.Popen] = subprocess.Popen,
-                 targets: Callable[[int], list[dict]] = _targets, sleep: Callable[[float], None] = time.sleep):
+                 targets: Callable[[int], list[dict]] = _targets, sleep: Callable[[float], None] = time.sleep,
+                 attended: bool = False, headless: bool = False):
         self.executable, self.profile, self.flags = executable, Path(profile), tuple(flags)
         self._popen, self._targets, self._sleep = popen, targets, sleep
+        self.attended = attended
+        self.headless = headless and not attended
         self.process: subprocess.Popen | None = None
         self.socket: _WebSocket | None = None
         self.window_id = None
+        #: 窗口是 Peach 收起来的（`place(visible=False)`）。这时还原位置已在屏幕内，用户点任务栏能自己唤出。
+        self.put_away = False
 
     def start(self) -> None:
         self.profile.mkdir(parents=True, exist_ok=True)
         port_file = self.profile / "DevToolsActivePort"
         port_file.unlink(missing_ok=True)
-        position = ONSCREEN
         command = [self.executable, f"--user-data-dir={self.profile}", "--remote-debugging-port=0",
                    # 带远程调试口时 Chromium 会把 `navigator.webdriver` 置真，Turnstile 据此拒绝连人工点击；关掉这个标记。
                    # 它是「不受支持的标志」，浏览器会在每个窗口顶上挂一条警告；`--test-type` 让它不挂。
                    "--disable-blink-features=AutomationControlled", "--test-type",
                    "--no-first-run", "--no-default-browser-check", "--disable-background-networking", "--disable-sync",
-                   f"--window-size={WINDOW_SIZE[0]},{WINDOW_SIZE[1]}",
-                   f"--window-position={position[0]},{position[1]}", *self.flags]
+                   f"--window-size={WINDOW_SIZE[0]},{WINDOW_SIZE[1]}", *self.flags]
+        if self.headless:
+            # 屏幕外坐标和最小化仍会创建 GUI，macOS 会把窗口放回桌面；headless 不创建窗口。
+            command.append("--headless=new")
+        else:
+            position = ONSCREEN if self.attended else OFFSCREEN
+            command.append(f"--window-position={position[0]},{position[1]}")
+        if "msedge" in Path(self.executable).name.lower() and not self.attended:
+            # Edge 会拿 Windows 账号把新 profile 隐式登录并开同步；InPrivate 窗口不登录、不同步。
+            # 代价是 Cookie 只活到进程退出，下次拉起再过一次验证（几秒）。
+            command.append("--inprivate")
         command.append("about:blank")
         try:
             self.process = self._popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                        stderr=subprocess.DEVNULL)
         except OSError as error:
-            raise BrowserUnavailable(f"浏览器没有启动：{error}") from None
+            raise BrowserLaunchFailed("errors.browserTransport.notStarted", {"error": str(error)}) from None
         port = self._wait_port(port_file)
         try:
             page = next(target for target in self._targets(port) if target.get("type") == "page")
             self.socket = _WebSocket(page["webSocketDebuggerUrl"])
             self.socket.call("Page.enable")
             self.socket.call("Network.enable")
+            if not self.attended:
+                self.socket.call("Network.setBlockedURLs", urls=list(BLOCKED_RESOURCES))
             self.window_id = self.socket.call("Browser.getWindowForTarget", targetId=page.get("id", "")).get("windowId")
         except (OSError, StopIteration, KeyError, ValueError, RuntimeError) as error:
             self.close()
-            raise BrowserUnavailable(f"浏览器的调试口没有接上：{error}") from None
+            raise BrowserLaunchFailed("errors.browserTransport.debugPortNotConnected",
+                                      {"error": str(error)}) from None
 
     def _wait_port(self, port_file: Path) -> int:
         for _ in range(300):
             if self.process is not None and self.process.poll() is not None:
-                raise BrowserUnavailable(f"浏览器启动后立即退出（{self.process.returncode}）")
+                raise BrowserLaunchFailed("errors.browserTransport.exitedAtStart",
+                                          {"code": self.process.returncode})
             if port_file.is_file():
                 lines = port_file.read_text(encoding="utf-8", errors="replace").splitlines()
                 if len(lines) >= 2 and lines[0].strip().isdigit():
                     return int(lines[0])
             self._sleep(0.1)
         self.close()
-        raise BrowserUnavailable("浏览器没有写出调试口")
+        raise BrowserLaunchFailed("errors.browserTransport.debugPortMissing")
 
     def alive(self) -> bool:
         return self.socket is not None and self.process is not None and self.process.poll() is None
@@ -236,7 +347,7 @@ class _Browser:
         assert self.socket is not None
         result = self.socket.call("Runtime.evaluate", timeout, expression=expression, returnByValue=True)
         if "exceptionDetails" in result:
-            raise RuntimeError(result["exceptionDetails"].get("text") or "页面脚本出错")
+            raise RuntimeError(result["exceptionDetails"].get("text") or "page script error")
         return result.get("result", {}).get("value")
 
     def navigate(self, url: str, *, referrer: str | None = None) -> None:
@@ -245,24 +356,51 @@ class _Browser:
         params = {"url": url, "referrer": referrer} if referrer else {"url": url}
         self.socket.call("Page.navigate", **params)
 
+    def extra_headers(self, headers: Mapping[str, str]) -> None:
+        """这一页之后每条请求都附带的头；传空字典就是清掉。"""
+        assert self.socket is not None
+        self.socket.call("Network.setExtraHTTPHeaders", headers=dict(headers))
+
+    def clear_cookies(self, url: str) -> int:
+        """删掉会随 `url` 发出去的全部 cookie（含 `cf_clearance`），返回条数。只动这一站，别的站的放行凭据留着。"""
+        assert self.socket is not None
+        cookies = self.socket.call("Network.getCookies", urls=[url]).get("cookies", [])
+        for cookie in cookies:
+            self.socket.call("Network.deleteCookies", name=cookie["name"], domain=cookie.get("domain", ""),
+                             path=cookie.get("path", "/"))
+        return len(cookies)
 
     def place(self, *, visible: bool) -> None:
-        """要人点时放回屏幕内并顶到前面，点完最小化。
+        """把窗口放回屏幕内，或最小化收起；无窗口的浏览器没有窗口可动。
 
-        位置与状态得分两步给：一条命令里同时带 `windowState` 与坐标，Chromium 只改状态不动位置
-        （2026-09-25 实测，窗口停在屏幕外原地）。收起来用最小化而不是再挪回屏幕外：负坐标会被系统
-        钳到边上，最小化则确定不占屏幕。
+        只有用户主动登录的窗口会顶到前台（`Page.bringToFront`）；后台采集的窗口放回屏幕内只发生在
+        用户自己从任务栏点开它之后，不替人抢焦点。位置与状态得分两步给：一条命令里同时带
+        `windowState` 与坐标，Chromium 只改状态不动位置（2026-09-25 实测，窗口停在屏幕外原地）。
+        收起来用最小化而不是再挪回屏幕外：负坐标会被系统钳到边上，最小化则确定不占屏幕。
         """
-        if self.socket is None or self.window_id is None:
+        if self.headless or self.socket is None or self.window_id is None:
             return
+        self.put_away = not visible
         if visible:
             self.socket.call("Browser.setWindowBounds", windowId=self.window_id, bounds={"windowState": "normal"})
             self.socket.call("Browser.setWindowBounds", windowId=self.window_id,
                              bounds={"left": ONSCREEN[0], "top": ONSCREEN[1],
                                      "width": WINDOW_SIZE[0], "height": WINDOW_SIZE[1]})
-            self.socket.call("Page.bringToFront")
+            if self.attended:
+                self.socket.call("Page.bringToFront")
         else:
             self.socket.call("Browser.setWindowBounds", windowId=self.window_id, bounds={"windowState": "minimized"})
+
+    def minimized_by_user(self) -> bool:
+        """窗口被最小化了、又不是 Peach 收的：屏幕外的窗口只有用户点任务栏按钮才会这样。
+
+        这种窗口的还原位置仍在屏幕外，点任务栏还原也看不见，只有最大化才上屏（2026-11-09 本机 Chrome 实测：
+        最小化再还原落回 -16384）。`place(visible=True)` 从这里出发能把它放回 (200, 100)。
+        """
+        if self.headless or self.socket is None or self.window_id is None or self.put_away:
+            return False
+        bounds = self.socket.call("Browser.getWindowBounds", windowId=self.window_id).get("bounds", {})
+        return bounds.get("windowState") == "minimized"
 
     def close(self) -> None:
         if self.socket is not None:
@@ -278,3 +416,275 @@ class _Browser:
             except subprocess.TimeoutExpired:
                 self.process.kill()
             self.process = None
+
+
+_STATE_SCRIPT = ("JSON.stringify({title: document.title, ready: document.readyState, url: location.href, "
+                 "head: document.documentElement.outerHTML.slice(0, 4000)})")
+#: 读回文档：状态码来自 Navigation Timing（Chromium 109 起有 `responseStatus`），HTML 是序列化后的 DOM。
+_DOCUMENT_SCRIPT = ("JSON.stringify({url: location.href, type: document.contentType, "
+                    "status: ((performance.getEntriesByType('navigation')[0] || {}).responseStatus || 0), "
+                    "html: '<!DOCTYPE html>\\n' + document.documentElement.outerHTML})")
+#: 点年龄门那颗按钮：文字匹配 `pattern`、没被禁用的第一颗。返回点了哪颗，没有就返回空串。
+_CLICK_SCRIPT = """(() => {
+  const pattern = new RegExp(%(pattern)s, 'i');
+  const target = [...document.querySelectorAll('button, a')].find((node) => !node.disabled && pattern.test(node.textContent));
+  if (!target) return '';
+  target.click();
+  return target.textContent.trim();
+})()"""
+
+_ATTENTION: dict[str, str] = {}
+_ATTENTION_LOCK = threading.Lock()
+
+
+def attention() -> list[str]:
+    """眼下哪些站的验证页等着人点（窗口模式）。`/healthz` 带出去供排查；无窗口模式不等人点，总是空。"""
+    with _ATTENTION_LOCK:
+        return list(_ATTENTION.values())
+
+
+def _set_attention(host: str, message: str | None) -> None:
+    with _ATTENTION_LOCK:
+        if message:
+            _ATTENTION[host] = message
+        else:
+            _ATTENTION.pop(host, None)
+
+
+class BrowserTransport:
+    """`HttpTransport`：让浏览器导航到地址，验证页由它过，过了读回文档。
+
+    一个实例管一个浏览器进程，请求串行，只发 GET。导航后每秒看一次标题、`readyState` 与页头：不是
+    验证页且 DOM 解析完就读文档；验证转了 `RESET_SECONDS` 没过，清掉该站 cookie 重载一次；重载后再等
+    自动时限没过：无窗口模式报 `ChallengeUnsolved`，由来源冷却处理；窗口模式登记 `attention`、再等
+    `click_seconds` 让人从任务栏点开窗口点一下，窗口不自己上屏、不抢前台。`headless` 每次拉起浏览器前问一遍，
+    设置改了之后下一条请求就换成新模式的浏览器。
+    各段时限怎么跟调用方的 `timeout` 配合见 `_load`。`gates` 是按主机登记的「点一下就过」的页（年龄门）：
+    落到那个路径就点匹配的按钮，等它跳回去。
+    """
+
+    def __init__(self, executable: str, profile: Path, flags: tuple[str, ...] = (), *,
+                 gates: Mapping[str, Mapping[str, str]] | None = None,
+                 popen: Callable[..., subprocess.Popen] = subprocess.Popen,
+                 targets: Callable[[int], list[dict]] = _targets,
+                 clock: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep,
+                 auto_seconds: float = AUTO_SECONDS, click_seconds: float = CLICK_SECONDS,
+                 idle_seconds: float = IDLE_SECONDS, headless: Callable[[], bool] = lambda: False):
+        self.executable, self.profile, self.flags = executable, Path(profile), tuple(flags)
+        self.gates = dict(gates or {})
+        self._popen, self._targets, self._clock, self._sleep = popen, targets, clock, sleep
+        self.auto_seconds, self.click_seconds, self.idle_seconds = auto_seconds, click_seconds, idle_seconds
+        self.headless = headless
+        #: 窗口模式下等过人点却没点过去的站。再撞验证只等自动时限、不再等人，直到哪次页面正常打开。
+        self._unsolved: set[str] = set()
+        self._lock = threading.RLock()
+        self._browser: _Browser | None = None
+        self._timer: threading.Timer | None = None
+        self._last_used = 0.0
+        atexit.register(self.close)
+
+    def __call__(self, request: HttpRequest, timeout: float, max_bytes: int) -> HttpResponse:
+        from .processing_traffic import unobserved
+        unobserved(Said('labels.browserTransport.trafficUnobserved'))
+        if request.method.upper() != "GET":
+            raise BrowserUnavailable("browser transport only sends GET")
+        with self._lock:
+            browser = self._ensure()
+            try:
+                state = self._load(browser, request.url, request.headers, timeout)
+                state = self._gate(browser, state)
+                document = json.loads(browser.evaluate(_DOCUMENT_SCRIPT, timeout=timeout + 10))
+            except (OSError, RuntimeError, ValueError, KeyError) as error:
+                if isinstance(error, (ChallengeUnsolved, PageTimeout)):
+                    raise
+                # 页面脚本、调试连接或进程任一处坏了都按断连处理：关掉，下一次请求重新拉起。
+                self._drop()
+                raise BrowserUnavailable(f"browser request failed: {error}") from None
+            finally:
+                self._touch()
+        body = document["html"].encode("utf-8")[:max_bytes + 1]
+        content_type = (document.get("type") or "text/html") + "; charset=utf-8"
+        return HttpResponse(int(document.get("status") or 200), {"content-type": content_type}, body,
+                            document.get("url") or state.get("url") or request.url)
+
+    def _ensure(self) -> _Browser:
+        headless = bool(self.headless())
+        if self._browser is None or not self._browser.alive() or self._browser.headless != headless:
+            self._drop()
+            browser = _Browser(self.executable, self.profile, self.flags, popen=self._popen,
+                               targets=self._targets, sleep=self._sleep, headless=headless)
+            browser.start()
+            self._browser = browser
+        return self._browser
+
+    def _state(self, browser: _Browser) -> dict:
+        try:
+            return json.loads(browser.evaluate(_STATE_SCRIPT))
+        except RuntimeError:
+            # 页面跳转的那一瞬执行环境被销毁，脚本会报错；这不是坏了，是还在加载。
+            return {"title": "", "ready": "loading", "url": "", "head": ""}
+
+    def _load(self, browser: _Browser, url: str, headers: Mapping[str, str], timeout: float) -> dict:
+        """导航到 `url`，等浏览器过完验证、DOM 解析完，返回那一刻的页面状态。
+
+        时限从导航那一刻起算，`timeout` 是调用方给这一条请求的预算（`SourceTransport` 已按本趟截止时间裁过）：
+
+        1. 一直没见到验证页：`timeout` 秒内要解析完，否则报 `PageTimeout`，调用方按连接失败处理。
+        2. 见到验证页：转了 `min(RESET_SECONDS, 自动时限)` 秒还没过，清掉该站 cookie 重新导航一次——过期的
+           `cf_clearance` 会让 Cloudflare 只转圈不放行也不给勾选框，清掉才出得来。重载后再等自动时限
+           `min(auto_seconds, timeout)` 秒，浏览器自己过了就照常返回。
+        3. 重载后仍没过：无窗口模式、或这一站在 `_unsolved` 里，就报 `ChallengeUnsolved`，清空验证页，由调用方
+           记录失败和来源冷却。窗口模式登记 `attention` 并从此刻起再等 `click_seconds`，这一段不受 `timeout`
+           约束；窗口留在屏幕外，不自己上屏、不抢前台。还没过就记进 `_unsolved` 并报 `ChallengeUnsolved`，
+           同一站之后不再等，直到哪次页面正常打开，所以一个站最多让整趟多等一次 `click_seconds`。
+        4. 窗口模式下，验证页上用户从任务栏点开了屏幕外的窗口（它只会被最小化）：当作要看，把窗口放回屏幕内，
+           按第 3 步开始等点击，`_unsolved` 里的站也一样。
+        """
+        host = urlsplit(url).hostname or url
+        referrer = next((value for key, value in headers.items() if key.lower() == REFERRER_HEADER), None)
+        browser.extra_headers({key: value for key, value in headers.items() if key.lower() in SESSION_HEADERS})
+        browser.navigate(url, referrer=referrer)
+        started = self._clock()
+        phase_started = started
+        auto_limit = min(self.auto_seconds, timeout)
+        reset_limit = min(RESET_SECONDS, auto_limit)
+        challenged_seen = False
+        cleared = False
+        waiting_since: float | None = None
+        placed = False
+
+        def wait_for_click(reason: str) -> float:
+            _set_attention(host, f"{host} verification needs a click; open the browser window from the taskbar")
+            LOGGER.warning("%s verification page %s; waiting for the user to click", host, reason)
+            return self._clock()
+
+        try:
+            while True:
+                # 先看窗口再读页面：最小化的窗口里页面脚本要好几秒才回（2026-11-09 本机 Chrome 实测），
+                # 先拉上屏，用户点完任务栏马上就能看到。
+                if not placed and challenged_seen and browser.minimized_by_user():
+                    browser.place(visible=True)
+                    placed = True
+                    if waiting_since is None:
+                        waiting_since = wait_for_click("restored from the taskbar by the user")
+                state = self._state(browser)
+                challenged = any(mark in state["head"] or mark in state["title"] for mark in CHALLENGE_MARKS)
+                # DOM 解析完（`interactive`）就够：验证页的标记在页头里，此时已经看得到；不等外部
+                # 资源全加载完——JAVten 作品页挂着统计脚本，到 `complete` 要 25 秒以上。
+                if state["ready"] in ("interactive", "complete") and not challenged and state["title"]:
+                    self._unsolved.discard(host)
+                    return state
+                challenged_seen = challenged_seen or challenged
+                now = self._clock()
+                elapsed = now - started
+                if waiting_since is not None:
+                    if now - waiting_since >= self.click_seconds:
+                        self._unsolved.add(host)
+                        raise ChallengeUnsolved(f"{host} verification did not pass within {int(elapsed)} s")
+                elif challenged_seen:
+                    waited = now - phase_started
+                    if not cleared and waited >= reset_limit:
+                        cleared = True
+                        count = browser.clear_cookies(url)
+                        LOGGER.info("%s verification page did not pass within %d s; cleared %d cookies for the site and reloaded", host, int(elapsed), count)
+                        browser.navigate(url, referrer=referrer)
+                        phase_started = now
+                    elif cleared and waited >= auto_limit:
+                        reason = self._no_click_wait(browser, host)
+                        if reason:
+                            raise ChallengeUnsolved(f"{host} verification did not pass automatically within "
+                                                    f"{int(elapsed)} s; {reason}")
+                        waiting_since = wait_for_click("did not pass automatically")
+                elif elapsed >= timeout:
+                    raise PageTimeout(f"{host} page did not open within {int(elapsed)} s")
+                self._sleep(1.0)
+        except ChallengeUnsolved:
+            # 放弃的验证页不能留在窗口里：它每 50 秒自己重载一次，`cf_chl_rc_ni` 跟着涨，在没人看的窗口里
+            # 一直重试（2026-09-25 生产进程内观察十分钟）。导航到空白页就停了；空白页没有上一跳。
+            browser.navigate("about:blank")
+            raise
+        finally:
+            if waiting_since is not None:
+                _set_attention(host, None)
+            if placed:
+                browser.place(visible=False)
+
+    def _no_click_wait(self, browser: _Browser, host: str) -> str:
+        """自动阶段过不了时不等人点的原因；该等就是空串。
+
+        无窗口模式没有窗口可点；窗口模式下这一站上次等过没人点（`_unsolved`），直到页面正常打开前不再等。
+        """
+        if browser.headless:
+            return "the background request was ended"
+        if host in self._unsolved:
+            return "nobody clicked it last time, so it does not wait again"
+        return ""
+
+    def _gate(self, browser: _Browser, state: dict) -> dict:
+        """落到站点的年龄门就替用户点那颗按钮，等它跳回要看的那一页。"""
+        parts = urlsplit(state.get("url") or "")
+        gate = self.gates.get(parts.hostname or "")
+        if not gate or gate["path"] not in parts.path:
+            return state
+        clicked = browser.evaluate(_CLICK_SCRIPT % {"pattern": json.dumps(gate["button"])})
+        if not clicked:
+            LOGGER.warning("%s age gate has no clickable button", parts.hostname)
+            return state
+        started = self._clock()
+        while self._clock() - started < GATE_SECONDS:
+            self._sleep(1.0)
+            state = self._state(browser)
+            if state["ready"] in ("interactive", "complete") and state["url"] and gate["path"] not in urlsplit(state["url"]).path:
+                return state
+        LOGGER.warning("%s age gate: clicked \"%s\" but the page did not navigate back", parts.hostname, clicked)
+        return state
+
+    def _touch(self) -> None:
+        self._last_used = self._clock()
+        if self._timer is not None:
+            self._timer.cancel()
+        self._timer = threading.Timer(self.idle_seconds, self._reap)
+        self._timer.daemon = True
+        self._timer.start()
+
+    def _reap(self) -> None:
+        with self._lock:
+            if self._browser is not None and self._clock() - self._last_used >= self.idle_seconds:
+                self._drop()
+
+    def _drop(self) -> None:
+        if self._browser is not None:
+            self._browser.close()
+            self._browser = None
+
+    def close(self) -> None:
+        with self._lock:
+            if self._timer is not None:
+                self._timer.cancel()
+                self._timer = None
+            self._drop()
+
+
+_SHARED: dict[tuple, BrowserTransport] = {}
+_SHARED_LOCK = threading.Lock()
+
+
+def shared(profile: Path, *, direct: bool, proxy: str,
+           gates: Mapping[str, Mapping[str, str]] | None = None,
+           headless: Callable[[], bool] | None = None) -> BrowserTransport | None:
+    """同一进程里按（profile，连接方式）复用一个浏览器；没有可用的浏览器或代理带凭据时返回 None。
+
+    `headless` 是采集设置里的后台模式（`scraping_access.browser_headless`），每次拉起浏览器时读。"""
+    executable = find_browser()
+    flags = proxy_flags(direct=direct, proxy=proxy)
+    if executable is None or flags is None:
+        return None
+    key = (str(profile), flags)
+    with _SHARED_LOCK:
+        if key not in _SHARED:
+            _SHARED[key] = BrowserTransport(executable, profile, flags, gates=gates)
+        else:
+            _SHARED[key].gates.update(gates or {})
+        if headless is not None:
+            _SHARED[key].headless = headless
+        return _SHARED[key]

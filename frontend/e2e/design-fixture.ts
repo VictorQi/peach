@@ -118,7 +118,7 @@ export async function openQualityGoals(browser: Browser, items: unknown[]): Prom
     status: 200, contentType: 'image/png', body: Buffer.from(PIXEL, 'base64'),
   }));
   await opened.page.reload({ waitUntil: 'load' });
-  await opened.page.locator('li[data-goal-id]').first().waitFor({ timeout: 15_000 });
+  await opened.page.locator('[data-goal-id]').first().waitFor({ timeout: 15_000 });
   await settle(opened.page);
   return opened;
 }
@@ -214,13 +214,13 @@ export async function openProcessing(
 /** 1280 的桌面视口比 `--board-content` 还窄，量不出「网格铺满、标题居中」这类差别。 */
 export const WIDE = { name: 'wide', width: 1600, height: 900, mobile: false };
 
-/** 垃圾文件页。计数行由垃圾队列那一页画，演示库里一条候选都没有时它照样在；壳铺的
- *  骨架（`[data-junk-count-skeleton]`）也有这两块，等的是页面接管之后的那一版。 */
+/** 垃圾文件页。筛选浮层由垃圾队列那一页画，演示库里一条候选都没有时它照样在；壳铺的
+ *  骨架（`[data-junk-count-skeleton]`）也有读数格与分类条，等的是页面接管之后的那一版。 */
 export const JUNK_COUNT = '#count > .peach-react:not([data-junk-count-skeleton])';
 export async function openJunk(browser: Browser): Promise<Visit> {
   const opened = await visit(browser, '/junk-files', WIDE);
   await expectBody(opened.page, '/junk-files', [
-    opened.page.locator(`${JUNK_COUNT} [data-collection-summary]`),
+    opened.page.locator(`${JUNK_COUNT} [data-catalog-readout]`),
     opened.page.locator(`${JUNK_COUNT} [data-junk-filters]`),
   ]);
   await settle(opened.page);
@@ -388,6 +388,7 @@ export interface CatalogFixture {
 export async function openCatalogFixture(
   browser: Browser,
   change: (payload: CatalogFixture, url: URL) => void,
+  { completeFirstPage = false }: { completeFirstPage?: boolean } = {},
 ): Promise<Visit> {
   const opened = await visit(browser, '/', DESKTOP);
   const baselines = new Map<string, CatalogFixture>();
@@ -403,7 +404,9 @@ export async function openCatalogFixture(
     const key = url.searchParams.get('orient') || '';
     let baseline = baselines.get(key);
     if (!baseline) {
-      const response = await route.fetch();
+      const fixtureUrl = new URL(url);
+      if (completeFirstPage && !fixtureUrl.searchParams.has('orient')) fixtureUrl.searchParams.set('limit', '60');
+      const response = await route.fetch({ url: fixtureUrl.href });
       baseline = await response.json() as CatalogFixture;
       baselines.set(key, baseline);
     }
@@ -497,12 +500,12 @@ export async function stubFollowManage(page: Page, { counts, extra = [] }: Follo
     ? route.fulfill(json({ status: 'idle' })) : route.fallback()));
 }
 
-/** 把 `/api/` 请求挂住，直到调用返回的 `release()`：首屏骨架停在屏幕上，量完再放行。
+/** 把 `/api/` 请求和指定的页面模块挂住，量完骨架后再调用 `release()`。
  *  先注册的桩照常生效：放行走 `fallback()`，交给它们或真实服务端。 */
-export async function holdApi(page: Page): Promise<() => void> {
+export async function holdApi(page: Page, pageModule?: (url: URL) => boolean): Promise<() => void> {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
-  await page.route((url) => url.pathname.startsWith('/api/') && url.pathname !== '/api/settings', async (route) => {
+  await page.route((url) => (url.pathname.startsWith('/api/') && url.pathname !== '/api/settings') || !!pageModule?.(url), async (route) => {
     await gate;
     await route.fallback().catch(() => {});
   });

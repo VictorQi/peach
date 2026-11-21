@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -120,7 +121,7 @@ class ErrorReportingTests(unittest.TestCase):
             self.assertEqual(summary['export']['status'], 'separate_export_required')
             self.assertGreater(summary['export']['compressed_bytes'], summary['export']['inline_limit_bytes'])
             self.assertNotIn('scraping/manifest.json', archive.namelist())
-            self.assertIn('按问题番号', summary['detail'])
+            self.assertIn('separately by code', summary['detail'])
         with zipfile.ZipFile(io.BytesIO(scraping_diagnostics.bundle_bytes(config, codes='ABC-123'))) as archive:
             self.assertIn('snapshots/0.json', archive.namelist())
 
@@ -372,6 +373,21 @@ class ErrorReportingTests(unittest.TestCase):
         with mock.patch.object(error_reporting, 'log_directories', return_value=[]), \
                 zipfile.ZipFile(io.BytesIO(support_bundle.bundle_bytes())) as archive:
             self.assertEqual(json.loads(archive.read('processing/library-processing.json'))['status'], 'paused')
+
+    def test_processing_export_carries_interrupted_jobs_and_update_pause_markers(self):
+        """恢复服务卡住时要看的两处：启动时接回的中断任务与更新暂停标记。"""
+        state = self.root / 'state'
+        (state / 'job-recovery').mkdir(parents=True)
+        (state / 'update-tasks' / 'active').mkdir(parents=True)
+        (state / 'job-recovery' / 'library-processing.json').write_text(json.dumps({
+            'body': {'stage': 'all', 'asset_ids': [60, 952]}, 'path': r'D:\private\movie.mp4'}), encoding='utf-8')
+        (state / 'update-tasks' / 'active' / 'abc.json').write_text('{"kind": "scan"}', encoding='utf-8')
+        with mock.patch.object(error_reporting, 'log_directories', return_value=[]), \
+                zipfile.ZipFile(io.BytesIO(support_bundle.bundle_bytes())) as archive:
+            recovery = json.loads(archive.read('processing/job-recovery/library-processing.json'))
+            self.assertEqual(recovery['body']['asset_ids'], [60, 952])
+            self.assertEqual(recovery['path'], '<path>')
+            self.assertEqual(json.loads(archive.read('processing/update-tasks/active/abc.json')), {'kind': 'scan'})
 
     def test_processing_export_reports_invalid_empty_and_over_limit_json_without_empty_members(self):
         state = self.root / 'state'
@@ -652,6 +668,18 @@ class ErrorReportingTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(any('line' in path.read_text(encoding="utf-8") for path in self.logs.glob("crash-*.log")))
 
+    def test_a_process_that_exits_cleanly_leaves_no_empty_logs_behind(self):
+        result = self.probe("from peach import error_reporting as e; e.install()")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(sorted(path.name for path in self.logs.glob("*-*.log")), [])
+
+    def test_a_process_that_logged_a_problem_keeps_its_event_log(self):
+        result = self.probe("import logging; from peach import error_reporting as e; e.install(); "
+                            "logging.getLogger('probe').warning('磁盘读不到')")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(list(self.logs.glob("errors-*.log"))), 1)
+        self.assertEqual(list(self.logs.glob("crash-*.log")), [])
+
     def test_exception_records_keep_codes_and_frames_without_source_lines_or_credentials(self):
         try:
             raise OSError(5, 'password=private-password https://example.com/?token=private-token')
@@ -803,12 +831,12 @@ class ErrorReportingTests(unittest.TestCase):
         for index, expected in ((0, "kemono"), (1, "unknown")):
             with self.subTest(index=index):
                 with mock.patch.object(error_reporting, "event") as emit:
-                    _report_follow_media_failure(item, ValueError("媒体条目格式不符"),
+                    _report_follow_media_failure(item, ValueError("unexpected media entry shape"),
                                                  operation="stream", phase="resolve", media_index=index)
                 self.assertEqual(emit.call_args.kwargs["resource_provider"], expected)
         del item.source_id
         with mock.patch.object(error_reporting, "event") as emit:
-            _report_follow_media_failure(item, ValueError("图片来源不可用"),
+            _report_follow_media_failure(item, ValueError("image source unavailable"),
                                          operation="image", phase="resolve")
         self.assertIsNone(emit.call_args.kwargs["source_id"])
 
@@ -890,7 +918,8 @@ class ErrorReportingTests(unittest.TestCase):
         remote.cookies.set(access.COOKIE, access.issue(empty_policy, 1)[0])
         self.assertEqual(remote.post(path, json={'message': 'anonymous'}).status_code, 401)
         policy = access.save(app.state.settings.access_path, 'valid-private-password')
-        remote.cookies.set(access.COOKIE, access.issue(policy, 1)[0])
+        sessions = access.Sessions(access.sessions_path(app.state.settings.access_path))
+        remote.cookies.set(access.COOKIE, access.issue(policy, 1, sessions)[0])
         self.assertEqual(remote.post(path, json={'message': 'phone failed'}).status_code, 200)
         self.assertEqual(remote.post(path, json={'message': 'phone failed'},
                                      headers={'Origin': 'https://other.example'}).status_code, 403)
@@ -1171,7 +1200,7 @@ class ErrorReportingTests(unittest.TestCase):
         self.assertTrue(record['listener_closed'])
         self.assertFalse(record['listener_rearm'])
 
-    def serve_with_accept_abort(self, *, bind_failure=None):
+    def serve_with_accept_abort(self, *, bind_failure=None, dualstack=False):
         """起真 uvicorn，让下一次重新挂 accept 时抛 WinError 64，走标准库 `_start_serving` 原路径。"""
         import functools
         import socket
@@ -1203,7 +1232,9 @@ class ErrorReportingTests(unittest.TestCase):
             loop = asyncio.get_running_loop()
             server = uvicorn.Server(uvicorn.Config(app, host='127.0.0.1', port=0, lifespan='off', log_config=None))
             loop.set_exception_handler(functools.partial(error_reporting.asyncio_handler, uvicorn_server=server))
-            serving = asyncio.create_task(server.serve())
+            # 双栈监听（`listening.bind`）：IPv4 连接从 `::` 套接字进来，重新监听后也要照样能连。
+            listener = socket.create_server(('::', 0), family=socket.AF_INET6, dualstack_ipv6=True)                 if dualstack else None
+            serving = asyncio.create_task(server.serve(sockets=[listener] if listener else None))
             while not server.started:
                 await asyncio.sleep(0.01)
             port = server.servers[0].sockets[0].getsockname()[1]
@@ -1241,6 +1272,13 @@ class ErrorReportingTests(unittest.TestCase):
         record = next(row for row in self.records() if row.get('classification') == 'accept-aborted')
         self.assertTrue(record['listener_closed'])
         self.assertTrue(record['listener_rearm'])
+
+    @unittest.skipUnless(os.name == 'nt' and socket.has_dualstack_ipv6(), 'Proactor 事件循环只在 Windows 上，且要有双栈')
+    def test_a_dual_stack_listener_still_accepts_ipv4_after_listening_again(self):
+        first, again, server, send = self.serve_with_accept_abort(dualstack=True)
+        self.assertEqual((first, again), (204, 204))
+        self.assertEqual(len(server.servers), 2)
+        send.assert_not_called()
 
     @unittest.skipUnless(os.name == 'nt', 'Proactor 事件循环只在 Windows 上')
     def test_a_listener_that_cannot_be_bound_again_stops_the_service_and_reports(self):
@@ -1374,7 +1412,7 @@ class DiagnosticExportJobTests(unittest.TestCase):
             started.set()
             release.wait(5)
             if options['cancelled']():
-                raise scraping_diagnostics.ExportCancelled('导出已取消')
+                raise scraping_diagnostics.ExportCancelled()
         with mock.patch.object(scraping_diagnostics, 'bundle_to', side_effect=generate):
             first = self.exports.start('scraping', 'ABC-123')
             try:

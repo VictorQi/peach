@@ -174,6 +174,14 @@ describe('扫描与采集控制', () => {
       const card = page.getByRole('region', { name: '扫描与采集', exact: true });
       const artifacts = path.resolve('..', 'build', 'agent-verification', 'processing-controls');
       await mkdir(artifacts, { recursive: true });
+      const chooseLibrary = async (index: number) => {
+        const trigger = card.locator('button[aria-labelledby~="processingLibraryLabel"]');
+        await trigger.scrollIntoViewIfNeeded();
+        await trigger.focus();
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        await trigger.press('ArrowDown');
+        await page.getByRole('option').nth(index).click();
+      };
       try {
         await card.waitFor();
         await settle(page);
@@ -182,20 +190,111 @@ describe('扫描与采集控制', () => {
         await card.getByRole('button', { name: '更多同步方式', exact: true }).click();
         const menu = page.getByRole('dialog', { name: '同步方式', exact: true });
         assert.equal(await menu.locator('svg').count(), 0);
-        assert.equal(await menu.getByRole('button').count(), 7);
+        assert.equal(await menu.getByRole('button').count(), 8);
         assert.equal(await menu.getByRole('group', { name: '日常同步', exact: true }).getByRole('button').count(), 2);
-        assert.equal(await menu.getByRole('group', { name: '全库维护', exact: true }).getByRole('button').count(), 5);
-        for (const label of ['仅发现新增文件', '补全待处理影片', '同步整个媒体库', '仅扫描文件', '补全资料与预览', '仅补全影片资料', '仅补全预览图']) {
+        assert.equal(await menu.getByRole('group', { name: '全库维护', exact: true }).getByRole('button').count(), 6);
+        for (const label of ['仅发现新增文件', '补全待处理影片', '同步所有媒体库', '仅扫描文件', '补全资料与预览', '仅补全影片资料', '仅补全封面', '仅补全预览图']) {
           await menu.getByText(label, { exact: true }).waitFor();
         }
-        await menu.getByText('为已入库的本地视频生成九宫格', { exact: true }).waitFor();
+        await menu.getByText('为已入库的视频生成九宫格，跳过流量保护目录', { exact: true }).waitFor();
         await menu.screenshot({ path: path.join(artifacts, `${viewport.name}-processing-menu.png`) });
         await menu.press('Escape');
+        await chooseLibrary(1);
+        await card.getByRole('button', { name: '同步新增文件', exact: true }).click();
+        const dialog = page.getByRole('dialog', { name: '同步新增文件', exact: true });
+        await dialog.waitFor();
+        await dialog.getByRole('region', { name: '磁盘预估' }).waitFor();
+        const columns = await dialog.locator('[aria-label="流量预估"], [aria-label="磁盘预估"]').evaluateAll(elements =>
+          elements.map(element => { const r = element.getBoundingClientRect(); return { top:r.top,left:r.left,right:r.right } }));
+        assert.equal(columns.length, 2);
+        assert.ok(Math.abs(columns[0].top - columns[1].top) < 1, JSON.stringify(columns));
+        assert.ok(columns[1].left >= columns[0].right, JSON.stringify(columns));
+        await dialog.getByText('网盘缓存占用待确认', { exact: true }).waitFor();
+        assert.match(await dialog.innerText(), /空间不足，还差/);
+        assert.match(await dialog.innerText(), /可能让电脑变慢/);
+        assert.equal(writes.length, 0);
+        const modalLayout = await layout(page);
+        assert.ok(modalLayout.scrollWidth <= modalLayout.viewportWidth, JSON.stringify(modalLayout));
+        assert.deepEqual(modalLayout.offenders, []);
+        await dialog.getByText('正在发现新增文件，数量和预估仍会变化…', { exact: true }).waitFor();
+        assert.equal(await dialog.getByRole('button', { name: '同步新增文件', exact: true }).isEnabled(), true);
+        await dialog.getByText('已发现视频 10 个', { exact: true }).waitFor();
+        const libraryLink = dialog.getByRole('link', { name: '管理媒体库', exact: true });
+        assert.equal(await libraryLink.getAttribute('href'), '/settings/library');
+        const footerOrder = await dialog.locator('.geist-modal-footer').evaluate(el => {
+          const link = el.querySelector('a')!.getBoundingClientRect();
+          const confirm = el.querySelector('[data-modal-confirm]')!.getBoundingClientRect();
+          return link.left < confirm.left && Math.abs((link.top + link.bottom) / 2 - (confirm.top + confirm.bottom) / 2) < 1;
+        });
+        assert.equal(footerOrder, true, '管理媒体库与主按钮在右下同排居中');
+        await libraryLink.click();
+        await page.waitForURL('**/settings/library');
+        assert.equal(await page.getByRole('dialog', { name: '同步新增文件', exact: true }).count(), 0);
+        const inventoryAtClose = inventoryReads;
+        await page.waitForTimeout(600);
+        assert.equal(inventoryReads, inventoryAtClose);
+        assert.equal(writes.length, 0);
+        await page.goto(new URL('/data-cleanup', page.url()).href);
+        await card.waitFor();
+        await chooseLibrary(1);
+        await card.getByRole('button', { name: '同步新增文件', exact: true }).click();
+        await dialog.getByText('正在发现新增文件，数量和预估仍会变化…', { exact: true }).waitFor();
+        inventoryComplete = true;
+        await dialog.getByText('预计流量', { exact: true }).waitFor();
+        await dialog.getByText('JAV 文件 60 个 · 不同番号 40 个', { exact: true }).waitFor();
+        const centering = await dialog.locator('.processing-effort-panel').evaluate(el => {
+          const panel = el.getBoundingClientRect();
+          const modal = el.closest('dialog')!.getBoundingClientRect();
+          return Math.abs((panel.left + panel.right) / 2 - (modal.left + modal.right) / 2);
+        });
+        assert.ok(centering < 1, `处理强度面板居中偏差 ${centering}px`);
+        const footer = await dialog.locator('.geist-modal-footer').evaluate(el => ({ display: getComputedStyle(el).display, padding: getComputedStyle(el).padding }));
+        assert.equal(footer.display, 'flex');
+        assert.notEqual(footer.padding, '0px');
+        const disclosure = dialog.getByRole('button', { name: /^(查看|收起)明细$/ });
+        assert.equal(await disclosure.getAttribute('aria-expanded'), 'false');
+        assert.equal(await disclosure.locator('svg').count(), 1);
+        await page.emulateMedia({ reducedMotion: 'no-preference' });
+        await dialog.getByText('查看明细', { exact: true }).click();
+        assert.equal(await disclosure.getAttribute('aria-expanded'), 'true');
+        const sources = dialog.locator('[data-processing-traffic] li');
+        assert.match(await sources.nth(0).innerText(), /示例网盘 A[\s\S]*代理/);
+        assert.match(await sources.nth(1).innerText(), /示例网盘 B[\s\S]*直连/);
+        assert.equal(await sources.locator('svg, img').count(), 2);
+        const modalBody = dialog.locator('.ui-geist-modal-body');
+        assert.equal(await modalBody.getAttribute('data-overlay-scrollbar'), 'true');
+        // 外框自己不滚，只有正文滚；外框不裁边（框里的下拉要能伸出去），所以是 visible 而不是 hidden。
+        assert.ok(!['auto', 'scroll'].includes(await dialog.evaluate(el => getComputedStyle(el).overflowY)), '弹窗外框自己不该滚');
+        assert.equal(await sources.first().evaluate(el => getComputedStyle(el.parentElement!).overflowY), 'visible',
+          '确认弹窗明细不应嵌套纵向滚动');
+        const frame = () => dialog.locator('.ui-geist-modal-header,.geist-modal-footer').evaluateAll(parts =>
+          parts.map(part => { const box = part.getBoundingClientRect(); return [box.top, box.bottom] }));
+        const stationary = await frame();
+        await modalBody.evaluate(el => { el.scrollTop = el.scrollHeight });
+        assert.deepEqual(await frame(), stationary, '正文滚动时标题或操作条移动');
+        await modalBody.evaluate(el => { el.scrollTop = 0 });
+        assert.equal((await dialog.innerText()).includes('未观测'), false);
+        assert.match(await dialog.innerText(), /约 6MB/);
+        await disclosure.click();
+        assert.equal(await disclosure.getAttribute('aria-expanded'), 'false');
+        assert.equal(await sources.first().isVisible(), false);
+        await disclosure.click();
+        assert.equal(await sources.first().isVisible(), true);
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        const startupSlider = dialog.getByRole('slider');
+        await startupSlider.press('End');
+        await dialog.screenshot({ path: path.join(artifacts, `${viewport.name}-high-startup.png`) });
+        await startupSlider.press('Home');
+        await dialog.screenshot({ path: path.join(artifacts, `${viewport.name}-startup.png`) });
+        await dialog.press('Escape');
+        await dialog.waitFor({ state: 'hidden' });
+        await chooseLibrary(0);
+        const inventoryBeforeQuickScan = inventoryReads;
         await card.getByRole('button', { name: '同步新增文件', exact: true }).click();
         await card.getByText('预计剩余约 20–40 分钟（粗估）', { exact: true }).waitFor();
         assert.equal(await page.getByRole('dialog', { name: '同步新增文件', exact: true }).count(), 0);
         assert.deepEqual(writes[0], { incremental: true });
-        assert.equal(inventoryReads, 0, '直接启动不扫描一遍文件来填确认框');
+        assert.equal(inventoryReads, inventoryBeforeQuickScan, '直接启动不扫描一遍文件来填确认框');
         const startedLayout = await layout(page);
         assert.ok(startedLayout.scrollWidth <= startedLayout.viewportWidth, JSON.stringify(startedLayout));
         assert.deepEqual(startedLayout.offenders, []);
@@ -209,7 +308,7 @@ describe('扫描与采集控制', () => {
         assert.equal(await pause.innerText(), '');
         assert.equal(await pause.locator('svg').count(), 1);
         await dock.getByRole('button', { name: '暂停', exact: true }).click();
-        await dock.getByText('正在暂停，当前步骤结束后暂停', { exact: true }).waitFor();
+        await dock.getByText('当前步骤结束后暂停', { exact: true }).waitFor();
         state.status = 'paused';
         const resume = dock.getByRole('button', { name: '继续', exact: true });
         await resume.waitFor();
@@ -227,7 +326,7 @@ describe('扫描与采集控制', () => {
         const cancelTask = dock.getByRole('button', { name: '取消任务', exact: true });
         assert.equal(await cancelTask.innerText(), '');
         await cancelTask.click();
-        const confirm = page.getByRole('dialog', { name: '取消任务「扫描与采集」', exact: true });
+        const confirm = page.getByRole('alertdialog', { name: '取消任务「扫描与采集」', exact: true });
         await confirm.getByRole('button', { name: '取消', exact: true }).click();
         await confirm.waitFor({ state: 'hidden' });
         assert.equal(writes.length, sent);

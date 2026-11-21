@@ -118,6 +118,21 @@ class WindowsShapeTests(_ScanCase):
 class PosixShapeTests(_ScanCase):
     """macOS：账本里写 `R:\\media\\...`，遍历的是挂载点，读取侧按挂载表翻回去。"""
 
+    def test_webm_is_registered_as_video_and_full_scan_repairs_existing_rows(self):
+        options = dict(declared_roots={'local': ('R:\\media',)}, mounts={'local': (self.media,)}, windows=False)
+        (self.media / 'clip.WeBM').write_bytes(b'webm')
+        self._scan('R:\\media', **options)
+        with closing(sqlite3.connect(self.db)) as connection, connection:
+            asset_id, medium = connection.execute(
+                "SELECT id,medium FROM asset WHERE name='clip.WeBM'").fetchone()
+            self.assertEqual(medium, 'video')
+            connection.execute("UPDATE asset SET medium='other',rating=5 WHERE id=?", (asset_id,))
+        self._scan('R:\\media', **options)
+        with closing(sqlite3.connect(self.db)) as connection:
+            self.assertEqual(connection.execute(
+                "SELECT id,medium,rating FROM asset WHERE name='clip.WeBM'").fetchall(),
+                [(asset_id, 'video', 5)])
+
     def test_file_identity_preserves_id_and_personal_fields_after_external_rename(self):
         options = dict(declared_roots={'local': ('R:\\media',)}, mounts={'local': (self.media,)}, windows=False)
         first, _ = self._scan('R:\\media', **options)
@@ -164,31 +179,29 @@ class PosixShapeTests(_ScanCase):
             self._scan('R:\\media', **options)
             self.assertEqual(pending(self.db), [])
 
-    def test_full_scan_queues_changed_videos_without_reprocessing_unchanged_files(self):
-        from peach.library_new_assets import pending, remember
-        options = dict(declared_roots={'local': ('R:\\media',)}, mounts={'local': (self.media,)}, windows=False)
-        self._scan('R:\\media', **options)
-        original = pending(self.db)
-        remember(self.db, completed=original)
-        video = self.media / '创作者/sub/a.mp4'
-        stamp = video.stat().st_mtime_ns
-        os.utime(video, ns=(stamp, stamp + 1_000_000))
-        self._scan('R:\\media', **options)
-        self.assertEqual(pending(self.db), original)
-        remember(self.db, completed=original)
-        self._scan('R:\\media', **options)
-        self.assertEqual(pending(self.db), [])
+    def test_committed_scan_batch_is_pending_when_the_next_checkpoint_is_interrupted(self):
+        from peach.file_identity import FileIdentityIndex
+        from peach.library_new_assets import pending
+        from peach.library_processing import _initial_processing_scope
 
-    def test_a_reappearing_watched_video_is_queued_even_when_its_version_is_unchanged(self):
-        from peach.library_new_assets import pending, remember
         options = dict(declared_roots={'local': ('R:\\media',)}, mounts={'local': (self.media,)}, windows=False)
-        self._scan('R:\\media', **options)
-        original = pending(self.db)
-        remember(self.db, completed=original)
-        with closing(sqlite3.connect(self.db)) as connection, connection:
-            connection.execute("UPDATE asset SET disposal='vanished' WHERE medium='video'")
-        scan.ingest_path(self.db, 'local', 'R:\\media\\创作者\\sub\\a.mp4', **options)
-        self.assertEqual(pending(self.db), original)
+        original = FileIdentityIndex.save
+
+        def stop_after_video_commit(index):
+            if 'video' in self._paths().values():
+                raise SystemExit()
+            return original(index)
+
+        with patch.object(FileIdentityIndex, 'save', stop_after_video_commit), self.assertRaises(SystemExit):
+            self._scan('R:\\media', **options)
+        result, _ = self._scan('R:\\media', **options, new_only=True)
+        queued = pending(self.db)
+        self.assertEqual(len(queued), 1)
+        self.assertTrue(set(result.new_ids).isdisjoint(queued))
+        self.assertEqual(
+            _initial_processing_scope(self.db, None, None, True, {'incremental_ids': []}),
+            (None, queued),
+        )
 
     def test_windows_mount_mapping_has_the_same_ledger_path_contract(self):
         options = dict(declared_roots={'local': ('R:\\media',)}, mounts={'local': (self.media,)}, windows=True)
@@ -299,7 +312,7 @@ class PosixShapeTests(_ScanCase):
             saved.clear()
             saved.update(json.loads(json.dumps(state)))
             if state.get('files') == 2:
-                raise InterruptedError('模拟服务退出')
+                raise InterruptedError('simulated service exit')
         options = dict(declared_roots={'local': ('R:\\media',)},
                        mounts={'local': (self.media,)}, windows=False)
         with self.assertRaises(InterruptedError):
@@ -344,7 +357,7 @@ class PosixShapeTests(_ScanCase):
         def save(state):
             saved.update(json.loads(json.dumps(state)))
             if state.get('cursor'):
-                raise InterruptedError('模拟文件批次提交后退出')
+                raise InterruptedError('simulated exit after a file batch commit')
         options = dict(declared_roots={'local': ('R:\\media',)}, mounts={'local': (self.media,)}, windows=False)
         with patch.object(scan, 'BATCH_SIZE', 1), self.assertRaises(InterruptedError):
             self._scan('R:\\media', save_checkpoint=save, **options)
@@ -419,6 +432,52 @@ class PosixShapeTests(_ScanCase):
             scan.ledger_root_for("local", "/somewhere/else", declared_roots=self.DECLARED,
                                  mounts={"local": (str(self.media),)}, windows=False)
         self.assertIn("挂载点", str(caught.exception))
+
+    def test_a_directory_outside_every_root_is_refused_before_touching_the_ledger(self):
+        """#591：Windows 挂载表为空时曾在取挂载表时越界（IndexError）。"""
+        with self.assertRaises(scan.ScanTargetError) as caught:
+            self._scan(r"Q:\elsewhere", declared_roots=self.DECLARED, mounts={}, windows=True)
+        self.assertIn("不在任何已配置的媒体目录下", str(caught.exception))
+        self.assertEqual(self._paths(), {})
+
+
+class CaseOnlyRenameTests(_ScanCase):
+    """只改大小写的文件与目录（#487）：扫描跟随磁盘上的实际写法，资产 id 与个人资料不变。"""
+
+    options = dict(declared_roots={'local': (r'R:\media',)}, windows=False)
+
+    def scan(self):
+        return self._scan(r'R:\media', **self.options, mounts={'local': (self.media,)})
+
+    def video(self):
+        with closing(sqlite3.connect(self.db)) as connection:
+            return connection.execute("SELECT id,path,name,rating FROM asset WHERE medium='video'").fetchall()
+
+    def test_a_file_renamed_only_in_case_keeps_its_id_and_follows_the_new_spelling(self):
+        self.scan()
+        with closing(sqlite3.connect(self.db)) as connection, connection:
+            asset_id = connection.execute("SELECT id FROM asset WHERE medium='video'").fetchone()[0]
+            connection.execute('UPDATE asset SET rating=4 WHERE id=?', (asset_id,))
+        sub = self.media / '创作者' / 'sub'
+        os.rename(sub / 'a.mp4', sub / 'A.mp4')
+        self.scan()
+        self.assertEqual(self.video(), [(asset_id, r'R:\media\创作者\sub\A.mp4', 'A.mp4', 4)])
+
+    def test_a_directory_renamed_only_in_case_moves_the_files_under_it(self):
+        self.scan()
+        asset_id = self.video()[0][0]
+        os.rename(self.media / '创作者' / 'sub', self.media / '创作者' / 'SUB')
+        self.scan()
+        self.assertEqual([row[:2] for row in self.video()], [(asset_id, r'R:\media\创作者\SUB\a.mp4')])
+
+    def test_both_spellings_present_on_a_case_sensitive_disk_are_left_alone(self):
+        sub = self.media / '创作者' / 'sub'
+        (sub / 'A.mp4').write_bytes(b'1' * 10)
+        if not (sub / 'a.mp4').exists() or (sub / 'A.mp4').samefile(sub / 'a.mp4'):
+            self.skipTest('文件系统不区分大小写，两种写法是同一个文件')
+        self.scan()
+        paths = sorted(row[1] for row in self.video())
+        self.assertIn(r'R:\media\创作者\sub\a.mp4', paths)
 
 
 class SidecarTests(_ScanCase):
@@ -605,6 +664,20 @@ class ScanTargetTests(unittest.TestCase):
         self.assertIn("nas", str(caught.exception))
         self.assertIn("local", str(caught.exception))
 
+    def test_a_subdirectory_maps_to_its_own_root_without_mounts(self):
+        """#591：Windows 挂载表为空、来源有多个根时，根下子目录原样作为扫描目录。"""
+        declared = {"local": (r"R:\media", r"S:\more")}
+        self.assertEqual(scan.walk_root_for("local", r"S:\more\演员\作品", declared_roots=declared,
+                                            mounts={}, windows=True), Path(r"S:\more\演员\作品"))
+
+    def test_a_directory_outside_every_root_is_a_readable_error_not_an_index_error(self):
+        """#591：不在任何根下时报可读错误；挂载表非空时也不能落到最后一个挂载点上。"""
+        for mounts, windows in (({}, True), ({"local": ("/mnt/media",)}, False)):
+            with self.subTest(mounts=mounts), self.assertRaises(scan.ScanTargetError) as caught:
+                scan.walk_root_for("local", r"Q:\elsewhere\作品", declared_roots=self.DECLARED,
+                                   mounts=mounts, windows=windows)
+            self.assertIn("不在任何已配置的媒体目录下", str(caught.exception))
+
     def test_medium_is_decided_by_extension(self):
         self.assertEqual([scan.medium_of(name) for name in
                           ("a.MP4", "b.webp", "c.flac", "d.7z", "e.nfo")],
@@ -615,7 +688,14 @@ class NasDirectoryTests(unittest.TestCase):
     def test_system_directories_are_skipped_and_similarly_named_files_are_kept(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
-            for name in ("#recycle", "#RECYCLE", "@eaDir", "@snapshot", "normal"):
+            for name in ("#recycle", "#RECYCLE", "@eaDir", "@snapshot", "@Recycle",
+                         "@Recently-Snapshot", ".@__thumb", ".@__qini", ".@upload_cache", ".streams",
+                         ".zfs", ".snapshot", ".snapshots", "~snapshot", ".recycle", ".Trash", ".Trash-1000",
+                         ".TemporaryItems", ".AppleDouble", ".AppleDB", ".@#local",
+                         ".AppleDesktop", "Network Trash Folder", ".Spotlight-V100", ".Trashes",
+                         ".fseventsd", "__MACOSX", "$Recycle.Bin", "System Volume Information",
+                         ".DocumentRevisions-V100", ".DocumentRevisions-V100-bad-1",
+                         ".wfm_upload123", "normal", "@creator", ".hidden"):
                 folder = root / name
                 folder.mkdir(exist_ok=True)
                 (folder / "sample.mp4").write_bytes(b"x")
@@ -623,7 +703,126 @@ class NasDirectoryTests(unittest.TestCase):
                 (root / name).write_bytes(b"x")
             files = [Path(entry.path).relative_to(root).as_posix()
                      for _, entries in scan._walk(root) for entry in entries]
-        self.assertEqual(set(files), {"normal/sample.mp4", "@video.mp4", "#recycle.mp4"})
+        self.assertEqual(set(files), {"normal/sample.mp4", "@creator/sample.mp4", ".hidden/sample.mp4",
+                                      "@video.mp4", "#recycle.mp4"})
+
+
+class LedgerReopenTests(_ScanCase):
+    """#138：开写事务时打不开事务侧文件，重开连接重试当前批次，而不是整轮失败。"""
+
+    OPTIONS = dict(declared_roots={'local': ('R:\\media',)}, windows=False)
+
+    def test_a_batch_that_cannot_open_the_journal_is_retried_on_a_fresh_connection(self):
+        real = scan._upsert_records
+        calls = []
+
+        def flaky(connection, *args, **kwargs):
+            calls.append(connection)
+            inserted = real(connection, *args, **kwargs)
+            if len(calls) == 1:
+                raise sqlite3.OperationalError("unable to open database file")
+            return inserted
+
+        with patch.object(scan, '_upsert_records', flaky), patch.object(scan.time, 'sleep') as slept, \
+                self.assertLogs('peach.scan', level='WARNING') as logs:
+            result, _ = self._scan('R:\\media', mounts={'local': (self.media,)}, **self.OPTIONS)
+        self.assertEqual(result.files, 3)
+        self.assertEqual(len(result.new_ids), 3)
+        self.assertIsNot(calls[0], calls[1])
+        slept.assert_called_once_with(scan.REOPEN_DELAYS[0])
+        self.assertIn('retrying', logs.output[0])
+        self.assertEqual(len(self._paths()), 3)
+
+    def test_other_operational_errors_and_exhausted_retries_are_raised(self):
+        for message, attempts in (("database is locked", 1), ("unable to open database file",
+                                                               len(scan.REOPEN_DELAYS) + 1)):
+            with self.subTest(message), patch.object(
+                    scan, '_upsert_records', side_effect=sqlite3.OperationalError(message)) as upsert, \
+                    patch.object(scan.time, 'sleep'), self.assertLogs('peach.scan', level='WARNING') as logs:
+                with self.assertRaises(sqlite3.OperationalError):
+                    self._scan('R:\\media', mounts={'local': (self.media,)}, **self.OPTIONS)
+                scan.LOGGER.warning('marker')
+            self.assertEqual(upsert.call_count, attempts)
+            self.assertEqual(len(logs.output), attempts)
+
+    def test_a_journal_mode_other_than_wal_is_logged(self):
+        with self.assertLogs('peach.scan', level='WARNING') as logs:
+            scan._open_ledger(':memory:').close()
+        self.assertIn('instead of wal', logs.output[0])
+
+
+class UnreadableRootTests(unittest.TestCase):
+    def test_an_unreadable_root_raises_while_unreadable_subdirectories_are_skipped(self):
+        """#693：根目录读不了就什么都没枚举到，不能当成空来源；子目录读不了照旧跳过。"""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            (root / "bad").mkdir()
+            (root / "good").mkdir()
+            (root / "good" / "a.mp4").write_bytes(b"x")
+            refused = {str(root / "bad")}
+
+            def read_directory(directory):
+                if directory in refused:
+                    raise PermissionError(13, "denied", directory)
+                with os.scandir(directory) as entries:
+                    return list(entries)
+
+            errors = []
+            files = [entry.name for _, entries in scan._walk(root, read_directory=read_directory,
+                                                              onerror=errors.append) for entry in entries]
+            self.assertEqual((files, len(errors)), (["a.mp4"], 1))
+            refused.add(str(root))
+            with self.assertRaises(scan.ScanRootUnreadable) as caught:
+                list(scan._walk(root, read_directory=read_directory, onerror=errors.append))
+            self.assertEqual(caught.exception.code, "errors.scan.rootUnreadable")
+            self.assertEqual(len(errors), 1)
+
+
+class SystemMetadataTests(_ScanCase):
+    def test_a_system_directory_scan_root_is_skipped_before_mapping_or_listing(self):
+        options = dict(declared_roots={'local': (r'R:\media\.snapshots',)},
+                       mounts={'local': (self.media,)}, windows=False)
+        progress = []
+        with patch.object(scan, 'walk_root_for') as mapped, patch.object(scan, '_walk') as walked:
+            result, output = self._scan(r'R:\media\.snapshots', **options,
+                                       progress=lambda files, total: progress.append((files, total)))
+        self.assertEqual((result.files, result.total_bytes, result.gone), (0, 0, 0))
+        self.assertEqual(progress, [(0, 0)])
+        self.assertIn('0 文件', output)
+        mapped.assert_not_called()
+        walked.assert_not_called()
+        self.assertEqual(self._paths(), {})
+        with self.assertRaises(scan.ScanTargetError):
+            self._scan(r'R:\media\.snapshots', declared_roots={})
+
+    def test_system_walk_roots_and_resumed_directories_are_not_listed(self):
+        system = self.media / '.Trash-1000'
+        system.mkdir()
+        (system / 'movie.mp4').write_bytes(b'media')
+        with patch.object(scan.os, 'scandir') as listed:
+            self.assertEqual(list(scan._walk(system)), [])
+            self.assertEqual(list(scan._walk(self.media, [str(system)])), [])
+        listed.assert_not_called()
+
+    def test_full_scan_and_direct_ingest_share_metadata_file_rules(self):
+        names = ('desktop.ini', 'Thumbs.db', '.DS_Store', '._movie.mp4', '.SYNOPPSDB123',
+                 '.wfm_upload123.mp4', 'movie.mp4@SynoEAStream')
+        for name in names:
+            (self.media / name).write_bytes(b'metadata')
+        (self.media / '@creator').mkdir()
+        (self.media / '@creator' / '.hidden.mp4').write_bytes(b'media')
+        options = dict(declared_roots={'local': (r'R:\media',)},
+                       mounts={'local': (self.media,)}, windows=False)
+        for name in names:
+            result = scan.ingest_path(self.db, 'local', str(PureWindowsPath(r'R:\media', name)), **options)
+            self.assertEqual((result.found, result.sidecar, result.asset_id), (True, True, None), name)
+        self.assertEqual(self._paths(), {})
+        cover = scan.ingest_path(self.db, 'local', r'R:\media\cover.jpg', **options)
+        self.assertEqual((cover.found, cover.sidecar), (True, False))
+        result, _ = self._scan(r'R:\media', **options)
+        self.assertEqual(result.files, 4)
+        self.assertIn(r'R:\media\@creator\.hidden.mp4', self._paths())
+        self.assertTrue(all((self.media / name).is_file() for name in names))
 
 
 if __name__ == "__main__":

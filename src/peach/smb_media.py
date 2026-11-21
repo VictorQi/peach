@@ -16,6 +16,9 @@ from pathlib import PureWindowsPath
 from types import SimpleNamespace
 from urllib.parse import quote, unquote, urlsplit
 
+from .os_errors import CodedOSError
+from .user_messages import UserPermissionError, UserValueError
+
 
 def address(value: str) -> tuple[str, str, tuple[str, ...], int]:
     """解析不含凭据的共享地址；路径始终限定在一个共享内。"""
@@ -23,15 +26,15 @@ def address(value: str) -> tuple[str, str, tuple[str, ...], int]:
         parsed = urlsplit(value)
         port = parsed.port or 445
     except ValueError:
-        raise ValueError("SMB 地址或端口无效") from None
+        raise UserValueError("errors.smbMedia.addressInvalid") from None
     if (parsed.scheme != 'smb' or not parsed.hostname or parsed.username is not None
             or parsed.password is not None or parsed.query or parsed.fragment
             or not 1 <= port <= 65535 or any(ord(c) < 33 or c in '\\/%' for c in parsed.hostname)):
-        raise ValueError("请填写 smb://服务器/共享/目录，账号和密码单独填写")
+        raise UserValueError("errors.smbMedia.addressFormat")
     parts = tuple(unquote(part) for part in parsed.path.split('/') if part)
     if not parts or any(part in {'.', '..'} or any(c in part for c in '\\/:\x00')
                         or any(ord(c) < 32 for c in part) for part in parts):
-        raise ValueError("SMB 地址需要共享名，目录不能包含上级目录或路径分隔符")
+        raise UserValueError("errors.smbMedia.sharePathInvalid")
     return parsed.hostname, parts[0], parts[1:], port
 
 
@@ -72,7 +75,7 @@ def save_credentials(config, sources):
                         if value.get('transport') == 'smb'
                         and canonical(value['mount']) == canonical(row['path'])), None)
         if root_id is None:
-            raise ValueError('SMB 媒体目录身份无效')
+            raise UserValueError('errors.smbMedia.rootIdentityInvalid')
         key = 'smb-' + root_id
         previous = store.load(key)
         values = dict(previous.values) if previous else {}
@@ -84,7 +87,7 @@ def save_credentials(config, sources):
         username = row.get('smb_username', values.get('username', ''))
         password = row.get('smb_password', '')
         if not isinstance(username, str) or not isinstance(password, str):
-            raise ValueError('SMB 账号和密码必须是文字')
+            raise UserValueError('errors.smbMedia.credentialsNotText')
         if username != values.get('username', ''):
             values.pop('password', None)
         values['username'] = username
@@ -177,7 +180,7 @@ class SmbResource:
         from dataclasses import replace
         parts = tuple(relative)
         if any(part in {'.', '..'} or any(c in part for c in '/\\:\x00') for part in parts):
-            raise ValueError('媒体目录越界')
+            raise UserValueError('errors.smbMedia.outsideRoot')
         return replace(self, relative=parts)
 
     def joinpath(self, *parts):
@@ -219,12 +222,13 @@ class SmbResource:
     def remote_parts(self):
         return (*address(self.uri)[2], *self.relative)
 
-    def stat(self):
+    def stat(self, *, with_identity: bool = False):
         transport = self._transport()
         try:
-            info = transport.stat(self.remote_parts)
+            info = transport.stat(self.remote_parts, with_identity=True) if with_identity else transport.stat(self.remote_parts)
             return SimpleNamespace(st_size=info.size, st_mtime=info.mtime, st_mtime_ns=info.mtime_ns,
-                                   st_mode=stat.S_IFDIR if info.is_dir else stat.S_IFREG, is_dir=info.is_dir)
+                                   st_mode=stat.S_IFDIR if info.is_dir else stat.S_IFREG, is_dir=info.is_dir,
+                                   st_ino=info.file_index if with_identity else 0, st_dev=self.uri)
         finally:
             transport.close()
 
@@ -236,9 +240,9 @@ class SmbResource:
 
     def open(self, mode='rb'):
         if mode not in ('rb', 'wb', 'xb', 'ab', 'r+b'):
-            raise ValueError('SMB 文件模式无效')
+            raise ValueError(f'unsupported SMB file mode: {mode}')
         if mode != 'rb' and not self.relative:
-            raise PermissionError('不能写入声明的媒体根目录')
+            raise UserPermissionError('errors.smbMedia.rootNotWritable')
         transport = self._transport()
         try:
             handle = (transport.open(self.remote_parts) if mode == 'rb' else
@@ -265,16 +269,16 @@ class SmbResource:
 
     def rename(self, target):
         if not isinstance(target, SmbResource) or target.root_id != self.root_id or target.uri != self.uri:
-            raise OSError(errno.EXDEV, 'SMB 改名仅支持同一媒体根目录')
+            raise CodedOSError(errno.EXDEV, 'errors.smbMedia.renameAcrossRoots')
         if not self.relative or not target.relative:
-            raise PermissionError('不能修改声明的媒体根目录')
+            raise UserPermissionError('errors.smbMedia.rootNotRenamable')
         with self._transport() as transport:
             transport.rename(self.remote_parts, target.remote_parts)
         return target
 
     def unlink(self, missing_ok=False):
         if not self.relative:
-            raise PermissionError('不能删除声明的媒体根目录')
+            raise UserPermissionError('errors.smbMedia.rootNotDeletable')
         try:
             with self._transport() as transport:
                 transport.unlink(self.remote_parts)
@@ -284,7 +288,7 @@ class SmbResource:
 
     def rmdir(self):
         if not self.relative:
-            raise PermissionError('不能删除声明的媒体根目录')
+            raise UserPermissionError('errors.smbMedia.rootNotDeletable')
         with self._transport() as transport:
             transport.unlink(self.remote_parts, directory=True)
 
@@ -292,7 +296,7 @@ class SmbResource:
         if not self.relative:
             if exist_ok and self.is_dir():
                 return
-            raise PermissionError('不能创建或替换声明的媒体根目录')
+            raise UserPermissionError('errors.smbMedia.rootNotReplaceable')
         if parents:
             self.parent.mkdir(mode, parents=True, exist_ok=True)
         try:
@@ -322,7 +326,7 @@ class _OwnedReader(io.IOBase):
 
     def write(self, data):
         if not self.writable():
-            raise io.UnsupportedOperation('SMB 句柄不可写')
+            raise io.UnsupportedOperation('SMB handle is not writable')
         return self.handle.write(data)
 
     def flush(self):
@@ -462,7 +466,7 @@ class _Bridge:
                 while remaining > 0:
                     block = handle.read(min(1 << 20, remaining))
                     if not block:
-                        raise OSError('SMB 文件在读取期间发生变化')
+                        raise OSError('SMB file changed while streaming')
                     self.wfile.write(block)
                     remaining -= len(block)
 

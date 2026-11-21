@@ -36,27 +36,26 @@ LIMIT = 30
 
 #: 键是 `<仓库相对路径>:<限定名>`，值是当前的分支数，只能往下改。
 BASELINE: dict[str, int] = {
-    "src/peach/junk.py:_scored_candidates": 53,
+    "src/peach/junk.py:_scored_candidates": 44,
     "scripts/localize_performer_names.py:collect": 63,
     "src/peach/web_resource_sync.py:_resource_orphan_plan": 50,
-    "src/peach/web_review.py:_review_rows": 40,
+    "src/peach/web_review.py:_review_rows": 38,
     "src/peach/fanbox.py:normalize_fanbox_post": 59,
     "scripts/merge_duplicate_identities.py:collect": 50,
     "src/peach/web_review.py:_attach_review_asset_context": 46,
     "src/peach/web_review.py:w_review_decision": 41,
     "scripts/harvest_social_avatars.py:run": 45,
     "scripts/fetch_studio_avatar_candidates.py:main": 44,
-    "src/peach/web_catalog.py:q_item": 44,
-    "src/peach/web_follow.py:q_follow_authors": 40,
-    "src/peach/taste_history.py:_taste_analysis": 40,
-    "src/peach/web_catalog.py:catalog_filter": 40,
+    "src/peach/web_catalog.py:q_item": 38,
+    "src/peach/web_follow.py:_follow_author_rows": 35,
+    "src/peach/taste_history.py:_taste_analysis": 34,
+    "src/peach/web_catalog.py:catalog_filter": 36,
     "scripts/audit_domain_codes.py:collect": 39,
-    "src/peach/web_catalog.py:q_items": 37,
-    "scripts/harvest_social_avatars.py:harvest_entity": 37,
+    "scripts/harvest_social_avatars.py:harvest_entity": 36,
     "scripts/merge_duplicate_identities.py:collect_repeated_projections": 34,
     "src/peach/fc2_similarity.py:media_evidence": 34,
     "scripts/clean_names.py:run": 33,
-    "src/peach/studio_icons.py:icon_row": 32,
+    "src/peach/studio_icons.py:icon_row": 31,
     "scripts/find_ads.py:find_candidates": 31,
     "scripts/rehome_unknown_jav.py:build_plan": 31,
     "src/peach/resource_identification.py:ingest_results": 30,
@@ -64,16 +63,17 @@ BASELINE: dict[str, int] = {
 
 #: 判过就该这么长的函数：`(分支数, 为什么拆开更差)`。键与 `BASELINE` 同形、不重叠。
 ACCEPTED: dict[str, tuple[int, str]] = {
-    "src/peach/api.py:create_app": (
-        43, "应用工厂：按启动顺序构造数据库、各项后台服务（含可选分享）与路由并接成一个 app，每个可注入的"
-            "依赖各带一个缺省；配置状态控制挂载探测和延迟恢复，停机等待预热释放连接。拆开会割裂成对的生命周期"),
     "src/peach/library_processing.py:process_library": (
-        53, "顺序流水线：垃圾检查、媒体属性、本地资料、本地预览、联网采集、写候选、收尾共用一份进度状态"
+        57, "顺序流水线：垃圾检查、媒体属性、本地资料、本地预览、联网采集、写候选、收尾共用一份进度状态"
             "与问题记录；来源扫描、资产查询与外部会话分别归 `_scan_sources`、"
-            "`_collection_rows`、`_RemoteSession`，剩下的是任务编排、取消检查点、增量范围和存量核查，拆开会分散停止与续跑状态"),
+            "`_collection_rows`、`_RemoteSession`，剩下的是任务编排、逐项目资料处理与指定范围的存量重新核查；"
+            "不同阶段、暂停及取消共用同一份文件版本快照，确保结算不会撤掉处理期间到达的新版本"),
+    "src/peach/api.py:create_app": (
+        31, "服务组装入口集中绑定路由、鉴权、迁移状态和后台服务生命周期，入口参数及部署形态决定共享的实例"),
     "src/peach/standalone_update.py:apply": (
-        30, "安装事务：同一任务令牌贯穿写入端预检、等待退出、资料备份、目录替换、就绪核验与失败回滚；"
-            "moved、installed 和 writer 一起决定回滚边界，拆散会隐藏程序目录与账本的配对恢复条件"),
+        30, "本地替换事务同时核对已暂存包的发布方和校验值，备份、安装、恢复及失败处理共用原安装路径"),
+    "src/peach/web_library_processing.py:w_library_processing": (
+        35, "同一处理请求的重试范围、流量授权、恢复参数和文件版本必须与实际派发的任务一起建立和记录"),
     "src/peach/jav_cover_fetch.py:run": (
         50, "批处理的主循环：每个番号依次量本机尺寸、择优、比较、落盘、记日志，统计、日志行"
             "和出错后换新的连接池在整轮里共用，逐段拆开只是把这几样来回传"),

@@ -9,13 +9,14 @@ A local-first video metadata scraper and media manager.
 [![Release](https://img.shields.io/github/v/release/VictorQi/peach?include_prereleases&sort=semver&label=release&logo=github)](https://github.com/VictorQi/peach/releases)
 [![CI pipelines](https://img.shields.io/github/actions/workflow/status/VictorQi/peach/test.yml?branch=master&label=CI&logo=githubactions&logoColor=white)](https://github.com/VictorQi/peach/actions/workflows/test.yml)
 [![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue?logo=gnu&logoColor=white)](LICENSE)
+[![Translation status](https://hosted.weblate.org/widget/peach/svg-badge.svg)](https://hosted.weblate.org/engage/peach/)
 [![Windows x64](https://img.shields.io/badge/Windows-x64-0078D4)](docs/TESTING_DESKTOP.md)
 [![macOS DMG](https://img.shields.io/badge/macOS-DMG-555555?logo=apple&logoColor=white)](docs/OPERATIONS.md#macos-独立测试包)
 [![Age restrictions](https://img.shields.io/badge/age-18%2B-555555)](#license)
 
 ## Screenshots
 
-[![Video library with search, filters and posters](https://peach.video/assets/screenshots/home-wide-20261025-2-1280.webp)](https://peach.video/assets/screenshots/home-wide-20261025-2.png)
+[![Video library with search, filters and posters](https://peach.video/assets/screenshots/home-wide-20261118-2-en-1280.webp)](https://peach.video/assets/screenshots/home-wide-20261118-2-en.png)
 
 Movie demo data; see [asset credits and licenses](https://peach.video/en/credits/).
 
@@ -24,19 +25,19 @@ Movie demo data; see [asset credits and licenses](https://peach.video/en/credits
 
 **People and works**
 
-[![Charlie Chaplin's profile and films](https://peach.video/assets/screenshots/profile-wide-20261025-2-1280.webp)](https://peach.video/assets/screenshots/profile-wide-20261025-2.png)
+[![Charlie Chaplin's profile and films](https://peach.video/assets/screenshots/profile-wide-20261118-2-en-1280.webp)](https://peach.video/assets/screenshots/profile-wide-20261118-2-en.png)
 
 **Creator updates**
 
-[![Creator follows and new works](https://peach.video/assets/screenshots/follow-wide-20261025-2-1280.webp)](https://peach.video/assets/screenshots/follow-wide-20261025-2.png)
+[![Creator follows and new works](https://peach.video/assets/screenshots/follow-wide-20261118-2-en-1280.webp)](https://peach.video/assets/screenshots/follow-wide-20261118-2-en.png)
 
 **Library statistics**
 
-[![Library, storage and viewing statistics](https://peach.video/assets/screenshots/stats-wide-20261025-3-1280.webp)](https://peach.video/assets/screenshots/stats-wide-20261025-3.png)
+[![Library, storage and viewing statistics](https://peach.video/assets/screenshots/stats-wide-20261118-2-en-1280.webp)](https://peach.video/assets/screenshots/stats-wide-20261118-2-en.png)
 
 **Player**
 
-[![Big Buck Bunny player](https://peach.video/assets/screenshots/play-wide-20261025-2-1280.webp)](https://peach.video/assets/screenshots/play-wide-20261025-2.png)
+[![Big Buck Bunny player](https://peach.video/assets/screenshots/play-wide-20261118-2-en-1280.webp)](https://peach.video/assets/screenshots/play-wide-20261118-2-en.png)
 
 </details>
 
@@ -53,7 +54,7 @@ Movie demo data; see [asset credits and licenses](https://peach.video/en/credits
 
 Background collection does not open or control a browser. Restricted content is skipped when optional source credentials are missing, while your existing library remains available. Optional library updates after an upgrade start when you choose and can be stopped. Version information and update actions stay in settings.
 
-When reading media information for a newly imported local video, Peach can optimize supported MP4 layouts in place without re-encoding or creating another video copy. It keeps a small recovery record and restores the original header if validation fails. Existing videos can use the same optimization during playback without changing the file. [Scope and recovery](docs/adr/0138-mp4-layout-normalization.md).
+When reading media information for a newly imported local video, Peach can optimize supported MP4 layouts in place without re-encoding or creating another video copy. It keeps a small recovery record and restores the original header if validation fails. Existing videos can use the same optimization during playback without changing the file. [Scope and recovery](docs/adr/0178-mp4-layout-normalization.md).
 
 ## Download and use
 
@@ -62,10 +63,15 @@ Daily browsing opens the catalog without waiting for optional source checks. Cat
 
 | Method | Get started |
 | --- | --- |
-| Windows x64 | [Installer](https://github.com/VictorQi/peach/releases/latest) · [Portable](https://github.com/VictorQi/peach/releases/latest) |
-| macOS | [Apple Silicon / ARM64](https://github.com/VictorQi/peach/releases/latest) · [Intel / x86_64](https://github.com/VictorQi/peach/releases/latest) |
+| Windows x64 | [Installer][peach-windows-x64-setup.exe] · [Portable][peach-windows-x64.zip] |
+| macOS | [Apple Silicon / ARM64][peach-macos-arm64.dmg] · [Intel / x86_64][peach-macos-x86_64.dmg] |
 | Docker / NAS | [Deployment guide](docs/DOCKER.md) |
 | Source | [Setup instructions](docs/OPERATIONS.md#从源码运行windowsmacos); requires Git, uv and Python 3.14+ |
+
+[peach-windows-x64-setup.exe]: https://github.com/VictorQi/peach/releases
+[peach-windows-x64.zip]: https://github.com/VictorQi/peach/releases
+[peach-macos-arm64.dmg]: https://github.com/VictorQi/peach/releases
+[peach-macos-x86_64.dmg]: https://github.com/VictorQi/peach/releases
 
 Choose your media folders after installation, then scan to start browsing and playing. Desktop test builds are unsigned, and macOS builds are not notarized. See the [Windows](docs/TESTING_DESKTOP.md) and [macOS](docs/OPERATIONS.md#macos-独立测试包) guides.
 
@@ -78,6 +84,10 @@ Development: [Contributing](CONTRIBUTING.md) · [Development guide](AGENTS.md) �
 ## Reporting problems
 
 This Fork has no public issue tracker enabled. Report problems through the channel where you obtained it; code changes go through [pull requests](https://github.com/VictorQi/peach/pulls). Include your version, steps and error message. Use demo data in public screenshots and redact private information; do not upload videos or databases.
+
+## Translation
+
+Peach is translated on [Hosted Weblate](https://hosted.weblate.org/engage/peach/). The current English is an AI draft, so suggestions and votes are welcome. See [Contributing](CONTRIBUTING.md#翻译) for the details.
 
 ## Related projects
 

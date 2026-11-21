@@ -116,8 +116,8 @@ describe('关注域地址与会话控制', () => {
     expect(followManageParams('?page=-4&tab=invalid')).toEqual({ tab: 'list', page: 1, sort: '', dir: '' });
     expect(followManageParams('?page=3.9&tab=feeds&sort=added&dir=asc')).toEqual({ tab: 'list', page: 3, sort: 'added', dir: 'asc' });
     expect(followManageEntry('?tab=feeds')).toBe('/subscriptions');
-    expect(followManageParams('?tab=tags').tab).toBe('tags');
-    expect(followManageEntry('?tab=tags')).toBe('/subscriptions?tab=tags');
+    expect(followManageParams('?tab=tags').tab).toBe('list');
+    expect(followManageEntry('?tab=tags')).toBe('/tags?scope=online');
     expect(followManagePath({ tab: 'list', page: 1, sort: '', dir: '' })).toBe('/subscriptions');
     expect(followManageEntry('?tab=wants&page=4&sort=x')).toBe('/jav?tab=wants');
     expect(followManageEntry('?tab=wants', 'add')).toBe('/subscriptions?tab=add');
@@ -128,14 +128,17 @@ describe('关注域地址与会话控制', () => {
     const calls: string[] = [];
     const ports = { view: () => current, adoptView: (next: FollowView) => { current = next },
       rememberReturn: (path: string) => { calls.push(path) }, close: () => { calls.push('close') },
-      open: vi.fn(), openAuthor: vi.fn(), drawer: vi.fn() };
-    const actions = createFollowDetailActions(ports, { toast: vi.fn(), failure: vi.fn() });
+      open: vi.fn(), openAuthor: vi.fn(), drawer: vi.fn(), presented: vi.fn() };
+    const actions = createFollowDetailActions(ports, { toast: vi.fn(), failure: vi.fn(), canFlip: () => false });
     actions.openTag('two'); actions.openTag('one');
     expect(calls).toEqual(['/follow?tag=one%2Ctwo', 'close', '/follow?tag=two', 'close']);
     actions.openItem(17, 2);
     expect(ports.open).toHaveBeenCalledWith(17, 2, true);
     actions.openAuthor('Kou');
     expect(ports.openAuthor).toHaveBeenCalledWith('Kou');
+    const item = { id: 3, title: '新作预告', tags: [] } as unknown as Parameters<typeof actions.present>[0];
+    actions.present(item, 'video');
+    expect(ports.presented).toHaveBeenCalledWith(item);
     expect(followWorkMark(['none', '甲乙丙', 1])).toBe('甲乙');
     const host = document.createElement('div'); host.innerHTML = followWorkMark(['a/b', '甲', 1, 11]);
     expect(new URL(host.querySelector('img')!.src).searchParams.get('work')).toBe('a/b');
