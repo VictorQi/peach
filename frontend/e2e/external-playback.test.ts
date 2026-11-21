@@ -27,10 +27,12 @@ describe('外部播放器', () => {
         });
         await page.reload();
         const chooser = page.locator(PLAYER_SELECT);
+        const openButton = page.getByRole('button', { name: '使用外部播放器打开', exact: true });
+        const focusedListbox = page.getByRole('listbox').and(page.locator(':focus-within'));
         await chooser.waitFor();
         assert.equal(await page.locator('#stage details[open]').count(), 0);
         assert.equal(await page.getByText('外部播放器 / VR', { exact: true }).count(), 0);
-        assert.equal(await page.getByRole('button', { name: '使用外部播放器打开', exact: true }).count(), 1);
+        assert.equal(await openButton.count(), 1);
         const waitForChevron = (expanded: boolean) => page.waitForFunction(expanded => {
           const icon = document.querySelector('[data-local-playback] button[aria-haspopup="listbox"]:not(:disabled) > svg');
           return icon && icon.parentElement?.getAttribute('aria-expanded') === String(expanded)
@@ -39,26 +41,28 @@ describe('外部播放器', () => {
         await waitForChevron(false);
         await chooser.click();
         await waitForChevron(true);
+        await focusedListbox.waitFor({ timeout: 5_000 });
         await page.keyboard.press('Escape');
         await waitForChevron(false);
-        assert.equal(await chooser.evaluate(button => button === document.activeElement), true);
+        // React Aria 在浮层卸载后的动画帧恢复焦点，此时箭头可能已经复位。
+        await chooser.and(page.locator(':focus')).waitFor({ timeout: 5_000 });
         assert.match(await chooser.ariaSnapshot(), /外部播放器/);
 
         await page.keyboard.press('Enter');
         await waitForChevron(true);
+        await focusedListbox.waitFor({ timeout: 5_000 });
         await page.keyboard.press('Tab');
         await waitForChevron(false);
-        assert.equal(await page.getByRole('button', { name: '使用外部播放器打开', exact: true })
-          .evaluate(button => button === document.activeElement), true);
+        await openButton.and(page.locator(':focus')).waitFor({ timeout: 5_000 });
 
         await chooser.click();
         await page.getByRole('option', { name: 'PotPlayer', exact: true }).click();
         await waitForChevron(false);
-        await page.getByRole('button', { name: '使用外部播放器打开', exact: true }).click();
+        await openButton.click();
         await page.waitForFunction(() => document.body.textContent?.includes('已请求打开本地播放器'));
         assert.equal(selected, 'potplayer');
         failOpen = true;
-        await page.getByRole('button', { name: '使用外部播放器打开', exact: true }).click();
+        await openButton.click();
         await page.locator('[data-local-playback] [role="alert"]').waitFor();
         const geometry = await page.locator('[data-local-playback]').evaluate(host => {
           const row = host.querySelector('[data-local-playback-row]')!.getBoundingClientRect();
