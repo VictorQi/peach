@@ -20,6 +20,7 @@ import type { Browser, Locator, Page } from 'playwright-core';
 
 import { configurationBody, expectBody, layout, launch, requiredEnv, settle, unmanagedScrollers, visit, VIEWPORTS } from './harness.ts';
 import { mockJavDetail } from './jav-detail-fixture.ts';
+import { prepareKnownHomeFeed } from './home-feed-fixture.ts';
 import { CLEANUP_HASH_REDIRECTS } from '../src/cleanup-routes.ts';
 
 interface Route {

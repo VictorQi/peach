@@ -108,7 +108,7 @@ class AutomaticUpdateTests(unittest.TestCase):
                             'result': {'current_version': version, 'latest_version': '0.50.0',
                                        'state': 'ahead'}})
         self.assertNotIn('result', self.updates.snapshot())
-        fresh = {'current_version': version, 'state': 'error', 'latest_version': None}
+        fresh = dict(release_updates.snapshot(), state='error')
         with patch('peach.release_updates.check', return_value=fresh) as check, \
                 patch('peach.automatic_updates.time.time', return_value=200001):
             self.updates.tick()
@@ -121,8 +121,7 @@ class AutomaticUpdateTests(unittest.TestCase):
         from peach import release_updates
 
         self.updates.write({'mode': 'off', 'interval_hours': 168, 'result': {'state': 'ahead'}})
-        self.updates.remember({'current_version': release_updates.snapshot()['current_version'],
-                               'state': 'current'})
+        self.updates.remember(dict(release_updates.snapshot(), state='current'))
         result = self.updates.snapshot()
         self.assertEqual(result['mode'], 'off')
         self.assertEqual(result['interval_hours'], 168)

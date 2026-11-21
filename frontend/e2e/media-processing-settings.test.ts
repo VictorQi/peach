@@ -109,7 +109,7 @@ describe('视频预览设置', () => {
         const order = await page.locator('.ui-board-group-active').evaluate((group) =>
           [...group.querySelectorAll('section[aria-label], form[aria-label]')].map((node) => node.getAttribute('aria-label')));
         const at = order.indexOf('视频播放');
-        assert.ok(at >= 0 && order.slice(0, at).every((name) => ['检查更新', '资料更新', '自动更新', '开机自启'].includes(name ?? '')), JSON.stringify(order));
+        assert.ok(at >= 0 && order.slice(0, at).every((name) => ['检查更新', '资料更新', '自动修复', '自动更新', '开机自启'].includes(name ?? '')), JSON.stringify(order));
         const startup = order.indexOf('开机自启');
         const storage = order.indexOf('存储空间');
         assert.ok(startup < 0 || startup < at, JSON.stringify(order));

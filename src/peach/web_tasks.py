@@ -33,7 +33,6 @@ TASK_FOLLOWUP_LIMIT = SETTLED_FOLLOWUP_LIMIT
 NO_TABLE = "api.tasks.noTaskTable"
 
 
-
 def running_tasks(contract) -> list[dict]:
     """在排或在跑的任务，每个 `task_key` 一项 `{task_key, run_id, status}`，按 `task_key` 排。
 
@@ -79,12 +78,14 @@ def _throttled_versions(contract, busy: bool) -> dict:
 
 
 def q_result_updates(contract, _args):
-    """常驻刷新只读取结果版本和活动状态，不组装任务列表与资源统计。"""
+    """常驻刷新读取版本、通知与活动任务摘要，完整列表留给任务中心。"""
     try:
-        busy = any(contract.task_runs.query(status=status, limit=1) for status in ACTIVE_STATUSES)
+        running = running_tasks(contract)
     except sqlite3.OperationalError:
-        busy = False
-    return {"ok": True, "result_versions": result_versions(contract), "busy": busy}
+        running = []
+    busy = bool(running)
+    return {"ok": True, "result_versions": _throttled_versions(contract, busy),
+            "ingest_notices": NOTICES.snapshot(), "busy": busy, "running_tasks": running}
 
 
 def q_tasks(contract, args):

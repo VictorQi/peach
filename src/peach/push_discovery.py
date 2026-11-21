@@ -944,18 +944,40 @@ class PushDiscoveryService:
         if self.config.cloud:
             self.secret.ensure()
 
-    def _start_local(self) -> None:
+    def _start_local(self, roots=None) -> None:
         """本地监视在后台线程里起：判来源在线、`schedule` 与 `start` 都要碰来源目录，
         挂死的挂载不能拖住服务启动与设置页保存。"""
         if not self.config.watch_local:
             self.local_channel = ChannelState.stopped("localOff")
             return
         with self._local_lock:
+            if roots and self._observer is not None:
+                self._append_watches(roots)
+                return
+            if self._opening is not None and self._opening.is_alive():
+                self._generation += 1
             generation = self._generation
         opening = threading.Thread(target=in_background(self._open_local), args=(generation,),
                                    name="PeachPushDiscoveryWatch", daemon=True)
         self._opening = opening
         opening.start()
+
+    def _append_watches(self, roots) -> None:
+        handler = _LocalEventHandler(self)
+        monitored = list(self.local_channel.roots)
+        for location, root, directory in roots:
+            if root in monitored:
+                continue
+            try:
+                handler.register(location, root, directory)
+                self._observer.schedule(handler, str(directory), recursive=True)
+            except OSError as error:
+                failure = ChannelState.stopped("watchFailed", error=str(error))
+                self.local_channel = ChannelState(True, failure.message, tuple(monitored), failure.message_code,
+                                                  failure.message_params)
+                return
+            monitored.append(root)
+        self.local_channel = ChannelState(True, "", tuple(monitored))
 
     def _open_local(self, generation: int) -> None:
         observer, state = self._watch()

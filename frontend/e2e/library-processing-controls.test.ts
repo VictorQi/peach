@@ -174,6 +174,14 @@ describe('扫描与采集控制', () => {
       const card = page.getByRole('region', { name: '扫描与采集', exact: true });
       const artifacts = path.resolve('..', 'build', 'agent-verification', 'processing-controls');
       await mkdir(artifacts, { recursive: true });
+      const chooseLibrary = async (index: number) => {
+        const trigger = card.locator('button[aria-labelledby~="processingLibraryLabel"]');
+        await trigger.scrollIntoViewIfNeeded();
+        await trigger.focus();
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        await trigger.press('ArrowDown');
+        await page.getByRole('option').nth(index).click();
+      };
       try {
         await card.waitFor();
         await settle(page);
@@ -191,6 +199,7 @@ describe('扫描与采集控制', () => {
         await menu.getByText('为已入库的视频生成九宫格，跳过流量保护目录', { exact: true }).waitFor();
         await menu.screenshot({ path: path.join(artifacts, `${viewport.name}-processing-menu.png`) });
         await menu.press('Escape');
+        await chooseLibrary(1);
         await card.getByRole('button', { name: '同步新增文件', exact: true }).click();
         const dialog = page.getByRole('dialog', { name: '同步新增文件', exact: true });
         await dialog.waitFor();
@@ -227,6 +236,7 @@ describe('扫描与采集控制', () => {
         assert.equal(writes.length, 0);
         await page.goto(new URL('/data-cleanup', page.url()).href);
         await card.waitFor();
+        await chooseLibrary(1);
         await card.getByRole('button', { name: '同步新增文件', exact: true }).click();
         await dialog.getByText('正在发现新增文件，数量和预估仍会变化…', { exact: true }).waitFor();
         inventoryComplete = true;
@@ -276,11 +286,15 @@ describe('扫描与采集控制', () => {
         await dialog.screenshot({ path: path.join(artifacts, `${viewport.name}-high-startup.png`) });
         await startupSlider.press('Home');
         await dialog.screenshot({ path: path.join(artifacts, `${viewport.name}-startup.png`) });
-        await dialog.getByRole('button', { name: '同步新增文件', exact: true }).click();
+        await dialog.press('Escape');
+        await dialog.waitFor({ state: 'hidden' });
+        await chooseLibrary(0);
+        const inventoryBeforeQuickScan = inventoryReads;
+        await card.getByRole('button', { name: '同步新增文件', exact: true }).click();
         await card.getByText('预计剩余约 20–40 分钟（粗估）', { exact: true }).waitFor();
         assert.equal(await page.getByRole('dialog', { name: '同步新增文件', exact: true }).count(), 0);
         assert.deepEqual(writes[0], { incremental: true });
-        assert.equal(inventoryReads, 0, '直接启动不扫描一遍文件来填确认框');
+        assert.equal(inventoryReads, inventoryBeforeQuickScan, '直接启动不扫描一遍文件来填确认框');
         const startedLayout = await layout(page);
         assert.ok(startedLayout.scrollWidth <= startedLayout.viewportWidth, JSON.stringify(startedLayout));
         assert.deepEqual(startedLayout.offenders, []);

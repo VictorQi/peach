@@ -13,6 +13,7 @@ import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from peach.interface_text import dev as t
+from peach.release_updates import REPOSITORY
 from peach.update_packages import MANIFEST, TOOL_PATHS, digest, read_manifest
 
 
@@ -26,13 +27,13 @@ def archive(destination: Path, root: Path, files: list[Path], manifest: dict | N
             package.writestr("Peach/" + MANIFEST, json.dumps(manifest, ensure_ascii=False, sort_keys=True))
 
 
-DOCS = "https://github.com/VictorQi/peach/blob/master/docs"
+DOCS = f"https://github.com/{REPOSITORY}/blob/master/docs"
 def download_sections(version: str, *, lite_installer: bool = False,
                       download_base: str | None = None) -> tuple[str, str]:
     """Release 正文下载段的英文与中文两份，不含折叠标签（由 `changelog.notes()` 分别折叠）：
     一张三平台的表、其余文件、已装版本的更新方式、macOS 首次安装与 Docker 标签。文字在 `release_download_text`。"""
     from . import release_download_text as text
-    directory = (download_base or f"https://github.com/VictorQi/peach/releases/download/v{version}").rstrip('/')
+    directory = (download_base or f"https://github.com/{REPOSITORY}/releases/download/v{version}").rstrip('/')
     base = f"{directory}/Peach-{version}-windows-x64"
     tools = (f"[FFmpeg]({base}-tools-ffmpeg.zip)", f"[untrunc]({base}-tools-untrunc.zip)",
              f"[cloudflared]({base}-tools-cloudflared.zip)")

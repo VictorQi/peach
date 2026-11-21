@@ -572,6 +572,13 @@ class SourceTransport:
             values = values_for(self.root, source)
             sent = sends_cookie(source) and bool(values.get("cookie") or values.get("cookies_text"))
             raise _paused(source, "refusedCookie" if sent else "refused", until)
+        if source and response.status < 400 and _refused(response):
+            from .sources.base import FailureReason
+            pause_source(self.root, source, refused=True)
+            raise SourceRefused("errors.scrapingAccess.verificationRequired", {}, FailureReason.CLOUDFLARE_CHALLENGE.value)
+        if blocked_pause and response.status >= 500:
+            until = pause_source(self.root, source, retry_after=300)
+            raise _paused(source, "coolingDown", until)
         if blocks and response.status < 400:
             # 这一趟通了，封已经解除：清掉记录，下次撞上从最短的一档重新起算。
             cooldown.unlink(missing_ok=True)

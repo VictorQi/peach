@@ -196,18 +196,10 @@ class ScrapingAccessTests(unittest.TestCase):
         self.assertEqual(seen[1].headers["X-Test"], "preserved")
 
 
-    def test_the_background_browser_mode_defaults_to_a_window_and_is_read_at_launch(self):
-        """后台采集浏览器默认保留窗口；设置成无窗口后，浏览器下次拉起时读到的是新模式。"""
+    def test_legacy_browser_mode_configuration_remains_readable(self):
         from peach.scraping_access import browser_mode, save_browser_mode
         self.assertEqual(browser_mode(self.root), "window")
-        transport = SourceTransport(self.root)
-        self.addCleanup(transport.close)
-        with patch("peach.browser_transport.shared") as shared:
-            transport._browser_for("javten")
-        headless = shared.call_args.kwargs["headless"]
-        self.assertFalse(headless())
         self.assertEqual(save_browser_mode(self.root, "headless"), "headless")
-        self.assertTrue(headless())
         with self.assertRaises(ValueError):
             save_browser_mode(self.root, "minimized")
         self.assertEqual(browser_mode(self.root), "headless")
@@ -795,193 +787,6 @@ class ScrapingAccessTests(unittest.TestCase):
         self.assertFalse(any("avbase" not in request.url and "jdbstatic" not in request.url and "javdb" not in request.url
                              for request in sent), "没有固定图片主机的来源图片那一跳不发请求")
 
-class BrowserFallbackTests(unittest.TestCase):
-    """登记了 `browser_fallback` 的来源（minnano-av）：HTTP 客户端被拦时由本机浏览器验证一页，
-    取到就固定走浏览器；浏览器也没取到才照 HTTP 客户端被拦那样冷却。"""
-
-    SEARCH = "https://www.minnano-av.com/search_result.php?search_scope=actress&search_word=x"
-
-    def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name).resolve()
-        self.cooldown = self.root / "scraping-minnano-av.cooldown.json"
-        self.request = HttpRequest("GET", self.SEARCH, {})
-        finder = patch("peach.browser_transport.find_browser", return_value=None)
-        finder.start()
-        self.addCleanup(finder.stop)
-
-    def browser(self, respond):
-        from peach import browser_transport
-
-        class FakeBrowser(browser_transport.BrowserTransport):
-            def __init__(self):
-                self.calls = []
-
-            def __call__(self, request, timeout, max_bytes):
-                self.calls.append(request.url)
-                return respond(request)
-
-        return FakeBrowser()
-
-    def refused_transport(self, response=None):
-        transport = SourceTransport(self.root)
-        http_calls = []
-
-        def http(request, *_args):
-            http_calls.append(request.url)
-            return response or HttpResponse(403, {}, b"")
-
-        transport.transports["minnano-av"] = http
-        return transport, http_calls
-
-    def record(self) -> dict:
-        return json.loads(self.cooldown.read_text(encoding="utf-8"))
-
-    def test_a_refused_http_request_is_retried_in_the_browser_and_the_source_stays_there(self):
-        from peach.scraping_access import fixed_to_browser
-        page = HttpResponse(200, {}, b"<title>actress</title>", "https://www.minnano-av.com/actress1.html")
-        browser = self.browser(lambda request: page)
-        self.cooldown.write_text(json.dumps({"until": 0, "blocks": 6, "via": "http"}), encoding="utf-8")
-        transport, http_calls = self.refused_transport()
-        with patch("peach.browser_transport.shared", return_value=browser):
-            self.assertIs(transport(self.request, 1, 100), page)
-            self.assertIs(transport(self.request, 1, 100), page, "本趟之后的请求直接走浏览器")
-        self.assertEqual(len(http_calls), 1)
-        self.assertEqual(browser.calls, [self.SEARCH, self.SEARCH])
-        self.assertTrue(fixed_to_browser(self.root, "minnano-av"))
-        self.assertFalse(self.cooldown.exists(), "HTTP 客户端攒下的六次拒绝不压到浏览器上")
-
-        later = SourceTransport(self.root)
-        with patch("peach.browser_transport.shared", return_value=browser), \
-                patch("peach.scraping_access.client_for", side_effect=AssertionError("固定后不该再起 HTTP 客户端")):
-            self.assertIs(later(self.request, 1, 100), page)
-        with patch("peach.browser_transport.find_browser", return_value="C:/chrome.exe"):
-            self.assertTrue(describe(self.root, "minnano-av")["browser"])
-        save(self.root, "minnano-av", {"network": "direct"})
-        self.assertTrue(fixed_to_browser(self.root, "minnano-av"), "改连接方式不丢固定")
-
-    def test_user_pause_between_http_and_browser_waits_before_opening_the_browser(self):
-        from peach.processing_control import ProcessingControl
-
-        control = ProcessingControl(self.root / 'control.json')
-        paused = threading.Event()
-        finished = threading.Event()
-        errors = []
-        browser = self.browser(lambda request: HttpResponse(200, {}, b'<title>actress</title>'))
-        transport = SourceTransport(self.root)
-        self.addCleanup(transport.close)
-
-        def http(*args):
-            control.request('pause', 'job')
-            return HttpResponse(403, {}, b'')
-
-        transport.transports['minnano-av'] = http
-
-        def run():
-            try:
-                with control.bind('job', publish=lambda **values: paused.set() if values.get('status') == 'paused' else None,
-                                  active=lambda: True, db_path=self.root / 'database/ledger.db', mode='high'):
-                    transport(self.request, 1, 100)
-            except BaseException as error:
-                errors.append(error)
-            finally:
-                finished.set()
-
-        with patch('peach.browser_transport.shared', return_value=browser):
-            thread = threading.Thread(target=run)
-            thread.start()
-            try:
-                self.assertTrue(paused.wait(2))
-                self.assertEqual(browser.calls, [])
-                self.assertFalse(finished.is_set())
-            finally:
-                control.request('resume', 'job')
-                thread.join(2)
-        self.assertFalse(thread.is_alive())
-        self.assertEqual(errors, [])
-        self.assertEqual(browser.calls, [self.SEARCH])
-
-    def test_user_cancel_between_http_and_browser_does_not_open_the_browser(self):
-        from peach.jobs import JobCancelled
-        from peach.processing_control import ProcessingControl
-
-        control = ProcessingControl(self.root / 'control.json')
-        transport = SourceTransport(self.root)
-        self.addCleanup(transport.close)
-
-        def http(*args):
-            control.request('cancel', 'job')
-            return HttpResponse(403, {}, b'')
-
-        transport.transports['minnano-av'] = http
-        with patch('peach.browser_transport.shared') as browser, \
-                control.bind('job', publish=lambda **values: None, active=lambda: True,
-                             db_path=self.root / 'database/ledger.db', mode='high'):
-            with self.assertRaises(JobCancelled):
-                transport(self.request, 1, 100)
-        browser.assert_not_called()
-
-    def test_a_challenge_page_over_http_also_gets_the_browser_check(self):
-        challenge = HttpResponse(200, {}, b"<html><head><title>Just a moment...</title></head></html>")
-        page = HttpResponse(200, {}, b"<title>actress</title>")
-        transport, _calls = self.refused_transport(challenge)
-        with patch("peach.browser_transport.shared", return_value=self.browser(lambda request: page)):
-            self.assertIs(transport(self.request, 1, 100), page)
-
-    def test_when_the_browser_fails_too_the_http_refusal_cools_down_as_before(self):
-        from peach import browser_transport
-        from peach.scraping_access import FIRST_BLOCKED_PAUSE, SourcePaused, fixed_to_browser
-
-        def unsolved(request):
-            raise browser_transport.ChallengeUnsolved("minnano-av.com 的人机验证没有通过")
-
-        def lost(request):
-            raise browser_transport.BrowserUnavailable("浏览器请求未取得")
-
-        for respond in (unsolved, lost, lambda request: HttpResponse(403, {}, b"")):
-            with self.subTest(respond=respond):
-                self.cooldown.unlink(missing_ok=True)
-                transport, _calls = self.refused_transport()
-                with patch("peach.browser_transport.shared", return_value=self.browser(respond)), \
-                        self.assertRaises(SourcePaused):
-                    transport(self.request, 1, 100)
-                record = self.record()
-                self.assertEqual((round(record["until"] - time.time()), record["blocks"], record["via"]),
-                                 (FIRST_BLOCKED_PAUSE, 1, "http"))
-                self.assertFalse(fixed_to_browser(self.root, "minnano-av"))
-
-        self.cooldown.unlink()
-        transport, _calls = self.refused_transport()
-        with patch("peach.browser_transport.shared", return_value=None), self.assertRaises(SourcePaused):
-            transport(self.request, 1, 100)
-        self.assertEqual(self.record()["via"], "http", "没有浏览器的机器照 HTTP 客户端冷却")
-
-    def test_a_source_fixed_to_the_browser_cools_down_on_the_browser_path(self):
-        from peach import browser_transport
-        from peach.scraping_access import FIRST_BLOCKED_PAUSE, SourcePaused, fix_to_browser, fixed_to_browser
-
-        def unsolved(request):
-            raise browser_transport.ChallengeUnsolved("minnano-av.com 的人机验证没有通过")
-
-        fix_to_browser(self.root, "minnano-av")
-        with patch("peach.browser_transport.shared", return_value=self.browser(unsolved)), \
-                self.assertRaises(SourcePaused):
-            SourceTransport(self.root)(self.request, 1, 100)
-        record = self.record()
-        self.assertEqual((round(record["until"] - time.time()), record["blocks"], record["via"]),
-                         (FIRST_BLOCKED_PAUSE, 1, "browser"))
-        self.assertTrue(fixed_to_browser(self.root, "minnano-av"), "浏览器那条路冷却完还走浏览器")
-
-    def test_sources_without_the_fallback_never_open_the_browser_on_a_refusal(self):
-        from peach.scraping_access import SourcePaused
-        transport = SourceTransport(self.root)
-        transport.transports["avwikidb"] = lambda *args: HttpResponse(403, {}, b"")
-        with patch("peach.browser_transport.shared", side_effect=AssertionError("avwikidb 不走浏览器")), \
-                self.assertRaises(SourcePaused):
-            transport(HttpRequest("GET", "https://avwikidb.com/actor/x/", {}), 1, 100)
-
-
 class SourcePreflightTests(unittest.TestCase):
     def test_batch_deduplicates_and_preserves_target_failures(self):
         from peach.source_preflight import check_sources
@@ -1056,17 +861,21 @@ class SourcePreflightTests(unittest.TestCase):
         self.assertEqual([row['source'] for row in state['results']], default_sources())
         self.assertEqual(state['failed'], state['total'] - 1)
 
-    def test_http_only_transport_does_not_launch_or_fix_browser_route(self):
-        from peach.scraping_access import SourcePaused, fix_to_browser, fixed_to_browser
+    def test_preflight_ignores_a_legacy_browser_route_without_changing_it(self):
+        from peach.follow_secrets import CredentialStore
+        from peach.scraping_access import SourcePaused, values_for
+
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            fix_to_browser(root, 'minnano-av')
+            credentials = {"transport": "browser"}
+            CredentialStore(root).save("scraping-minnano-av", credentials)
             transport = SourceTransport(root, allow_browser=False)
-            with patch.object(transport, '_browser_for', side_effect=AssertionError('不能启动浏览器')), \
-                    patch('peach.scraping_access.client_for') as client:
+            self.addCleanup(transport.close)
+            with patch("peach.browser_transport.shared") as browser, \
+                    patch("peach.scraping_access.client_for") as client:
                 client.return_value = httpx.Client(transport=httpx.MockTransport(
-                    lambda request: httpx.Response(403, content=b'blocked')))
+                    lambda request: httpx.Response(403, content=b"blocked")))
                 with self.assertRaises(SourcePaused):
-                    transport(HttpRequest('GET', 'https://www.minnano-av.com/', {}), 1, 1024)
-            transport.close()
-            self.assertTrue(fixed_to_browser(root, 'minnano-av'))
+                    transport(HttpRequest("GET", "https://www.minnano-av.com/", {}), 1, 1024)
+            browser.assert_not_called()
+            self.assertEqual(values_for(root, "minnano-av"), credentials)

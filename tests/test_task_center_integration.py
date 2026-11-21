@@ -317,14 +317,15 @@ class TasksEndpointTests(unittest.TestCase):
         with unittest.mock.patch.object(web_tasks, '_payload_reader',
                                        side_effect=AssertionError('不得组装完整任务列表')):
             idle = web_contract.dispatch_api_get(self.contract, '/api/result-updates', {})
-            self.assertEqual(idle, {'ok': True, 'busy': False, 'result_versions': expected})
+            self.assertEqual(idle, {'ok': True, 'busy': False, 'result_versions': expected,
+                                    'running_tasks': [], 'ingest_notices': web_tasks.NOTICES.snapshot()})
             parent = self.store.start('library-processing', trigger='manual')
             self.assertTrue(web_tasks.q_result_updates(self.contract, {})['busy'])
             self.store.enqueue_followups(parent.id, [('next', 'child', '后继')])
             self.store.finish(parent.id, 'succeeded')
             self.assertTrue(web_tasks.q_result_updates(self.contract, {})['busy'])
 
-    def test_finished_followups_remain_complete_without_per_row_control_queries(self):
+    def test_finished_followups_stay_bounded_without_per_row_control_queries(self):
         parent = self.store.start('parent', trigger='manual')
         children = self.store.enqueue_followups(
             parent.id, [(f'child:{i}', 'child', '后继') for i in range(64)])['queued']
@@ -334,7 +335,8 @@ class TasksEndpointTests(unittest.TestCase):
         database = self.store.database
         with unittest.mock.patch.object(database, 'read_connection', wraps=database.read_connection) as reads:
             payload = web_tasks.q_tasks(self.contract, {})
-        self.assertEqual({row['id'] for row in payload['finished']}, {parent.id, *children})
+        recent = children[-web_tasks.TASK_FOLLOWUP_LIMIT:]
+        self.assertEqual({row['id'] for row in payload['finished']}, {parent.id, *recent})
         self.assertTrue(all('control' not in row and 'resources' not in row for row in payload['finished']))
         self.assertLess(reads.call_count, 20)
 

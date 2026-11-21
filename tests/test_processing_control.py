@@ -52,7 +52,7 @@ class ProcessingControlTests(unittest.TestCase):
             self.assertEqual(pending(self.db), [1, 2])
             def complete(*args, **kwargs):
                 observe(self.db, 1, 100, 2000)
-                return {'status': 'failed', 'stage': '处理结束', 'completed_at': 1,
+                return {'status': 'failed', **stage_fields('library.finished'), 'completed_at': 1,
                         'retryable_asset_ids': [2]}
             process.side_effect = complete
             w_library_processing(contract, {'asset_ids': [1, 2], 'automatic': True})

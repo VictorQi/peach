@@ -70,9 +70,12 @@ describe('首次运行页', { skip: origin && media && dataRoot ? false : '只�
       // 第一步就能选语言：换界面语言整页重载成新语言，换回「自动」再按浏览器语言回到中文。
       await page.locator('button[aria-labelledby~="setup-language-label"]').click();
       await Promise.all([page.waitForEvent('load'), page.getByRole('option', { name: 'English', exact: true }).click()]);
+      // 重载先回到添加文件夹的入口，再进入完整的设置表单。
+      await page.getByRole('button', { name: 'More settings', exact: true }).click();
       await page.getByRole('heading', { name: 'Welcome to Peach' }).waitFor({ state: 'visible', timeout: 15_000 });
       await page.locator('button[aria-labelledby~="setup-language-label"]').click();
       await Promise.all([page.waitForEvent('load'), page.getByRole('option', { name: 'Auto', exact: true }).click()]);
+      await page.getByRole('button', { name: '其他设置', exact: true }).click();
       await heading.waitFor({ state: 'visible', timeout: 15_000 });
       assert.deepEqual((await layout(page)).offenders, []);
       await page.getByRole('button', { name: '开始设置', exact: true }).click();

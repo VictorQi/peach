@@ -141,7 +141,7 @@ describe('馆藏首屏独立于可选请求',()=>{
  after(async()=>{await browser?.close()});
  for(const viewport of VIEWPORTS){
   it(`${viewport.name} 可选请求未返回时可打开真实卡片，失败后原位重试`,{timeout:60000},async()=>{
-   const context=await browser.newContext({viewport:{width:viewport.width,height:viewport.height}});
+   const context=await browser.newContext({viewport:{width:viewport.width,height:viewport.height},locale:'zh-CN'});
    let release:()=>void=()=>{};
    const held=new Promise<void>(resolve=>{release=resolve});
    try{
@@ -152,7 +152,7 @@ describe('馆藏首屏独立于可选请求',()=>{
     });
     const page=await context.newPage();
     const requested=new Set<string>(),itemQueries:string[]=[];
-    let released=false,reads=0;
+    let released=false,retrying=false,reads=0;
     await page.route(/\/api\/(settings|sources|entity\/shapes)$/,async route=>{
      const endpoint=new URL(route.request().url()).pathname;
      if(route.request().method()!=='GET'){await route.continue();return}
@@ -167,13 +167,16 @@ describe('馆藏首屏独立于可选请求',()=>{
     });
     await page.route(/\/api\/items\?/,async route=>{
      reads++;
-     if(reads===1){await route.fulfill({status:503,json:{error:'读取暂时不可用'}});return}
+     if(!retrying){await route.fulfill({status:503,json:{error:'读取暂时不可用'}});return}
      itemQueries.push(route.request().url());
      await route.continue();
     });
     const started=Date.now();
     await page.goto(requiredEnv('PEACH_E2E_ORIGIN')+'/',{waitUntil:'domcontentloaded'});
-    await page.locator('#grid').getByRole('button',{name:'立即重试',exact:true}).click();
+    const retry=page.locator('#grid').getByRole('button',{name:'立即重试',exact:true});
+    await retry.waitFor();
+    retrying=true;
+    await retry.click();
     const card=page.locator('#grid [data-media-card]').first();
     await card.waitFor({state:'visible'});
     assert.equal(released,false,'可选接口仍被挂起时主列表已可用');

@@ -124,7 +124,7 @@ def measure(ffprobe: str, asset_id: int, path: str, timeout: float = TIMEOUT_SEC
         with prepare_local(Path(native), layout_root) if layout_root is not None else nullcontext(False) as changed:
             duration, width, height, codec, fps, audio = probe_file(ffprobe, native, timeout)
             if changed and duration <= 0:
-                raise ValueError('MP4 整理后未取得有效时长，已恢复原文件头')
+                raise ValueError('MP4 probe found no valid duration after layout fix. Original header restored.')
     except InterruptedError:
         raise
     except Exception as error:  # 超时、文件读不到、输出不是 JSON：对这一行都是「没拿到」

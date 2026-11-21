@@ -185,7 +185,8 @@ class MediaImportTests(unittest.TestCase):
                 self.assertEqual(self.store.query(), [])
                 with patch.dict(os.environ, PEACH_HEADLESS_MANAGED='1'), patch.object(routes.folder_picker, 'pick_folder') as picker:
                     headless = await client.post('/api/pick-folder?t=secret', json={})
-                self.assertEqual(headless.status_code, 501)
+                self.assertEqual(headless.status_code, 200)
+                self.assertEqual(headless.json()['mode'], 'server')
                 picker.assert_not_called()
                 accepted = await client.post('/api/library-imports?t=secret', json={'path': str(self.folder)})
                 self.assertEqual(accepted.status_code, 200, accepted.text)

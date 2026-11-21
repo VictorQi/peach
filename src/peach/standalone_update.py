@@ -66,7 +66,7 @@ def read() -> dict:
     try:
         data = json.loads(state_path().read_text(encoding="utf-8"))
         if data.get("state") in ACTIVE | {"ready"} and data.get("publisher") != release_updates.REPOSITORY:
-            return dict(data, state="error", progress=0, message="这份更新不属于当前发布源，请重新检查并下载。")
+            return dict(data, state="error", progress=0, **message_fields("errors.standaloneUpdate.wrongPublisher"))
         return data
     except (OSError, ValueError):
         return {"state": "idle", "progress": 0}

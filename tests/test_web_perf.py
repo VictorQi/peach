@@ -485,7 +485,7 @@ class CoverIndexTests(unittest.TestCase):
         with (
             patch("peach.cover_artwork.has_javdb_source", wraps=has_javdb_source) as sources,
             patch.object(self.contract, "_cover_focus", wraps=self.contract._cover_focus) as faces,
-            patch.object(self.contract, "_poster_box", wraps=self.contract._poster_box) as posters,
+            patch.object(self.contract, "_poster_record", wraps=self.contract._poster_record) as posters,
         ):
             self.assertTrue(self.contract.has_cover("ABC-001"))
             self.assertEqual(self.contract.cover_frame("ABC-001"), {"cy": 0.42})

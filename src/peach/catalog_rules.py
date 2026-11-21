@@ -1295,7 +1295,8 @@ def is_uncensored_release(name: str | None, code: str | None) -> bool:
 #: 先排除没有版次标记的名字，避免逐作品编译番号表达式。左侧不加边界，
 #: 保留番号本身以字母结尾、后面紧接 CH 等标记的情形；精确身份仍由原判据核验。
 _EDITION_EVIDENCE = re.compile(
-    r"(?:CH|C|SUB|UC|UN|U|UNCEN(?:SORED)?|无码|無碼|中字|中文字幕)(?=$|[^A-Z0-9])", re.I)
+    r"(?:CH|C|SUB|UC|UN|U|UNCEN(?:SORED)?|LTX|UMR|LEAK(?:ED)?|流出|无码|無碼|中字|中文字幕)"
+    r"(?=$|[^A-Z0-9])", re.I)
 
 
 def jav_edition_badges(name: str | None, code: str | None,

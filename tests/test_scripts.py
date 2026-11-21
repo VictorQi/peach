@@ -5522,7 +5522,7 @@ class ReleaseDownloadNotesTests(unittest.TestCase):
         for section in download_sections('1.0.0', lite_installer=True):
             links = {url for url in re.findall(r'https://[^\s)]+', section) if not url.startswith(DOCS)}
             self.assertEqual(len(links), 9)
-            self.assertTrue(all(url.startswith('https://github.com/peach-mitao/peach/releases/download/v1.0.0/')
+            self.assertTrue(all(url.startswith('https://github.com/VictorQi/peach/releases/download/v1.0.0/')
                                 for url in links))
 
     def test_each_language_has_one_table_covering_windows_macos_and_docker(self):
@@ -5548,6 +5548,7 @@ class ReleaseDownloadNotesTests(unittest.TestCase):
         self.assertIn('### Added\n\n- **Updates**: Public downloads.', result)
         self.assertEqual(links[0], 'https://gitgud.io/peach-mitao/peach/-/blob/v1.0.0/docs/OPERATIONS.md')
         self.assertNotIn('github.com/peach-mitao/peach/releases/download', result)
+        self.assertNotIn('github.com/VictorQi/peach/releases/download', result)
         downloads = {url for url in links[1:] if '/docs/' not in url}
         self.assertEqual(len(downloads), 9)
         self.assertTrue(all(url.startswith('https://downloads.peach.video/v1.0.0/') for url in downloads))

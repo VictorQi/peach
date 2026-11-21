@@ -63,10 +63,15 @@
 
 | 方式 | 入口 |
 | --- | --- |
-| Windows x64 | [安装版](https://github.com/VictorQi/peach/releases/latest) · [免安装版](https://github.com/VictorQi/peach/releases/latest) |
-| macOS | [Apple Silicon / ARM64](https://github.com/VictorQi/peach/releases/latest) · [Intel / x86_64](https://github.com/VictorQi/peach/releases/latest) |
+| Windows x64 | [安装版][peach-windows-x64-setup.exe] · [免安装版][peach-windows-x64.zip] |
+| macOS | [Apple Silicon / ARM64][peach-macos-arm64.dmg] · [Intel / x86_64][peach-macos-x86_64.dmg] |
 | Docker / NAS | [部署说明](docs/DOCKER.md) |
 | 源码运行 | [安装步骤](docs/OPERATIONS.md#从源码运行windowsmacos)，需要 Git、uv 和 Python 3.14+ |
+
+[peach-windows-x64-setup.exe]: https://github.com/VictorQi/peach/releases
+[peach-windows-x64.zip]: https://github.com/VictorQi/peach/releases
+[peach-macos-arm64.dmg]: https://github.com/VictorQi/peach/releases
+[peach-macos-x86_64.dmg]: https://github.com/VictorQi/peach/releases
 
 安装后选择媒体目录，扫描后即可浏览与播放。桌面测试包未签名，macOS 尚未完成公证；详见 [Windows](docs/TESTING_DESKTOP.md) 与 [macOS](docs/OPERATIONS.md#macos-独立测试包) 说明。
 

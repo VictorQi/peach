@@ -466,7 +466,8 @@ class WebE2ESmokeTests(unittest.TestCase):
 
     @classmethod
     def _start_server(cls):
-        env = offline_environment(cls.root, cls.proxy, PEACH_DATA_ROOT=str(cls.data), PYTHONIOENCODING="utf-8")
+        env = offline_environment(cls.root, cls.proxy, PEACH_DATA_ROOT=str(cls.data), PYTHONIOENCODING="utf-8",
+                                  PEACH_TRAY_MANAGED='1')
         cls.log = cls.proxy.log = (cls.root / "serve.log").open("w", encoding="utf-8")
         cls.server = subprocess.Popen(
             [sys.executable, "-X", "utf8", "-m", "peach", "serve", "--host", "127.0.0.1",

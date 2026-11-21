@@ -3943,7 +3943,7 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
                          completed_at=time.time())
             state.update(interrupted_state(control))
             if isinstance(error, Cancelled):
-                state.update(status='cancelled', outcome='cancelled', stage='已停止', error='')
+                state.update(status='cancelled', outcome='cancelled', **stage_fields('job.stopped'), error='')
             state['traffic'] = traffic.snapshot(finished=state.get('status') in ('failed', 'cancelled'))
             _save(path, state)
             raise

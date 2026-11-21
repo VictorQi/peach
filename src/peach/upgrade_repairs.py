@@ -2198,9 +2198,9 @@ class UpgradeRepairs:
     def control(self, action: str) -> dict:
         """在现有设置中直接开始或停止；每次新一轮只处理开始时已有的内容。"""
         if not self.available:
-            raise ValueError('资料更新只在本机写入端可用')
+            raise UserValueError('errors.upgradeRepairs.localWriterOnly')
         if action not in ('start', 'pause'):
-            raise ValueError('请选择开始或停止派发')
+            raise UserValueError('errors.upgradeRepairs.invalidAction')
         self.prepare()
         with FileLock(str(self.receipt) + '.lock', timeout=0):
             receipt = _read(self.receipt)

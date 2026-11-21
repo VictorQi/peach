@@ -843,7 +843,9 @@ describe('设计决定：作品卡、管理页与复核', () => {
         assert.equal(await dialog.locator('[data-guide-banner][data-guide-completed]').count(), 1);
         await page.reload();
         await page.locator('#grid').waitFor();
-        assert.equal(await opener.isVisible(), false, '完成快速导览后刷新又显示了教程按钮');
+        await opener.waitFor({ state: 'visible' });
+        assert.equal(await dialog.isVisible(), false, '刷新后教程仍须主动打开');
+        assert.equal(await guide.isVisible(), false, '刷新后不自动播放导览');
         assert.deepEqual(writes, [], '只读教程触发了业务写入');
         await page.goto(new URL('/settings/maintenance', page.url()).href);
         await page.getByRole('region', { name: '新手教程', exact: true }).getByRole('button', { name: '重新打开', exact: true }).click();

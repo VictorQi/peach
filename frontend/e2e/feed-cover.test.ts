@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {after,before,describe,it} from 'node:test';
 import type {Browser,Route} from 'playwright-core';
 import {launch,layout,requiredEnv,VIEWPORTS} from './harness.ts';
+import {prepareKnownHomeFeed} from './home-feed-fixture.ts';
 
 describe('新作封面显示时机',()=>{
  let browser:Browser;
@@ -238,6 +239,7 @@ describe('新作封面显示时机',()=>{
    const context=await browser.newContext({viewport:{width:viewport.width,height:viewport.height}});
    try{
     const page=await context.newPage(),remote='https://covers.example.test/front.svg';
+    await prepareKnownHomeFeed(page);
     await page.route(/\/cover-image\?code=EXM-001$/,route=>route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="632" height="900"><rect width="632" height="900" fill="#0f0"/></svg>'}));
     await page.route(/\/api\/feeds\/discoveries\?/,route=>route.fulfill({json:{ok:true,items:[{id:1,code:'EXM-001',title:'示例新作',has_cover:false,cover_url:remote}]}}));
     await page.goto(requiredEnv('PEACH_E2E_ORIGIN')+'/');

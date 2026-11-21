@@ -1104,6 +1104,7 @@
       "sourceMissing": "This follow source doesn't exist.",
       "addedPendingCheck": "Added. Waiting to check for updates.",
       "addedCheckBusy": "Added. Another check is running, so this one will be checked later.",
+      "addedMissingCredentials": "Added. Complete the source credentials to check for updates.",
       "creatorBindingIncomplete": "Both entity_id and key are required.",
       "aliasGroupSpansProfiles": "These aliases are linked to more than one creator profile. Confirm which profile they belong to first.",
       "creatorNameRequired": "Enter a valid creator name.",
@@ -1240,6 +1241,23 @@
     }
   },
   "errors": {
+    "mediaImports": {
+      "choosePath": "Choose a folder or enter its full path.",
+      "absolutePath": "Enter the full path on the computer running Peach.",
+      "chooseFolder": "Choose a folder.",
+      "libraryChanged": "The library changed. Select it again.",
+      "chooseExisting": "Choose a folder you have already added.",
+      "folderChanged": "Folder settings changed. Try again.",
+      "startUnavailable": "The scan could not start. Try again.",
+      "queueUnavailable": "The scan could not be queued. Try again.",
+      "folderRemoved": "This folder was removed from the configuration.",
+      "readIncomplete": "The folder scan did not finish. Try again.",
+      "readOnly": "Add folders from a Peach instance that can modify this library.",
+      "updateInProgress": "An update is being installed. Add the folder afterward.",
+      "needSetup": "Complete the initial setup first.",
+      "databaseMismatch": "Finish the pending settings changes before adding a folder.",
+      "chooseOne": "Choose one folder."
+    },
     "seedSharing": {
       "invalidChoice": "Choose whether to enable public metadata contributions.",
       "previewFirst": "Preview the local metadata and confirm the sharing scope first.",
@@ -1715,6 +1733,7 @@
       "downloadBudgetSpent": "This run's download limit is used up. Run it again to continue; existing images are kept",
       "coolingDown": "The source is cooling down. Try again later; existing images are kept",
       "challengeTimedOut": "The source's human verification wasn't passed in time, so requests to it are paused for a while. Next time, open the collection browser from the taskbar and click the verification; existing images are kept",
+      "verificationRequired": "The source requires verification. Requests are paused and existing images are kept.",
       "rateLimited": "The source is rate limiting requests; the cooldown has been recorded. Existing images are kept",
       "coolingDownNamed": "{{label}} is paused. Try again in about {{minutes}} min",
       "rateLimitedNamed": "{{label}} is rate limiting. Try again in about {{minutes}} min",
@@ -1865,6 +1884,8 @@
       "offlineFailed": "The remote side rejected this task: PikPak reported that the cloud download failed"
     },
     "upgradeRepairs": {
+      "invalidAction": "Choose whether to start or pause dispatch.",
+      "localWriterOnly": "Metadata updates require a local library with write access.",
       "invalidReceipt": "The post-update processing record is invalid",
       "noDanglingReceipt": "No receipt for the dangling candidate repair",
       "integrityFailed": "The database integrity check failed while updating existing metadata",
@@ -2131,6 +2152,7 @@
       "withdrawalsMissing": "Seed must carry over every previous withdrawal unchanged"
     },
     "standaloneUpdate": {
+      "wrongPublisher": "This update is from a different publisher. Check again and download a new copy.",
       "checksumFailed": "The update package failed verification. Download it again.",
       "dataInsideProgram": "The data directory is inside the program directory, so it can't be replaced automatically",
       "databaseRestoreCheckFailed": "Database restore check failed",
@@ -3007,6 +3029,13 @@
     }
   },
   "labels": {
+    "mediaImports": {
+      "adding": "Adding folder: {{name}}",
+      "reading": "Scanning folder: {{name}}",
+      "added": "Folder added. Peach is scanning it.",
+      "readFolder": "Scan folder",
+      "finished": "Folder scan complete"
+    },
     "listSeparator": ", ",
     "resumeAt": {
       "earlyToday": "at {{clock}} today",

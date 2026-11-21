@@ -1104,6 +1104,7 @@
       "sourceMissing": "这个关注来源不存在",
       "addedPendingCheck": "已登记，等待检查更新",
       "addedCheckBusy": "已登记，另一次检查正在进行，这条稍后再查",
+      "addedMissingCredentials": "已登记，来源凭据尚未配置完整，暂未检查",
       "creatorBindingIncomplete": "entity_id 与 key 都要给",
       "aliasGroupSpansProfiles": "这组别名关联了多份创作者档案，请先确认档案归属",
       "creatorNameRequired": "请填写有效的创作者名称",
@@ -1240,6 +1241,23 @@
     }
   },
   "errors": {
+    "mediaImports": {
+      "choosePath": "请选择文件夹或填写完整路径",
+      "absolutePath": "请填写运行 Peach 的电脑上的完整文件夹路径",
+      "chooseFolder": "请选择文件夹",
+      "libraryChanged": "当前媒体库已变化，请重新选择",
+      "chooseExisting": "请选择已添加的文件夹",
+      "folderChanged": "文件夹配置已变化，请重试",
+      "startUnavailable": "暂时无法开始读取，请重试",
+      "queueUnavailable": "暂时无法安排读取，请重试",
+      "folderRemoved": "读取的文件夹已经从配置中移除",
+      "readIncomplete": "文件夹未读取完成，请重试",
+      "readOnly": "请在可修改媒体库的 Peach 实例中添加文件夹",
+      "updateInProgress": "正在安装更新，请稍后添加",
+      "needSetup": "请先完成首次设置",
+      "databaseMismatch": "当前媒体库与配置不一致，请先完成正在进行的设置变更",
+      "chooseOne": "请选择一个文件夹"
+    },
     "seedSharing": {
       "invalidChoice": "请选择是否开启公共资料贡献。",
       "previewFirst": "请先预览本机资料并确认分享范围。",
@@ -1715,6 +1733,7 @@
       "downloadBudgetSpent": "本趟下载量已用完，再跑一次接着采；已有图片保留",
       "coolingDown": "来源正在冷却，请稍后重试；已有图片保留",
       "challengeTimedOut": "来源的人机验证没有在限时内通过，暂停向它请求一段时间；下次可从任务栏点开采集浏览器点一下验证；已有图片保留",
+      "verificationRequired": "来源需要验证，已暂停请求。已有图片会保留。",
       "rateLimited": "来源限流，已记录冷却时间；已有图片保留",
       "coolingDownNamed": "{{label}} 暂停中，约 {{minutes}} 分钟后再试",
       "rateLimitedNamed": "{{label}} 限流，约 {{minutes}} 分钟后再试",
@@ -1865,6 +1884,8 @@
       "offlineFailed": "远端拒绝了这个任务：PikPak 报告离线失败"
     },
     "upgradeRepairs": {
+      "invalidAction": "请选择开始或停止派发",
+      "localWriterOnly": "资料更新只在本机写入端可用",
       "invalidReceipt": "更新后的处理记录格式无效",
       "noDanglingReceipt": "没有悬空候选补修的回执",
       "integrityFailed": "更新已有资料时账本完整性校验失败",
@@ -2131,6 +2152,7 @@
       "withdrawalsMissing": "种子必须原样继承全部历史撤销"
     },
     "standaloneUpdate": {
+      "wrongPublisher": "这份更新不属于当前发布源，请重新检查并下载。",
       "checksumFailed": "更新包校验失败，请重新下载",
       "dataInsideProgram": "数据目录位于程序目录内，不能自动替换",
       "databaseRestoreCheckFailed": "数据库恢复检查失败",
@@ -3007,6 +3029,13 @@
     }
   },
   "labels": {
+    "mediaImports": {
+      "adding": "添加文件夹：{{name}}",
+      "reading": "读取文件夹：{{name}}",
+      "added": "文件夹已添加，内容正在读取",
+      "readFolder": "读取文件夹",
+      "finished": "文件夹读取完成"
+    },
     "listSeparator": "、",
     "resumeAt": {
       "earlyToday": "今天凌晨 {{clock}}",

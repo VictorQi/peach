@@ -521,6 +521,9 @@ class RecoveryServiceCadenceTests(unittest.TestCase):
                                side_effect=lambda contract, track=None: self.restored.append(time.monotonic()))
         patcher.start()
         self.addCleanup(patcher.stop)
+        incremental = patch('peach.web_library_processing.dispatch_incremental')
+        incremental.start()
+        self.addCleanup(incremental.stop)
         self.module = web_job_recovery
         self.service = web_job_recovery.RecoveryService(
             SimpleNamespace(db_path=self.db, followups=Mock()), available=True)

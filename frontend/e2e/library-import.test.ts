@@ -17,7 +17,7 @@ describe('原位添加文件夹', () => {
     let selected = false;
     let added = false;
     const opened = await visit(browser, '/?thumb=0', viewport, async page => {
-      await page.route('**/api/items{,?*}', async route => {
+      await page.route(/\/api\/items(?:\?|$)/, async route => {
         // 空态只替换最初的列表，添加和后续读取、播放都走实际服务。
         if (!added) await route.fulfill({ json: { items: [], total: 0, has_more: false } });
         else await route.continue();

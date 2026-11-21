@@ -42,6 +42,7 @@ class FaultFixTests(unittest.TestCase):
                 mock.patch.object(web_job_recovery, 'resume',
                                   side_effect=lambda _db, handlers: handlers['library-processing']({})), \
                 mock.patch.object(web_job_recovery, 'w_library_processing', side_effect=stuck_in_processing), \
+                mock.patch('peach.web_library_processing.dispatch_incremental'), \
                 mock.patch('peach.error_reporting.local_event') as event:
             worker = threading.Thread(target=service.tick)
             worker.start()

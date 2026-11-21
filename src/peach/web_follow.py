@@ -2643,21 +2643,21 @@ def _save_discovery_aliases(store, author_name: str, aliases: list[str]) -> list
     return learned
 
 
-def _deferred_source_check_message(body, checked, provider, credential) -> str:
+def _deferred_source_check_code(body, checked, provider, credential) -> str:
     """首检未执行时，区分主动延后、并发占用与必需凭据尚未齐备。"""
     if body.get("defer_check"):
-        return "已登记，等待检查更新"
+        return "api.follow.addedPendingCheck"
     if checked.get("busy"):
-        return "已登记，另一次检查正在进行，这条稍后再查"
+        return "api.follow.addedCheckBusy"
     guide = CREDENTIAL_GUIDE.get(provider, {})
     if guide.get('requirement') == 'required':
         if credential is None:
-            return "已登记，来源凭据尚未配置完整，暂未检查"
+            return "api.follow.addedMissingCredentials"
         try:
             credential.require(*guide.get('fields', ()))
         except CredentialError:
-            return "已登记，来源凭据尚未配置完整，暂未检查"
-    return "已登记，等待检查更新"
+            return "api.follow.addedMissingCredentials"
+    return "api.follow.addedPendingCheck"
 
 
 def w_follow_source(contract, body) -> dict:
@@ -2719,8 +2719,7 @@ def w_follow_source(contract, body) -> dict:
             "source": source_id, "provider": parsed.provider,
             "provider_label": PROVIDER_LABELS.get(parsed.provider, parsed.provider),
             "ref": parsed.ref, "label": label, "ok": True, "deferred": True,
-            **message_fields("api.follow.addedPendingCheck" if body.get("defer_check") else
-                             "api.follow.addedCheckBusy"),
+            **message_fields(_deferred_source_check_code(body, checked, parsed.provider, credential)),
         }
     return {"ok": True, "source": source_id, "provider": parsed.provider,
             "ref": parsed.ref, "label": label, "checked": outcome,

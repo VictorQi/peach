@@ -145,7 +145,7 @@ def observe_many(db, observations):
         except FileNotFoundError:
             data = {'seen': {}, 'items': {}}
         if not isinstance(data.get('seen'), dict) or not isinstance(data.get('items'), dict):
-            raise ValueError('增量媒体队列格式无效，请检查状态文件')
+            raise ValueError('Invalid incremental media queue state')
         pending_ids, changed = [], False
         for asset_id, size, mtime_ns, new in observations:
             key, version = str(asset_id), [size, mtime_ns]

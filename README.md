@@ -63,10 +63,15 @@ Daily browsing opens the catalog without waiting for optional source checks. Cat
 
 | Method | Get started |
 | --- | --- |
-| Windows x64 | [Installer](https://github.com/VictorQi/peach/releases/latest) · [Portable](https://github.com/VictorQi/peach/releases/latest) |
-| macOS | [Apple Silicon / ARM64](https://github.com/VictorQi/peach/releases/latest) · [Intel / x86_64](https://github.com/VictorQi/peach/releases/latest) |
+| Windows x64 | [Installer][peach-windows-x64-setup.exe] · [Portable][peach-windows-x64.zip] |
+| macOS | [Apple Silicon / ARM64][peach-macos-arm64.dmg] · [Intel / x86_64][peach-macos-x86_64.dmg] |
 | Docker / NAS | [Deployment guide](docs/DOCKER.md) |
 | Source | [Setup instructions](docs/OPERATIONS.md#从源码运行windowsmacos); requires Git, uv and Python 3.14+ |
+
+[peach-windows-x64-setup.exe]: https://github.com/VictorQi/peach/releases
+[peach-windows-x64.zip]: https://github.com/VictorQi/peach/releases
+[peach-macos-arm64.dmg]: https://github.com/VictorQi/peach/releases
+[peach-macos-x86_64.dmg]: https://github.com/VictorQi/peach/releases
 
 Choose your media folders after installation, then scan to start browsing and playing. Desktop test builds are unsigned, and macOS builds are not notarized. See the [Windows](docs/TESTING_DESKTOP.md) and [macOS](docs/OPERATIONS.md#macos-独立测试包) guides.
 

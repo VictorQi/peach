@@ -21,6 +21,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -28,6 +29,7 @@ import unittest
 from peach.diagnostic_browser import BUNDLE_CHUNK_NAME
 from scripts import npm_backports, test_history
 from test_frontend_preflight import frontend_npm
+from support.conditions import missing_prerequisite
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
@@ -407,14 +409,18 @@ class VitestTests(unittest.TestCase):
         self.assertIn("maxWorkers: 4", config)
 
     def test_the_island_suite_passes(self):
-        npm = frontend_npm("vitest", "vitest")
+        frontend_npm("vitest", "vitest")
+        node = shutil.which("node")
+        if node is None:
+            missing_prerequisite("运行 Vitest 需要 Node.js")
         # 定向入口（含全量失败后的单独重跑）只跑指定的几个文件，路径相对 frontend/。
         selected = json.loads(os.environ.get("PEACH_VITEST_FILES", "[]"))
         # 另挂一个 JSON 报告器，把逐条结果交给测试结果历史；控制台输出与判据不变。
         with tempfile.TemporaryDirectory() as folder:
             report = Path(folder) / "vitest.json"
+            # Windows 的 npm.cmd 会先把长测试清单交给 cmd.exe；直接启动 Vitest 保留完整参数。
             completed = subprocess.run(
-                [npm, "--prefix", str(FRONTEND), "test", "--silent", "--",
+                [node, str(FRONTEND / "node_modules/vitest/vitest.mjs"), "run",
                  "--reporter=default", "--reporter=json", f"--outputFile.json={report}", *selected],
                 capture_output=True, text=True, encoding="utf-8", errors="replace",
                 cwd=str(FRONTEND), check=False)

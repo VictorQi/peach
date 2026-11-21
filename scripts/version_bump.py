@@ -20,6 +20,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from peach.interface_text import dev as t  # noqa: E402
+from peach.release_updates import REPOSITORY  # noqa: E402
 
 #: 版本号的唯一来源。GitHub Release 的 `v<版本>` tag 必须与它相等。
 VERSION_FILE = "src/peach/__init__.py"
@@ -29,6 +30,11 @@ VERSION_PATTERN = re.compile(r'(__version__\s*=\s*")(\d+)\.(\d+)\.(\d+)(")')
 #: 制品齐了以后才把它们换到新版本，发布前后读者都拿得到能下载的链接。
 README_FILES = ("README.md", "README.zh-CN.md")
 DOWNLOAD_LINK = re.compile(r"releases/download/v(\d+\.\d+\.\d+)/Peach-(\d+\.\d+\.\d+)-([^)\s]+)")
+RELEASE_PAGE = f"https://github.com/{REPOSITORY}/releases"
+FIRST_RELEASE_ASSETS = frozenset({"windows-x64-setup.exe", "windows-x64.zip", "macos-arm64.dmg", "macos-x86_64.dmg"})
+FIRST_RELEASE_LINK = re.compile(
+    rf"(?m)^\[peach-({'|'.join(map(re.escape, sorted(FIRST_RELEASE_ASSETS)))})\]: {re.escape(RELEASE_PAGE)}$"
+)
 
 #: 版本标签的形状。`--match` 用它排除别的标签，免得把某个临时标签当成上一个发布点。
 TAG_GLOB = "v[0-9]*.[0-9]*.[0-9]*"
@@ -198,6 +204,8 @@ def read_version(root: Path) -> str:
 
 def point_downloads_at(text: str, version: str) -> str:
     """把正文里每条 Release 下载直链换到 `version`，其余字节不动。"""
+    text = FIRST_RELEASE_LINK.sub(
+        lambda match: f"[peach-{match[1]}]: {RELEASE_PAGE}/download/v{version}/Peach-{version}-{match[1]}", text)
     return DOWNLOAD_LINK.sub(
         lambda match: f"releases/download/v{version}/Peach-{version}-{match.group(3)}", text)
 
@@ -208,6 +216,7 @@ def readme_assets(root: Path, version: str) -> list[str]:
     for name in README_FILES:
         text = (root / name).read_bytes().decode("utf-8")
         names.update(f"Peach-{version}-{suffix}" for *_, suffix in DOWNLOAD_LINK.findall(text))
+        names.update(f"Peach-{version}-{suffix}" for suffix in FIRST_RELEASE_LINK.findall(text))
     return sorted(names)
 
 
@@ -219,6 +228,8 @@ def readme_link_problems(root: Path, *, version: str | None = None, revision: st
         text = git(root, "show", f"{revision}:{name}") if revision else (root / name).read_text(encoding="utf-8")
         links = DOWNLOAD_LINK.findall(text)
         versions = {version for tag, asset, _ in links for version in (tag, asset)}
+        if not links and revision is None and set(FIRST_RELEASE_LINK.findall(text)) == FIRST_RELEASE_ASSETS:
+            continue
         if not links:
             problems.append(t("version_bump.readmeNoLinks", name=name))
         elif len(versions) != 1 or not versions <= set(allowed):
