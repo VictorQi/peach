@@ -15,10 +15,17 @@ from collections.abc import Iterable
 from functools import lru_cache
 from pathlib import PureWindowsPath
 
+#: 规则给出的几种取值（ADR-0162 的英文 id）。本模块是最底层纯规则、不依赖别的 Peach 模块，定义放在这里，
+#: `catalog_vocabulary` 从这里导入后对外提供，含义与用法见那边的说明。
+PERFORMER_TAG_PREFIX = "performer:"
+CHINESE_SUBTITLES = "chinese-subtitles"
+UNCENSORED, UNCENSORED_LEAK, UNCENSORED_CRACK = "uncensored", "uncensored-leak", "uncensored-crack"
+FC2_MAIN_PART, FC2_BONUS_PREFIX = "main", "bonus-"
+
 
 VIDEO_EXTENSIONS = frozenset({
     '.mp4', '.m4v', '.mkv', '.avi', '.wmv', '.mov', '.ts', '.flv', '.rmvb', '.mpg',
-    '.m2ts', '.strm', '.iso',
+    '.m2ts', '.strm', '.iso', '.webm',
 })
 AUDIO_EXTENSIONS = frozenset({'.mp3', '.flac', '.wav', '.m4a', '.ogg', '.opus'})
 _EXTRA_SUFFIXES = {
@@ -261,6 +268,28 @@ _CODE_DATE = re.compile(rf"^{_MMDDYY}[-_]\d{{2,4}}$")
 #: 没有实证的形态放进来，素材编号和文件计数都会被当成番号。
 _KIRARI_BODY = r"MKB?D-S\d{2,4}"
 _KIRARI_CODE = re.compile(rf"^{_KIRARI_BODY}$", re.I)
+#: 厂牌段是「一个字母加数字」的番号，只认登记过的厂牌。放开成任意「字母+数字」的话，
+#: 厂牌名 `S1`、`G1`，画质词 `X1080`、`VR180`，素材编号 `G2115`、`p1000` 都会被读成番号
+#: （后三种本机账本里都有）。
+#: TMA 的 `T28`、`T38`：JavBus 片商页 `studio/54` 2026-11-14 全量翻过，这两段分别 282、65 部，
+#: 序号三位，TMA 别的字母段都是纯字母；r18.dev 给 `T28-612` 的 content_id 是 `55t2800612`。
+#: S Model 的 `S2M`（アンコール，序号三位）、`S2MBD`（BD 版，序号三位）、`S2MCR`（Model Collection Remix，序号两位）与
+#: キャットウォーク的 `CW3D2DBD`（序号两位）：#124 报告，2026-11-16 在 JavDB 搜索页核过
+#: `S2M-009`、`S2MCR-08`、`CW3D2DBD-14` 都按这个写法收录。两位序号的段在 `SERIAL_WIDTHS` 里登记位数。
+#: 交替按长度从长到短排：`S2MCR-08` 不能先被 `S2M` 吃掉一截。
+DIGIT_LABELS = ("CW3D2DBD", "S2MBD", "S2MCR", "S2M", "T28", "T38")
+DIGIT_LABEL_PATTERN = "(?:" + "|".join(sorted(DIGIT_LABELS, key=lambda label: (-len(label), label))) + ")"
+_DIGIT_LABEL_TEXT = re.compile(rf"^({DIGIT_LABEL_PATTERN})[-_. ]?(\d{{2,5}})$", re.I)
+_DIGIT_LABEL_CODE = re.compile(rf"^{DIGIT_LABEL_PATTERN}-\d{{2,5}}$")
+#: 尾字母属于番号本身的厂牌段：アイビーワークス 的 `IBW-483z`。JavDB 2026-11-16 搜索页里
+#: `IBW-483z`、`IBW-489z`、`IBW-493z`、`IBW-583z` 都带 `z`（#124）。别的段的尾字母多半是版次
+#: （`ADN-516C` 的 `C` 是中字），所以只认登记过的段与字母，版次标记照旧按共享规则剥掉。
+LABEL_SUFFIXES = {"IBW": "Z"}
+SUFFIXED_CODE_PATTERN = "(?:" + "|".join(
+    f"{label}-\\d{{2,5}}{suffix}" for label, suffix in sorted(LABEL_SUFFIXES.items())) + ")"
+_SUFFIXED_TEXT = re.compile(
+    "^(" + "|".join(sorted(LABEL_SUFFIXES)) + r")[-_. ]?(\d{2,5})("
+    + "|".join(sorted(set(LABEL_SUFFIXES.values()))) + r")(?![A-Za-z0-9])", re.I)
 
 #: Tokyo-Hot 的编号没有厂牌字母段：`n1234`／`k1234` 是本编，`red-123` 是 Red Hot 支线。
 #: 规范写法取小写，不跟着别的番号大写——javbus 的作品页地址就是 `/n1234`，NeoAVDC
@@ -324,7 +353,7 @@ _BRACKETED_PROMO_DOMAIN = re.compile(
     r"[\[【(（]\s*" + _PROMO_DOMAIN.pattern + r"\s*[\]】)）]", re.I,
 )
 _EDITION_TAIL = re.compile(
-    r"(?:[-_.\s]+(?:c|ch|sub|uc|u|uncen(?:sored)?|uncensored|中字|中文字幕|无码|无码破解|破解))+$",
+    r"(?:[-_.\s]+(?:c|ch|sub|uc|u|ltx|uncen(?:sored)?|uncensored|中字|中文字幕|无码|无码破解|破解))+$",
     re.I,
 )
 
@@ -353,7 +382,7 @@ REPOST_SITE_LABELS = frozenset({
 
 #: 画质标记落在番号前面，剥掉才露出番号主体（`HD-abp-758` → `abp-758`）。
 _QUALITY_HEAD = re.compile(r"^(?:hd|fhd|sd|uhd|4k|2160p?|1080p?|720p?)[-_. ]+", re.I)
-#: 版本标记：`-C`/`-CH` 是中文字幕版，`-UC` 是无码流出，画质词也可能落在词尾。
+#: 版本标记：`-C`/`-CH` 是中文字幕版，`-UC` 是无码（有码番号上算破解），画质词也可能落在词尾。
 #: token 单独列成一份，字幕 sidecar 配对要剥掉同一批后缀（`subtitles.py`）；各写一份
 #: 的话，哪天多认一个版次标记，字幕就配不上那一批文件。
 VERSION_TAIL_TOKENS = ("ch", "sub", "uc", "fhd", "4k", "hd", "c", "u")
@@ -379,7 +408,8 @@ _CODE_BODY = re.compile(r"^(?:\d{3})?[A-Za-z]{2,8}[-_. ]?\d{2,5}$")
 _FORUM_URL_WRAPPER = re.compile(r"^\[url\](.+)\[(?:\||/)url\]$", re.I)
 _REMUX_CODE_TAIL = re.compile(r"\(([A-Za-z]{2,8}-\d{2,5})\)\[BD[ ._-]Remux\]$", re.I)
 _INLINE_STUDIO_CODE = re.compile(
-    rf"(?<![A-Za-z0-9])(?:(?:\d{{3}})?[A-Za-z]{{2,8}}-\d{{2,5}}|{_KIRARI_BODY})(?![A-Za-z0-9])", re.I)
+    rf"(?<![A-Za-z0-9])(?:(?:\d{{3}})?[A-Za-z]{{2,8}}-\d{{2,5}}|{_KIRARI_BODY}|{DIGIT_LABEL_PATTERN}-\d{{2,5}})"
+    r"(?![A-Za-z0-9])", re.I)
 
 #: DMM 自己交付的文件名：四位发行日（`0112` 是 1 月 12 日）顶在番号前面，编码写在后面。
 #: 四位是判据的关键——素人系的前缀恰好三位（`259LUXU-1007`），放宽到「若干位数字」
@@ -486,7 +516,7 @@ _QUALITY_TOKEN = re.compile(r"^(?:hd|fhd|sd|uhd|4k|2160p?|1080p?|720p?)$", re.I)
 #: （`TG-2025-01-27`）是日期。只取词元开头这一段，紧跟的版次和分卷（`-C`、`-CD1`、
 #: `_part1`）不影响番号。
 _HYPHENATED_CODE = re.compile(
-    rf"^(?:{_KIRARI_BODY}(?![0-9])|(?:\d{{3}})?[A-Z]{{2,8}}-\d{{3,5}}(?![0-9]|-\d{{2}}-\d))",
+    rf"^(?:{_KIRARI_BODY}(?![0-9])|(?:(?:\d{{3}})?[A-Z]{{2,8}}|{DIGIT_LABEL_PATTERN})-\d{{3,5}}(?![0-9]|-\d{{2}}-\d))",
     re.I,
 )
 #: 用户番号识别规则的上限。每条规则要对库里每个文件名跑一遍，条数和长度都设个顶。
@@ -617,6 +647,10 @@ def normalise_code_key(code: str | None) -> str:
     short_fc2 = _FC2_ID.match(value)
     if short_fc2:
         return f"FC2-PPV-{short_fc2.group(1)}"
+    digit_label = _DIGIT_LABEL_TEXT.fullmatch(value)
+    if digit_label:
+        label, digits = digit_label.groups()
+        return f"{label}-{code_serial(label, digits)}"
     shape = re.fullmatch(r"(\d{3})?([A-Z]+)-?(\d+)([A-Z]{0,2})", value)
     if not shape:
         return value
@@ -632,17 +666,24 @@ def normalise_code_key(code: str | None) -> str:
 #: 130 分钟）。代价是随手写成 `MCDV-24` 的有码片会被认成无码那部。
 SHORT_SERIAL_PREFIXES = frozenset({"MCDV"})
 
+#: 官方编号定宽、不足位数补零的字母段。`HEYZO`：官网与各来源都写四位（`HEYZO-0707`），
+#: 按三位收成 `HEYZO-707` 就查不到资料（#354）。
+SERIAL_WIDTHS = {"HEYZO": 4, "S2MCR": 2, "CW3D2DBD": 2, "CDRP": 2}
+
 
 def _keeps_width(letters: str, digits: str) -> bool:
     return len(digits) < 3 and letters.upper() in SHORT_SERIAL_PREFIXES
 
 
 def code_serial(letters: str, digits: str) -> str:
-    """番号数字段的规范写法：补零到三位，`SHORT_SERIAL_PREFIXES` 的短号按原写保留。
+    """番号数字段的规范写法：补零到三位，`SERIAL_WIDTHS` 的字母段补到登记的位数，
+    `SHORT_SERIAL_PREFIXES` 的短号按原写保留。
 
-    三位以上的前导零一律收掉：DMM 的 `mcdv00024` 与 `MCDV-024` 是同一部。
+    多出来的前导零一律收掉：DMM 的 `mcdv00024` 与 `MCDV-024` 是同一部。
     """
-    return digits if _keeps_width(letters, digits) else f"{int(digits):03d}"
+    if _keeps_width(letters, digits):
+        return digits
+    return f"{int(digits):0{SERIAL_WIDTHS.get(letters.upper(), 3)}d}"
 
 
 def code_serial_pattern(letters: str, digits: str) -> str:
@@ -677,6 +718,7 @@ def is_jav_code(code: str | None) -> bool:
         or _CODE_AMATEUR.match(value)
         or _CODE_DATE.match(value)
         or _KIRARI_CODE.match(value)
+        or _DIGIT_LABEL_CODE.match(value)
         or tokyo_hot_code(value)
     )
 
@@ -770,6 +812,11 @@ def _release_identity(code: str) -> str:
         # 来源只给一串数字时分隔符无从得知，原样留着数字，别替它挑一个片商。
         # 与带分隔符那一侧的比对交给 `same_release_code`。
         return value
+    digit_label = re.fullmatch(rf"(\d{{1,4}})?({DIGIT_LABEL_PATTERN})(\d{{2,5}})", value)
+    if digit_label:
+        # DMM 的 content_id 带片商数字头（`55t2800612`），和别的番号一样留在身份里。
+        prefix, label, number = digit_label.groups()
+        return f"{prefix or ''}{label}-{code_serial(label, number)}"
     shape = _RELEASE_ID.fullmatch(value)
     if shape:
         prefix, letters, number, suffix = shape.groups()
@@ -819,6 +866,8 @@ def code_letter_stem(code: str | None) -> str:
     value = normalise_code_key(code)
     if not value or value.startswith("FC2"):
         return ""
+    if _DIGIT_LABEL_CODE.fullmatch(value):
+        return value.split("-", 1)[0].lower()
     return re.sub(r"[^A-Z]", "", value.split("-", 1)[0]).lower()
 
 
@@ -940,10 +989,35 @@ def release_code_from_text(value: str | None) -> str | None:
     if date:
         return f"{date.group(1)}{date.group(2)}{date.group(3)}"
     body = VERSION_TAIL.sub("", _QUALITY_HEAD.sub("", text))
+    suffixed = _suffixed_code(body, whole=True)
+    if suffixed:
+        return suffixed
     canonical = normalise_code_key(body)
-    if not (_CODE_BODY.fullmatch(body) or _KIRARI_CODE.fullmatch(canonical)) or is_code_body_stopword(body):
+    if not (_CODE_BODY.fullmatch(body) or _KIRARI_CODE.fullmatch(canonical)
+            or _DIGIT_LABEL_TEXT.fullmatch(body)) or is_code_body_stopword(body):
         return None
     return canonical if is_jav_code(canonical) else None
+
+
+def _suffixed_code(text: str, *, whole: bool = False) -> str:
+    """`LABEL_SUFFIXES` 登记的「字母段 + 序号 + 尾字母」番号；`whole` 要求整段就是它。"""
+    shape = _SUFFIXED_TEXT.match(text)
+    if not shape or (whole and shape.end() != len(text)):
+        return ""
+    label, digits, suffix = shape.group(1).upper(), shape.group(2), shape.group(3).upper()
+    return normalise_code_key(f"{label}-{digits}{suffix}") if LABEL_SUFFIXES.get(label) == suffix else ""
+
+
+def without_label_suffix(code: str | None) -> str:
+    """登记尾字母番号去掉尾字母后的写法（`IBW-483Z` → `IBW-483`）；不是这一类返回空串。
+
+    旧版把尾字母当版次剥掉，存下的就是这个写法；升级补修按它认出要改回的行。
+    """
+    value = normalise_code_key(code)
+    shape = re.fullmatch(r"([A-Z]+)-(\d+)([A-Z])", value)
+    if not shape or LABEL_SUFFIXES.get(shape.group(1)) != shape.group(3):
+        return ""
+    return f"{shape.group(1)}-{shape.group(2)}"
 
 
 def _tokyo_hot_from_text(text: str) -> str:
@@ -958,8 +1032,17 @@ def _tokyo_hot_from_text(text: str) -> str:
     return ""
 
 
+class CodePatternError(ValueError):
+    """番号识别规则写错了。`code`、`params` 是给用户看的那句的语言资源键与参数，调用方据此转成带 code 的报错
+    （本模块是最底层的纯规则，不依赖 Peach 的其他模块）。"""
+
+    def __init__(self, code: str, params: dict | None = None) -> None:
+        self.code, self.params = code, dict(params or {})
+        super().__init__(f"invalid code pattern ({code})")
+
+
 def compile_code_patterns(raw) -> tuple[re.Pattern, ...]:
-    """把用户写的番号识别规则编译成正则；写错的规则抛 `ValueError`，消息给用户看。
+    """把用户写的番号识别规则编译成正则；写错的规则抛 `CodePatternError`（`ValueError`），带给用户看的 code。
 
     每条规则是一个对完整文件名做搜索的正则。番号取命名组 `code`，没有就取第一个
     括号，再没有就取整段匹配。`(?<code>…)` 是多数在线正则工具的写法，Python 写作
@@ -968,18 +1051,20 @@ def compile_code_patterns(raw) -> tuple[re.Pattern, ...]:
     if raw is None:
         return ()
     if not isinstance(raw, (list, tuple)):
-        raise ValueError("番号识别规则要写成一组正则表达式")
+        raise CodePatternError("errors.catalogRules.codePatternsNotList")
     rules = [str(rule).strip() for rule in raw if str(rule or "").strip()]
     if len(rules) > CODE_PATTERN_LIMIT:
-        raise ValueError(f"番号识别规则最多 {CODE_PATTERN_LIMIT} 条")
+        raise CodePatternError("errors.catalogRules.codePatternsTooMany", {"limit": CODE_PATTERN_LIMIT})
     compiled = []
     for index, rule in enumerate(rules, 1):
         if len(rule) > CODE_PATTERN_MAX_LENGTH:
-            raise ValueError(f"第 {index} 条规则超过 {CODE_PATTERN_MAX_LENGTH} 个字符")
+            raise CodePatternError("errors.catalogRules.codePatternTooLong",
+                                   {"index": index, "limit": CODE_PATTERN_MAX_LENGTH})
         try:
             compiled.append(re.compile(_PCRE_NAMED_GROUP.sub("(?P<", rule), re.I))
         except re.error as error:
-            raise ValueError(f"第 {index} 条规则不是有效的正则表达式：{error}") from None
+            raise CodePatternError("errors.catalogRules.codePatternInvalid",
+                                   {"index": index, "error": str(error)}) from None
     return tuple(compiled)
 
 
@@ -1105,7 +1190,9 @@ def _titled_release_code(stem: str) -> str | None:
         if _QUALITY_TOKEN.match(token):
             continue
         head = _HYPHENATED_CODE.match(token)
-        return release_code_from_text(head.group(0)) if head else None
+        if not head:
+            return None
+        return _suffixed_code(token) or release_code_from_text(head.group(0))
     return None
 
 
@@ -1118,6 +1205,9 @@ def _jav_code_pattern(code: str | None) -> str:
     fc2 = re.fullmatch(r"FC2-PPV-(\d+)", canonical)
     if fc2:
         return rf"FC2(?:[-_ ]?PPV)?[-_ ]*0*{re.escape(fc2.group(1))}"
+    if _DIGIT_LABEL_CODE.fullmatch(canonical):
+        label, serial = canonical.split("-", 1)
+        return rf"{label}[-_ ]*{code_serial_pattern(label, serial)}"
     amateur = re.fullmatch(r"(\d{3})?([A-Z]+)-(\d+)([A-Z]{0,2})", canonical)
     if amateur:
         prefix, letters, digits, suffix = amateur.groups()
@@ -1148,6 +1238,16 @@ UNCENSORED_CODE_SHAPES = (
     re.compile(r"^HEYZO-\d{2,5}$", re.I),
     _TOKYO_HOT_BODY,
 )
+#: 番号形状和有码一样、片商只出无码的厂牌字母段：S Model（`SMBD`／`SMD`／`SMDV`／`S2M`）、
+#: スカイハイ（`SKY`／`SKYHD`）、キャットウォーク（`CWP`／`CWPBD`），以及 `DRG`、`LAF` 两个系列
+#: 与各自的 `BD` 版。取 amane `parsing/file_info.py` 与 mdcz `67bb8bc5` 两份前缀表的交集，
+#: 本机账本 2026-11-04 只读核过 `SMBD`、`CWPBD`、`SKY` 都挂在这几家无码片商名下。
+#: 两表里的两字母段（`BT`、`KP`、`PT`…）和 `JAV`、`RED`、`TS` 会撞有码番号，不收；
+#: `MCDV` 一个字母段两家共用（ADR-0133）；KIRARI 只认带 `S` 的序号（`_KIRARI_CODE`）。
+#: 这一类只决定来源链与「无码」徽章，不进 `UNCENSORED_CODE_SHAPES`：它们的封面是常规封套，
+#: 取景照旧按有码裁。
+_UNCENSORED_LABEL_CODE = re.compile(
+    r"^(?:SMBD|SMD|SMDV|S2M|S2MBD|SKY|SKYHD|CWP|CWPBD|DRG|DRGBD|LAF|LAFBD)-\d{2,5}$", re.I)
 #: 文件名里的发行站标记。番号形状认不出来时，这是另一条本机就能核验的证据。
 _UNCENSORED_SITE = re.compile(
     r"(?i)(?<![A-Z0-9])(?:"
@@ -1163,6 +1263,11 @@ _GLUED_EDITION = r"(?:CH|C|SUB|UC|U)"
 def is_uncensored_code(code: str | None) -> bool:
     value = str(code or "").strip()
     return any(shape.fullmatch(value) for shape in UNCENSORED_CODE_SHAPES)
+
+
+def is_uncensored_label_code(code: str | None) -> bool:
+    """有码形状、但字母段属于只出无码的片商（`_UNCENSORED_LABEL_CODE`）。"""
+    return bool(_UNCENSORED_LABEL_CODE.fullmatch(str(code or "").strip()))
 
 
 def code_release_date(code: str | None) -> str | None:
@@ -1183,7 +1288,8 @@ def is_uncensored_release(name: str | None, code: str | None) -> bool:
     这两条都是本机可核验的证据，不依赖抓取结果——`040221-001` 这类番号在
     r18.dev 永远 404，等元数据到齐再判，徽章就永远不会出现。
     """
-    return is_uncensored_code(code) or bool(_UNCENSORED_SITE.search(str(name or "")))
+    return (is_uncensored_code(code) or is_uncensored_label_code(code)
+            or bool(_UNCENSORED_SITE.search(str(name or ""))))
 
 
 #: 先排除没有版次标记的名字，避免逐作品编译番号表达式。左侧不加边界，
@@ -1193,8 +1299,58 @@ _EDITION_EVIDENCE = re.compile(
 
 
 def jav_edition_badges(name: str | None, code: str | None,
-                       tags: tuple[str, ...] | list[str] = ()) -> list[str]:
-    """Project filename/tag evidence into compact edition badges beside the code."""
+                       tags: tuple[str, ...] | list[str] = (),
+                       source_names: tuple[str, ...] | list[str] = ()) -> list[str]:
+    """Project filename/tag evidence into compact edition badges beside the code.
+
+    给出的是版次 id（`catalog_vocabulary` 的 `CHINESE_SUBTITLES`、`UNCENSORED` 等），界面按语言显示。
+
+    `source_names` 是这个文件来源处的名字：云下载的种子名与网盘任务名。网盘离线下载
+    落地的文件名常常只剩番号，`SONE-804ch` 里的 `ch` 只留在任务名上。来源名按同一套
+    判据读，和文件名的关系是：
+    - 中字只有「有」这一个方向，任何一边有就算；
+    - 无码类版次以文件侧（文件名、番号形状、标签）为准；文件侧什么都没说，或只有泛泛的
+      `-U`／标签「无码」时，才用来源名里明说的那一档。文件名写 `-U`、种子名写「流出」，
+      结果是无码流出（`UNCENSORED_LEAK`）。
+    几个来源名之间不分先后，各取所说最具体的一档（`UNCENSORED_EDITIONS` 的次序）。
+    """
+    subtitled, kind, generic = _edition_evidence(name, code, tags)
+    evidence = [_edition_evidence(source, code) for source in source_names]
+    subtitled = subtitled or any(item[0] for item in evidence)
+    if not kind or generic:
+        # 文件侧只有泛泛的 `-U`／标签「无码」时，来源名里明说的流出、破解压过它。
+        explicit = [item[1] for item in evidence if item[1] and not item[2]]
+        fallback = [item[1] for item in evidence if item[1]]
+        candidates = explicit or ([] if kind else fallback)
+        if candidates:
+            kind = min(candidates, key=UNCENSORED_EDITIONS.index)
+    return ([CHINESE_SUBTITLES] if subtitled else []) + ([kind] if kind else [])
+
+
+#: 无码类版次，按「谁说得更具体」排：破解 > 流出 > 无码（同 mdcz `bc4e8828`）。
+UNCENSORED_EDITIONS = (UNCENSORED_CRACK, UNCENSORED_LEAK, UNCENSORED)
+#: 有码片商的番号：字母段加 2–5 位序号，含 MGS 素人系的三位数字前缀。这类片商不出无码版，
+#: 文件名上的 `-U`／`uncensored` 说的只能是事后的去码版本。
+_CENSORED_RELEASE = re.compile(r"^(?:\d{3})?[A-Z]{2,8}-\d{2,5}$")
+
+
+def _censored_release(code: str | None) -> bool:
+    value = normalise_code_key(code)
+    return bool(_CENSORED_RELEASE.fullmatch(value)) and not is_uncensored_label_code(value)
+
+
+def _edition_evidence(name: str | None, code: str | None,
+                      tags: tuple[str, ...] | list[str] = ()) -> tuple[bool, str, bool]:
+    """一段名字（加标签）给出的版次证据：(中字, 无码档, 无码档是否只凭泛泛的无码标记)。
+
+    无码档取 `UNCENSORED_EDITIONS` 之一或空串：
+    - 无码片商的片是「无码」，文件名再写什么都不改；
+    - 明写破解（`破解`、`AI去码`、`-LTX`、`-UMR`、`-C-U`）是「无码破解」；
+    - 明写流出（`流出`、`leak`、`leaked`）是「无码流出」；
+    - 只有 `-U`／`-UC`／`uncensored` 或标签「无码」：有码片商的番号是「无码破解」——真流出的片很少，
+      网上流传的去码版绝大多数是破解（mdcz issue #80 的用户原话把 `番号-U` 叫作 AI 破解版）；
+      FC2 这类本身就可能无码的片仍是「无码」。
+    """
     text = _MEDIA_EXTENSION.sub("", str(name or ""))
     tag_set = {str(tag).strip().casefold() for tag in tags if str(tag).strip()}
     code_pattern = _jav_code_pattern(code) if _EDITION_EVIDENCE.search(text) else ''
@@ -1206,36 +1362,43 @@ def jav_edition_badges(name: str | None, code: str | None,
         if code_pattern else None
     )
     suffix = after_code.group(1) if after_code and after_code.group(1) else ""
+    # `-C-U` 整个是破解标记，不是「中字 + 无码」（mdcz `b3b1ef79` 先剪掉它再判字幕）。
+    cracked_cu = re.compile(r"(?:^|[-_.\s\[])c[-_.\s]u(?=$|[-_.\s\]])", re.I)
     cracked = (
         bool(re.search(r"无码\s*破解|無碼\s*破解|AI\s*去码|"
                        r"(?:^|[-_.\s\[])破解(?:$|[-_.\s\]])", text, re.I))
+        # `-LTX`、`-UMR` 是破解版的发布标记（amane #613、mdcz `bc4e8828`、`b3b1ef79` 同认）。
+        # 只看番号之后那段：`LTX` 自己也能是番号的字母段。
+        or bool(re.search(r"(?:^|[-_.\s\[])(?:ltx|umr)(?:$|[-_.\s\]])", suffix, re.I))
+        or bool(cracked_cu.search(suffix))
         or "ai去码" in tag_set or "无码破解" in tag_set
     )
-    uncensored = (
-        cracked
-        or "无码" in tag_set
-        # 无码片商的片本身就是无码，不需要文件名里另有 `-U`／`Uncen` 标记。
-        or is_uncensored_release(name, code)
-        # `un` 和 `u`／`uc` 是同一个意思。此前它没进这张表，`ABF-158-UN.mp4`
-        # 既拿不到徽章，`UN` 又被当标题显示；现在标题判空了，不认它就等于把
-        # 这条信息整个丢掉。
-        or bool(re.search(r"(?:^|[-_.\s\[])"
-                          r"(?:uc|un|u|uncen(?:sored)?|uncensored|无码|無碼)"
-                          r"(?:$|[-_.\s\]])", suffix, re.I))
+    suffix = cracked_cu.sub("", suffix)
+    leaked = (
+        bool(re.search(r"(?:^|[-_.\s\[])(?:流出|无码流出|無碼流出|leak|leaked)(?:$|[-_.\s\]])",
+                       suffix, re.I))
+        or "无码流出" in tag_set
     )
+    # `un` 和 `u`／`uc` 是同一个意思。此前它没进这张表，`ABF-158-UN.mp4` 既拿不到徽章，
+    # `UN` 又被当标题显示；现在标题判空了，不认它就等于把这条信息整个丢掉。
+    marked = "无码" in tag_set or bool(re.search(
+        r"(?:^|[-_.\s\[])(?:uc|un|u|uncen(?:sored)?|uncensored|无码|無碼)(?:$|[-_.\s\]])",
+        suffix, re.I))
     subtitled = (
         bool({"中文字幕", "内嵌字幕", "外挂字幕", "中字"}.intersection(tag_set))
         or bool(re.search(r"(?:^|[-_.\s\[])(?:c|ch|sub|中字|中文字幕)"
                           r"(?:$|[-_.\s\]])", suffix, re.I))
     )
-    badges = []
-    if subtitled:
-        badges.append("中字")
+    # 无码片商的片本身就是无码，不需要文件名里另有 `-U`／`Uncen` 标记。
+    if is_uncensored_release(name, code):
+        return subtitled, UNCENSORED, False
     if cracked:
-        badges.append("无码破解")
-    elif uncensored:
-        badges.append("无码")
-    return badges
+        return subtitled, UNCENSORED_CRACK, False
+    if leaked:
+        return subtitled, UNCENSORED_LEAK, False
+    if marked:
+        return subtitled, UNCENSORED_CRACK if _censored_release(code) else UNCENSORED, True
+    return subtitled, "", False
 
 
 #: 头尾的裸域名不允许标签里带连字符：`ABP-762-fuckbe.com` 整串都符合「标签+.com」，
@@ -1333,12 +1496,13 @@ def jav_fallback_title(name: str | None, code: str | None) -> str:
 
 
 def jav_display_metadata(name: str | None, code: str | None,
-                         tags: tuple[str, ...] | list[str] = ()) -> dict[str, object]:
+                         tags: tuple[str, ...] | list[str] = (),
+                         source_names: tuple[str, ...] | list[str] = ()) -> dict[str, object]:
     """Safe display projection; raw name/code remain untouched for file operations."""
     return {
         "display_code": normalise_code_key(code),
         "display_title": jav_fallback_title(name, code),
-        "edition_badges": jav_edition_badges(name, code, tags),
+        "edition_badges": jav_edition_badges(name, code, tags, source_names),
     }
 
 
@@ -1362,7 +1526,7 @@ def face_focus(ratio: float, cx: float, cy: float) -> dict | None:
 
 def tag_cat(tag: str) -> str:
     """Classify one tag for the web surface."""
-    if tag.startswith("演员:"):
+    if tag.startswith(PERFORMER_TAG_PREFIX):
         return "artist"
     if tag in LENGTH_TAGS or tag in TECH_TAGS or tag in ATTRIBUTE_TAGS:
         return "meta"
@@ -1460,17 +1624,17 @@ def ordered_multipart_items(items: list[dict]) -> list[dict]:
 
 
 def fc2_collection_label(item: dict) -> str:
-    """明确的 FC2 本篇、数字集数和特典标签；不根据时长猜序号。"""
+    """明确的 FC2 本篇、数字集数和特典的卷 id（`main`、`2`、`bonus-1`）；不根据时长猜序号。"""
     code = normalise_code_key(item.get("code"))
     match = _FC2_COLLECTION_NAME.match(str(item.get("name") or ""))
     if not code.startswith("FC2-PPV-") or not match or f"FC2-PPV-{match[1]}" != code:
         return ""
     tail = match[2]
     if not tail:
-        return "本篇"
+        return FC2_MAIN_PART
     bonus = _BONUS_PART.fullmatch(tail)
     if bonus:
-        return "特典 " + str(int(bonus[1] or 1))
+        return FC2_BONUS_PREFIX + str(int(bonus[1] or 1))
     number = re.fullmatch(r"[-_ ](\d{1,2})", tail)
     return str(int(number[1])) if number else ""
 
@@ -1480,13 +1644,15 @@ def _fc2_bonus_collection(items: list[dict]) -> list[dict]:
     labels = [fc2_collection_label(item) for item in items]
     if (len(items) < 2 or not all(labels) or len(set(labels)) != len(labels)
             or len({normalise_code_key(item.get("code")) for item in items}) != 1
-            or not any(label.startswith("特典 ") for label in labels)):
+            or not any(label.startswith(FC2_BONUS_PREFIX) for label in labels)):
         return []
-    if "本篇" in labels and any(label.isdigit() for label in labels):
+    if FC2_MAIN_PART in labels and any(label.isdigit() for label in labels):
         return []  # 本篇与数字分卷并存，可能是完整版和切片。
     def key(pair):
         label = pair[0]
-        return (1, int(label[3:])) if label.startswith("特典 ") else (0, int(label) if label.isdigit() else -1)
+        if label.startswith(FC2_BONUS_PREFIX):
+            return (1, int(label[len(FC2_BONUS_PREFIX):]))
+        return (0, int(label) if label.isdigit() else -1)
     return [item for _, item in sorted(zip(labels, items), key=key)]
 
 
@@ -1618,10 +1784,12 @@ GENERIC_PHOTO_DIRS = frozenset({
 
 
 def photo_set_title(directory: str) -> str:
-    """图集标题：叶子目录名；叶子只是 `P`、`图片` 这类通用名时用上一级。"""
+    """图集标题：叶子目录名；叶子只是 `P`、`图片` 这类通用名时用上一级。
+
+    取不到目录名时是空串，接口里由 `web_entity.photo_set_heading` 换成带 code 的固定说法。"""
     parts = [part for part in str(directory).replace("/", "\\").split("\\") if part]
     if not parts:
-        return "未命名图集"
+        return ""
     leaf = parts[-1]
     if leaf.casefold() in GENERIC_PHOTO_DIRS and len(parts) > 1:
         return parts[-2]
@@ -1670,3 +1838,10 @@ def fill_masked_title(masked: str, originals) -> str | None:
               and not any(char in candidate for char in MASKED_TITLE_CHARS)
               and (found := pattern.search(candidate))}
     return filled.pop() if len(filled) == 1 else None
+
+
+#: 标题里标明蓝光版的说法（`jav_editions.bluray_title`）。
+BLURAY_TITLE = re.compile(r"ブルーレイ|blu[\s-]?ray", re.I)
+#: 比对蓝光版与配信版标题前去掉的版本字样与随附物：剩下的才是作品名。
+EDITION_TITLE_WORDS = re.compile(
+    r"ブルーレイ(?:ディスク|エディション|版)?|blu[\s-]?ray(?:\s*disc)?(?:\s*edition)?|特典映像付き?|チェキ付き?", re.I)

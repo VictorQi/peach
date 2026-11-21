@@ -1,16 +1,24 @@
-/** 升级补修与程序安装分别显示；复核和重试都由用户明确发起。 */
+/** 升级补修与程序安装分别显示；复核和重试都由用户明确发起。进度读页面顶部横幅那份更新快照，本页不另查。 */
 import { useEffect, useState } from 'react';
+import { RiArrowRightLine } from '@remixicon/react';
 import { Button } from '@/components/base/buttons/button';
+import { LinkButton } from '@/components/base/buttons/link-button';
+import { REPAIR_CENTER_PATH } from '@peach/history';
 import { apiSend } from '../../api';
-import { useClientUpdates } from '../client-updates';
+import { checkClientUpdates, useClientUpdates } from '../client-updates';
 import type { ClientUpdates } from '../client-updates';
 import { AnimatedNumber } from '../components/animated-number';
 import { StatusLabel } from '../components/status-label';
-import { ErrorText, ExternalLink, Fact, FactList, Footer, Help, Section, Stack, TaskCenterLink } from './section';
+import { ErrorText, ExternalLink, Fact, FactList, Footer, Help, Section, Stack, TaskCenterLink, translateWithNodes } from './section';
 import { useAction } from './use-action';
+import { codedText } from '../../core/server-text';
+import { t } from '../../i18n';
 
-const LABELS: Record<string, string> = { idle: '尚未开始', paused: '已停止派发', pending: '等待更新', running: '正在更新', failed: '需要重试',
-  review: '需要复核', complete: '已完成', unavailable: '当前部署未启用' };
+const LABELS: Record<string, string> = { pending: t('settings:upgradeRepairs.pending'), running: t('settings:upgradeRepairs.repairing'), failed: t('settings:repairCenter.needsRetry'),
+  deferred: t('settings:repairCenter.deferred'), review: t('settings:upgradeRepairs.needsReview'), complete: t('settings:shared.completed'), unavailable: t('settings:upgradeRepairs.unavailable') };
+
+/** 一格读数：滚动的数字加「项」。 */
+const itemCount = (value: number) => translateWithNodes('settings:upgradeRepairs.itemCount', { count: value }, { value: <AnimatedNumber value={value} /> });
 
 export function UpgradeRepairs() {
   const { snapshot } = useClientUpdates();
@@ -21,30 +29,33 @@ export function UpgradeRepairs() {
   const state = data?.state || 'pending';
   const pending = data?.items.reduce((count, row) => count + (row.pending || 0), 0) || 0;
   const failed = data?.items.reduce((count, row) => count + (row.failed || 0), 0) || 0;
+  const deferred = data?.items.reduce((count, row) => count + (row.deferred || 0), 0) || 0;
   const review = data?.items.reduce((count, row) => count + (row.review_count || 0), 0) || 0;
   const operate = (command: 'start' | 'pause' | 'retry') => void action.run(command, signal => apiSend<ClientUpdates['repairs']>(
     command === 'retry' ? '/api/configuration/upgrade-repairs/retry' : '/api/configuration/upgrade-repairs',
     command === 'retry' ? {} : { action: command }, 'POST', signal), next => {
     setSaved(next);
-    document.dispatchEvent(new Event('peach:client-updates'));
+    checkClientUpdates();
   });
-  return <Section id="upgradeRepairs" title="资料更新" aside={<StatusLabel
+  return <Section id="upgradeRepairs" title={t('settings:upgradeRepairs.title')} aside={<StatusLabel
     tone={state === 'failed' ? 'error' : state === 'running' ? 'progress' : state === 'review' ? 'warning'
       : state === 'complete' ? 'success' : 'neutral'}><span key={state}
-        data-copy-key={`upgradeRepairs.${state}.status`}>{LABELS[state] || '未取得'}</span></StatusLabel>}>
-    <Stack><Help>按当前来源设置补全已有资料和预览，可能联网。每轮只处理开始时已有的内容，稍后可停止。</Help></Stack>
+        data-copy-key={`upgradeRepairs.${state}.status`}>{LABELS[state] || t('settings:shared.notFound')}</span></StatusLabel>}>
     <FactList>
-      <Fact term="待完成"><span><AnimatedNumber value={pending} /> 项</span></Fact>
-      <Fact term="失败"><span><AnimatedNumber value={failed} /> 项</span></Fact>
-      <Fact term="待复核"><span><AnimatedNumber value={review} /> 项</span></Fact>
+      <Fact term={t('settings:upgradeRepairs.toDo')}><span>{itemCount(pending)}</span></Fact>
+      <Fact term={t('settings:shared.failed')}><span>{itemCount(failed)}</span></Fact>
+      {deferred ? <Fact term={t('settings:upgradeRepairs.deferred')}><span>{itemCount(deferred)}</span></Fact> : null}
+      <Fact term={t('settings:upgradeRepairs.toReview')}><span>{itemCount(review)}</span></Fact>
     </FactList>
-    {data?.message || action.error ? <Stack><ErrorText>{action.error || data?.message}</ErrorText></Stack> : null}
-    {pending || data?.enabled ? <Stack><Help>{data?.enabled ? '资料与预览正在后台补全。' : '尚未完成的工作已保留，停止进度可在任务中心查看。'}</Help><TaskCenterLink /></Stack> : null}
-    <Footer status={review ? <ExternalLink href="/api/configuration/upgrade-repairs/review">下载复核记录</ExternalLink> : undefined}>
-      <Button size="small" variant="secondary" disabled={!data?.available || !!action.busy}
-        onClick={() => operate(data?.enabled ? 'pause' : 'start')}>{data?.enabled ? '停止派发' : pending ? '继续更新' : '开始更新'}</Button>
-      <Button size="small" variant="secondary" disabled={!data?.available || data?.enabled || !!action.busy || !failed}
-        onClick={() => operate('retry')}>重试失败项</Button>
+    {data?.message || action.error ? <Stack><ErrorText>{action.error || codedText(data, 'message')}</ErrorText></Stack> : null}
+    {state === 'running' ? <Stack><Help>{t('settings:upgradeRepairs.runningHelp')}</Help><TaskCenterLink /></Stack> : null}
+    {state === 'deferred' ? <Stack><Help>{t('settings:upgradeRepairs.deferredHelp')}</Help></Stack> : null}
+    <Footer status={review ? <ExternalLink href="/api/configuration/upgrade-repairs/review">{t('settings:upgradeRepairs.downloadReviewLog')}</ExternalLink> : null}>
+      <LinkButton href={REPAIR_CENTER_PATH} size="small" trailingIcon={RiArrowRightLine}>{t('settings:upgradeRepairs.repairCenterLink')}</LinkButton>
+      <Button size="small" disabled={!data?.available || !!action.busy}
+        onClick={() => operate(data?.enabled ? 'pause' : 'start')}>{data?.enabled ? '停止派发' : data?.started ? '继续更新' : '开始更新'}</Button>
+      <Button size="small" variant="secondary" disabled={!data?.available || state === 'running' || !!action.busy || (!failed && state !== 'failed')}
+        onClick={() => operate('retry')}>{t('settings:upgradeRepairs.retryFailed')}</Button>
     </Footer>
   </Section>;
 }

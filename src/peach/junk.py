@@ -7,35 +7,18 @@ import time
 from functools import cache, lru_cache
 from pathlib import PureWindowsPath
 
+from . import interface_text
 from .catalog_rules import (
-    _jav_code_pattern, is_jav_code, promo_free_key, release_code_from_filename, without_store_prefix,
+    FC2_BONUS_PREFIX, _jav_code_pattern, fc2_collection_label, is_jav_code, promo_free_key,
+    release_code_from_filename, without_store_prefix,
 )
+from .junk_words import (AD_BRAND, AD_BRAND_FORM, AD_DIR_BRAND_MEDIA, AD_DIR_FORM, PAGE_PROMO_CLAIM, PART_MARK,
+                         PROMO_FILLER, PROMO_PHRASE)
 from .media_sources import SCANNABLE_LOCATIONS
 from .settings_file import PROJECT_ROOT
 from .personal_records import record_holders
 from .repository import LedgerDatabase
 
-# 只认联系方式与站点形态的推广套话。「微信」「成人游戏」这类词单独出现不算：
-# 实测正片标题里就有（「还要微信跟老公汇报战果」是剧情，不是联系方式）。
-PROMO_PHRASE = re.compile(
-    r"(扫码|扫一扫|掃一掃|扫描|掃描|QR ?CODE|二维码|二維碼|加微信|加微|威信\d|微信号|"
-    r"微信\s*[:：]|免费看|免费玩|福利群|最新(?:地址|位址|網址|网址)|"
-    r"(?:地址|位址|網址|网址)(?:發佈|发布|獲取|获取)|收藏不迷路|"
-    r"永久(?:域名|地址|发布)|地址发布器|防屏蔽|资源获取|点击(?:观看|下载|进入)|下载APP|下载|签到|代币|领取|"
-    r"强力推荐|国产大片|在线视频|線上影片每天火熱更新|手机看片|手機影城|"
-    r"大饱眼福|房间火爆|澳门|赌场|博彩|棋牌|加我|"
-    r"GAMES?\d*|APP)", re.I)
-# 只降低残留、自己不构成命中的套话。
-#
-# 手游插页整批绕过了上面的判据：`爱姬远征-免费18禁手游-扫码安装.jpg` 命中「扫码」，
-# 可剥完还剩「爱姬远征免费禁手游安装」12 个字，落在 6~14 的中间档只拿 30 分，够不上
-# 40 的门槛；`三国志侵略版-免费18禁手游-扫码安装.png` 多两字残留就到 14，连 30 分都没有。
-# 残留越多分越低，而这些残留里一个内容字都没有——广告名写得越长反而越安全。
-# 游戏名（爱姬远征、天下布魔）永远进不了词表，能剥的只有它旁边那圈固定套话。
-# 这些词单独出现说明不了什么（真片名里也有「免费」），所以只参与残留计算，不作命中依据。
-PROMO_FILLER = re.compile(
-    r"(免费\d*禁|免费|免費|手游|手遊|成人遊?戲|成人游戏|下载安装|安装|安裝|访问|訪問)",
-    re.I)
 # 结尾不能用 \b：`uuc82.com_2` 里 `m` 和 `_` 都是词字符，构不成边界，域名会漏掉。
 #: `manko.fun`、`58m.co` 是云下载包里的推广附件（2026-11-03 只读盘点）。
 PROMO_DOMAIN = re.compile(
@@ -45,7 +28,6 @@ PROMO_DOMAIN = re.compile(
 # 是被误填进 code 的创作者账号名，不能拿来做「同番号有完整版」的比较，
 # 判据与 `is_jav_code` 同源：分隔符正是番号与账号名的唯一线索。
 REAL_CODE = re.compile(r"^(?:\d{2,3})?[A-Za-z]{2,8}-\d{2,5}$|^FC2", re.I)
-PART_MARK = re.compile(r"(CD\d|part\d|分卷|-\d{1,2}$|\(\d+\)$)", re.I)
 # 推广站目录的两种形态，与 `scripts/find_ads.py` 的判据 D/E 同源：
 # 创作者位是旧导入器的目录名投影，`bbsxv.xyz-DOCP-324` 这类广告包会直接落在那里；
 # 裸域名目录（98T.la@账号、huachishe.com@系列）是转载水印，不是广告，不能进判据。
@@ -83,17 +65,6 @@ INTERNET_SHORTCUT_SUFFIXES = frozenset({".url"})
 #: 保存下来的网页。`.mhtml` 是 Edge 的整页存档，媒体目录里的这份没有内容价值；
 #: 它和 `.url` 一样是「导航页」而不是媒体，不给体积兜底留机会。
 PAGE_ARCHIVE_SUFFIXES = frozenset({".mhtml", ".mht", ".htm", ".html"})
-#: 推广品牌词。它们单独出现在视频名里不构成证据——`麻豆传媒`、`外围`、`直播` 都可能是
-#: 真片名的一部分——只有叠加推广形态、装饰符或推广目录上下文时才计分。
-#: 名单来自 2026-09 用户实例 `B:\xxr\0208 (23)` 里自曝身份的推广站与推广 APP。
-AD_BRAND = re.compile(
-    r"(91(?:短视频|视频|国产|AV|約炮|约炮)|成人抖音|快手直播|杏吧|草榴|色中色|成人头条|"
-    r"泡芙短视频|含羞草|她趣|台湾UU|全国外围|外围楼凤|楼凤|麻豆传媒映画|蜜桃影像|"
-    r"成人游戏|169BBS|SEX169)", re.I)
-#: 与品牌词同现才算推广名的形态词。`视频`、`直播` 这类过常见的词不进这张表：
-#: `麻豆传媒映画APP-限时免费体验` 是推广包，`麻豆传媒 某作品` 是资源。
-AD_BRAND_FORM = re.compile(
-    r"(APP|一键|导航|聊天室|免费体验|限时免费|扫码|资源获取|网址|发布页)", re.I)
 #: 品牌推广图的体积上限。`蜜桃影像传媒.png` 18 KB、`東方秋白…169BBS…` 75 KB，
 #: 而任何一张内容图都在 MB 量级；品牌名 + 这种体积才是广告卡，不是作品套图。
 BRAND_TINY_BYTES = 300 * 1024
@@ -102,17 +73,9 @@ DECOR_MARKS = "❤♥❥♡💕💗💖💘💝"
 #: 装饰图体积上限。`❤草榴视频❤.jpg` 705 KB 是广告卡；同名配套封面（2 MB 级）不算，
 #: 它走 `has_sibling_original` 的正片配对豁免。
 DECORATED_MAX_BYTES = 1536 * 1024
-#: 目录名自曝是推广包的形态：`-APP`、`一键约炮`、`論壇文宣`、聊天室等。
-#: 只匹配目录分量，不看文件名；命中后目录里不构成内容的文件都进复核。
-AD_DIR_FORM = re.compile(
-    r"(論壇文宣|论坛文宣|文宣|宣傳|一键约炮|全国外围|外围楼凤|楼凤|聊天室|"
-    r"免费体验|限时免费)", re.I)
 #: `APP` 按词匹配：`Happy` 里也藏着 `app`，裸子串会把正常目录卷进来；
 #: `.app` 是域名后缀，`bkm9.app` 那类推广目录靠目录里其他证据，不靠这一条。
 AD_DIR_APP = re.compile(r"(?:^|[^A-Za-z.])APP(?:[^A-Za-z.]|$)", re.I)
-#: 品牌名只在目录里还带媒体平台词时才算推广目录；`草榴视频` 是推广 APP，
-#: `麻豆传媒` 单独出现可能是这个厂牌的资源目录。
-AD_DIR_BRAND_MEDIA = re.compile(r"(?:视频|視頻|影视|影視|传媒|傳媒|直播|短视频|短視頻)", re.I)
 JUNK_KINDS = frozenset({"video", "image", "audio", "archive", "url", "other"})
 #: 达到这个体积的视频不再当广告残留。这个值与原有「小于 120 MB」证据同源；
 #: 较大的同番号短版本属于重复清理问题，由 ``q_duplicates`` 承接。
@@ -134,7 +97,6 @@ SHORT_ATTACHMENT_CLUSTER = 3
 NUMBERED_SOURCE_VIDEO = re.compile(r"^(?:\[[^\]]+\]|【[^】]+】)[\s._-]*\d+(?:[\s._-]*\(\d+\))?$")
 PAGE_COMPONENT_SUFFIXES = frozenset({".js", ".css", ".aspx"})
 PAGE_CHROME_IMAGE = re.compile(r"^(?:banner(?:_[bs])?|1000x90(?:yunding)?|count\d*|logo|lan\d*|you|zuo|zuoxia)$", re.I)
-PAGE_PROMO_CLAIM = re.compile(r"(?:记住|記住).{0,12}(?:网址|網址)|(?:网址|網址).{0,8}(?:发布|發布)")
 #: 云下载包里的附带视频按这个时长以内、且正片至少长这么多倍认定。
 #:
 #: 2026-11-03 只读盘点：364 个已入库下载任务留下 142 个附属文件，推广视频全在 27~157 秒
@@ -168,7 +130,7 @@ def _windows_parent(text: str) -> PureWindowsPath:
 def _promo_directory_parts(parts: tuple[str, ...]) -> bool:
     """`_promo_directory` 按目录分量缓存：同一目录下的几百个文件判的是同一组分量。"""
     for text in parts:
-        if AD_DIR_APP.search(text) or AD_DIR_FORM.search(text):
+        if AD_DIR_FORM.search(text) or (AD_DIR_APP.search(text) and AD_BRAND.search(text)):
             return True
         if AD_BRAND.search(text) and AD_DIR_BRAND_MEDIA.search(text):
             return True
@@ -202,7 +164,7 @@ def promo_residue(name: str) -> int:
     text = PROMO_PHRASE.sub("", text)
     text = PROMO_FILLER.sub("", text)
     # 只数中日韩文字与字母，忽略编号、扩展名和标点。
-    return len(re.findall(r"[一-鿿぀-ヿ가-힯 A-Za-z]", text))
+    return len(re.findall(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af A-Za-z]", text))
 
 
 def _folder_index(connection, *, roots=None) -> tuple[dict[str, int], dict[str, set[str]]]:
@@ -275,8 +237,8 @@ def _scope_clause(*, asset_ids=None, roots=None):
     return (" AND (" + " OR ".join(clauses) + ")", tuple(values)) if clauses else (" AND 0", ())
 
 
-def _junk_rows(connection, *, asset_ids=None, roots=None):
-    """读取能进入垃圾复核的物理文件；字幕、NFO 与大视频在最外层排除。"""
+def _junk_rows(connection, *, asset_ids=None, roots=None, visual_ids=()):
+    """读取物理候选及有视觉证据的视频；字幕与 NFO 在外层排除。"""
     marks = ",".join("?" for _ in SCANNABLE_LOCATIONS)
     scope, parameters = _scope_clause(asset_ids=asset_ids, roots=roots)
     rows = connection.execute(
@@ -284,18 +246,21 @@ def _junk_rows(connection, *, asset_ids=None, roots=None):
         "feedback,disposal,play_count,leave_ratio,o_count,studio,ctx_orient,path "
         f"FROM asset WHERE location IN ({marks}) AND disposal IS NULL "
         "AND (COALESCE(medium,'other')<>'video' OR (size < ? "
-        "AND (duration IS NULL OR duration <= 1200)))" + scope,
-        (*SCANNABLE_LOCATIONS, JUNK_VIDEO_MAX_BYTES, *parameters)).fetchall()
+        "AND (duration IS NULL OR duration <= 1200)) OR id IN (SELECT value FROM json_each(?)))" + scope,
+        (*SCANNABLE_LOCATIONS, JUNK_VIDEO_MAX_BYTES, json.dumps(tuple(visual_ids)), *parameters)).fetchall()
     # NFO 是媒体资料边车，不是等待清理的物理内容；即使名字或所在目录带推广词，
     # 也应由资料读取报告解析问题，不能进入会把文件移入回收站的垃圾队列。
     return [row for row in rows if _junk_file_eligible(row)]
 
 
 def _junk_file_eligible(row) -> bool:
-    """资料边车、STRM指针和文件自身带番号的分卷不属于垃圾附件。"""
+    """保护资料边车、STRM 指针、带番号的作品图片和视频分卷。"""
     item = _windows_path(row["name"] or row["path"] or "")
     # STRM 的大小与名字描述的是链接文件，不能作为远端影片的垃圾证据。
     if item.suffix.casefold() in MEDIA_SIDECAR_SUFFIXES or item.suffix.casefold() == '.strm':
+        return False
+    if (row['medium'] == 'image' and release_code_from_filename(item.stem)
+            and not PROMO_PHRASE.search(PROMO_DOMAIN.sub('', item.stem))):
         return False
     if not (row["medium"] == "video" and PART_MARK.search(item.stem)):
         return True
@@ -327,7 +292,7 @@ def promo_name_rules() -> tuple[dict, ...]:
         names = frozenset(re.sub(r"\s", "", name).casefold() for name in entry.get("names", ()))
         patterns = tuple(re.compile(pattern, re.I) for pattern in entry.get("patterns", ()))
         if not entry["reason"] or not (names or patterns) or int(entry["max_bytes"]) <= 0:
-            raise ValueError(f"推广附件命名规则不完整：{entry}")
+            raise ValueError(f"incomplete promotional attachment rule: {entry}")
         rules.append({
             "reason": str(entry["reason"]),
             "suffixes": frozenset(str(suffix).casefold() for suffix in entry["suffixes"]),
@@ -356,22 +321,44 @@ def _promo_name_reason(suffix: str, path: str, size: int) -> str:
     return ""
 
 
+class _Reason(str):
+    """一条判为垃圾的理由。字符串本身是 zh-CN 原文（`why` 照旧用它拼），另带 code 与参数给 `why_parts`；
+    文字在 `server:labels.junk.<名字>`（ADR-0159）。"""
+
+    def __new__(cls, name: str, **params):
+        code = f"labels.junk.{name}"
+        value = super().__new__(cls, interface_text.text(f"server:{code}", params))
+        value.code, value.params = code, params
+        return value
+
+
+def why_parts(why) -> list[dict]:
+    """`why` 按段写给前端：带 code 的理由给 code 与参数，词库里的固定说法（内容数据）原样给 `text`。"""
+    parts: list[dict] = []
+    for index, reason in enumerate(why):
+        if index:
+            parts.append({"text": " · "})
+        parts.append({"code": reason.code, "params": reason.params} if isinstance(reason, _Reason)
+                     else {"text": str(reason)})
+    return parts
+
+
 def _attachment_junk_reason(suffix: str, path: str, size: int) -> str:
     """区分安装附件与网页存档组件。"""
     if suffix in INSTALLER_SUFFIXES and size < 64 * 1024**2:
-        return "媒体目录中的安装附件"
+        return _Reason("installerAttachment")
     item = _windows_path(path)
     folder = _windows_parent(path)
     if suffix in PAGE_COMPONENT_SUFFIXES and any(
             part.casefold().endswith("_files") for part in folder.parts):
-        return "网页存档的脚本或样式附件"
+        return _Reason("pageArchiveAsset")
     parent = folder.name
     if (parent.casefold().endswith('_files') and PAGE_PROMO_CLAIM.search(parent)
             and AD_DOMAIN.search(parent[:-len('_files')]) and suffix in {'.gif', '.jpg', '.png'}
             and size < 2 * 1024**2
             and (PAGE_CHROME_IMAGE.fullmatch(item.stem)
                  or (item.name.casefold() == '1.gif' and size <= 4096))):
-        return "推广网页存档的横幅、标志或导航图片"
+        return _Reason("promoPageImage")
     return ""
 
 
@@ -430,9 +417,9 @@ def _short_attachment_reasons(connection, rows, *, roots=None) -> dict[int, str]
         count = len(folders[folder])
         spread = len(signatures.get(signature, ()))
         if count >= SHORT_ATTACHMENT_CLUSTER:
-            reasons[asset_id] = f"同目录长正片旁有 {count} 条极短小附件，须核验内容"
+            reasons[asset_id] = _Reason("shortAttachmentCluster", count=count)
         elif spread >= SHORT_ATTACHMENT_CLUSTER:
-            reasons[asset_id] = f"同体积、时长与分辨率的极短附件散布在 {spread} 个发行目录，须核验内容"
+            reasons[asset_id] = _Reason("shortAttachmentSpread", count=spread)
     return reasons
 
 
@@ -509,12 +496,23 @@ def _download_attachment_reasons(connection, rows) -> dict[int, tuple[str, bool]
         if row["medium"] == "video":
             duration = row["duration"] or 0
             if 0 < duration < DOWNLOAD_ATTACHMENT_SECONDS and main_duration >= duration * DOWNLOAD_MAIN_RATIO:
-                reasons[row["id"]] = (f"{code} 下载包里的附带短视频，正片长 {main_duration / 60:.0f} 分", True)
+                reasons[row["id"]] = (_Reason("downloadShortVideo", code=code, minutes=f"{main_duration / 60:.0f}"), True)
         elif row["medium"] == "archive":
-            reasons[row["id"]] = (f"{code} 下载包里的附带压缩包，须核验内容", False)
+            reasons[row["id"]] = (_Reason("downloadArchive", code=code), False)
         else:
-            reasons[row["id"]] = (f"{code} 下载包里的附带文件，名字不带本片番号", True)
+            reasons[row["id"]] = (_Reason("downloadFile", code=code), True)
     return reasons
+
+
+def _software_file(path: str) -> bool:
+    """包管理器内部文件、软件元数据和动态库不参与媒体垃圾判断。"""
+    item = _windows_path(path)
+    name = item.name.casefold()
+    return ('node_modules' in {part.casefold() for part in item.parts}
+            or name in {'package.json', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml'}
+            or (item.suffix.casefold() in {'', '.txt', '.json', '.rst'}
+                and name.startswith(('readme', 'license', 'licence', 'notice')))
+            or item.suffix.casefold() in {'.md', '.dll'})
 
 
 def _repeated_copies(connection, *, roots=None) -> dict[tuple[str, int], int]:
@@ -534,6 +532,8 @@ def _repeated_copies(connection, *, roots=None) -> dict[tuple[str, int], int]:
             "AND size>0 AND size<? AND path IS NOT NULL "
             "AND (COALESCE(medium,'other')<>'video' OR duration IS NULL OR duration<=1200)" + scope,
             (*SCANNABLE_LOCATIONS, JUNK_VIDEO_MAX_BYTES, *parameters)):
+        if _software_file(str(path)):
+            continue
         folder = str(path).rpartition("\\")[0]
         if folder not in releases:
             releases[folder] = bool(release_code_from_filename(folder.rpartition("\\")[2]))
@@ -552,7 +552,7 @@ def _repeated_copy_reason(row, copies: dict[tuple[str, int], int]) -> str:
     if (not count or (row["medium"] != "video" and size > REPEATED_COPY_MAX_BYTES)
             or ARTWORK_NAME.fullmatch(item.stem) or release_code_from_filename(item.stem)):
         return ""
-    return f"同名同体积的副本散布在 {count} 个目录"
+    return _Reason("repeatedCopies", count=count)
 
 
 def _attachment_evidence(row, suffix: str, name: str, download_attachments: dict,
@@ -591,24 +591,24 @@ def _video_evidence(row, stem: str, longer: dict, promo_dir: bool,
     duration = row["duration"]
     longest = longer.get(code)
     if longest and REAL_CODE.match(code) and duration is not None and 0 < duration < longest * 0.2 \
-            and not PART_MARK.search(stem):
-        # 分卷已排除，真番号下不到两成时长基本就是片段/预告，单独即可入队复核。
+            and not PART_MARK.search(stem) and not fc2_collection_label(row).startswith(FC2_BONUS_PREFIX):
+        # 分卷和特典已排除，同番号下不到两成时长的其余短版进入片段复核。
         # 用户标记的 `反抗不如享受.mp4`（ABW-220，244 秒）正好卡在旧的 35 分门外。
-        score += 40; why.append(f"同番号有 {longest/60:.0f} 分完整版")
+        score += 40; why.append(_Reason("fullVersionExists", minutes=f"{longest/60:.0f}"))
     if duration is not None and 0 < duration < 240:
-        score += 15; why.append("不足 4 分钟")
+        score += 15; why.append(_Reason("underFourMinutes"))
     context = directory_points
     if (row["size"] or 0) < JUNK_VIDEO_MAX_BYTES:
-        score += 10; context += 10; why.append("小于 120 MB")
+        score += 10; context += 10; why.append(_Reason("under120Mb"))
     if promo_dir:
         # 30 分单独不构成删片理由：正片也可能躺在别人起错名的目录里，
         # 要再叠一条时长或体积证据才到门槛。
-        score += 30; context += 30; why.append("住在推广目录")
+        score += 30; context += 30; why.append(_Reason("promoDirectory"))
     probed = duration is not None and duration > 0
     review_only = 0 if probed else context
     if NUMBERED_SOURCE_VIDEO.fullmatch(stem) and PROMO_DOMAIN.search(stem):
         review_only += AUTO_TRASH_SCORE
-        why.append("编号视频可能只有来源水印，须核验内容")
+        why.append(_Reason("numberedSourceVideo"))
     if attachment_reason:
         score += JUNK_REVIEW_SCORE; review_only += JUNK_REVIEW_SCORE; why.append(attachment_reason)
     return score, review_only, why
@@ -616,10 +616,12 @@ def _video_evidence(row, stem: str, longer: dict, promo_dir: bool,
 
 def _judgement_inputs(database, *, asset_ids, roots):
     """读取同一账本快照中的候选、用户决定、作品版本与目录上下文。"""
+    from . import junk_visual
+    visual = junk_visual.read(database)
     with database.read_connection() as c:
-        rows = _junk_rows(c, asset_ids=asset_ids, roots=roots)
+        rows = _junk_rows(c, asset_ids=asset_ids, roots=roots, visual_ids=visual)
         if not rows:
-            return [], {}, frozenset(), {}, {}, {}, {}, {}
+            return [], {}, frozenset(), {}, {}, {}, {}, {}, visual
         # 同番号是否存在明显更长的版本；只在 code 是真番号时才有意义。
         longer = {r[0]: r[1] for r in c.execute(
             "SELECT code, max(duration) FROM asset WHERE medium='video' AND code IS NOT NULL "
@@ -637,7 +639,7 @@ def _judgement_inputs(database, *, asset_ids, roots):
         download_attachments = _download_attachment_reasons(c, rows)
         copies = _repeated_copies(c, roots=context)
     return (rows, longer, frozenset(dismissed_ids), folder_assets, folder_videos, short_attachments,
-            download_attachments, copies)
+            download_attachments, copies, visual)
 
 
 def scored_candidates(database, *, asset_ids=None, roots=None) -> tuple[list[dict], frozenset[int]]:
@@ -653,14 +655,32 @@ def scored_candidates(database, *, asset_ids=None, roots=None) -> tuple[list[dic
         _promo_directory_parts.cache_clear()
 
 
+def _non_video_evidence(item, stem, suffix, *, self_evident, promo_directory):
+    """非视频推广形态的分数与理由，配套作品文件及已单独计分的网页附件不叠加。"""
+    if (item.get('medium') == 'video' or self_evident
+            or suffix in PAGE_ARCHIVE_SUFFIXES or suffix in INTERNET_SHORTCUT_SUFFIXES):
+        return 0, []
+    if is_decorated_name(stem) and (item.get('size') or 0) <= DECORATED_MAX_BYTES:
+        return 60, [_Reason('decoratedImage')]
+    if AD_BRAND.search(stem) and (AD_BRAND_FORM.search(stem)
+            or (item.get('medium') == 'image' and (item.get('size') or 0) <= BRAND_TINY_BYTES)):
+        return 60, [_Reason('promoBrand')]
+    if promo_directory:
+        return 50, [_Reason('promoDirectory')]
+    return 0, []
+
+
 def _scored_candidates(database, *, asset_ids, roots) -> tuple[list[dict], frozenset[int]]:
+    from . import junk_visual
     (rows, longer, dismissed_ids, folder_assets, folder_videos, short_attachments,
-     download_attachments, copies) = _judgement_inputs(database, asset_ids=asset_ids, roots=roots)
+     download_attachments, copies, visual) = _judgement_inputs(database, asset_ids=asset_ids, roots=roots)
     # 每个目录里挂着推广名的候选有多少个；插页判据要看它有没有同伙。
     promo_neighbours = _promo_neighbour_counts(rows)
     out = []
     for r in rows:
         d = dict(r)
+        if _software_file(d.get('path') or d.get('name') or ''):
+            continue
         s, why = 0, []
         name = d.get("name") or _windows_path(d.get("path") or "").name
         name_path = _windows_path(name)
@@ -675,9 +695,9 @@ def _scored_candidates(database, *, asset_ids, roots) -> tuple[list[dict], froze
         promo = bool(PROMO_PHRASE.search(spoken) or PROMO_DOMAIN.search(spoken))
         page_archive = suffix in PAGE_ARCHIVE_SUFFIXES
         if suffix in INTERNET_SHORTCUT_SUFFIXES:
-            s += 60; why.append("网址快捷方式")
+            s += 60; why.append(_Reason("internetShortcut"))
         elif page_archive:
-            s += 60; why.append("网页存档")
+            s += 60; why.append(_Reason("pageArchive"))
         attachment_reason = _attachment_junk_reason(suffix, d.get("path") or name, d.get("size") or 0)
         if attachment_reason:
             s += 60; why.append(attachment_reason)
@@ -712,32 +732,21 @@ def _scored_candidates(database, *, asset_ids, roots) -> tuple[list[dict], froze
         promo_dir = _promo_directory(_windows_parent(d.get("path") or name).parts)
         if promo and residue < 6 and not bundled:
             # 名字剥完只剩广告本身，这是最硬的信号。
-            s += 60; why.append("整个名字都是推广语")
+            s += 60; why.append(_Reason("wholeNamePromo"))
         elif promo and residue < 14 and not real_owner and not bundled:
-            s += 30; why.append("推广语占了名字主体")
+            s += 30; why.append(_Reason("mostlyPromo"))
             neighbours = promo_neighbours.get(folder, 0)
             if neighbours >= PROMO_CLUSTER_FILES:
                 s += 30
-                why.append(f"同目录另有 {neighbours - 1} 个同类推广名")
+                why.append(_Reason("promoNeighbours", count=neighbours - 1))
         directory_points = 0
         if owner_is_promo:
-            directory_points = 50; why.append("创作者位是推广站域名")
+            directory_points = 50; why.append(_Reason("promoCreator"))
         elif AD_DIRPACK.search(folder) and not self_evident:
-            directory_points = 45; why.append("目录是「域名+番号」的推广打包")
+            directory_points = 45; why.append(_Reason("promoDirectoryPack"))
         s += directory_points
-        # 非视频的推广形态：装饰符小图、品牌推广名、住在推广目录。`self_evident`
-        # （真番号、内容级体积、正片配套图）与网页存档、网址快捷方式已单独计分，
-        # 这里不重复叠加。
-        if (d.get("medium") != "video" and not self_evident and not page_archive
-                and suffix not in INTERNET_SHORTCUT_SUFFIXES):
-            if is_decorated_name(nm) and (d.get("size") or 0) <= DECORATED_MAX_BYTES:
-                s += 60; why.append("装饰符小图")
-            elif AD_BRAND.search(nm) and (
-                    AD_BRAND_FORM.search(nm)
-                    or (d.get("medium") == "image" and (d.get("size") or 0) <= BRAND_TINY_BYTES)):
-                s += 60; why.append("推广品牌名")
-            elif promo_dir:
-                s += 50; why.append("住在推广目录")
+        points, reasons = _non_video_evidence(d, nm, suffix, self_evident=self_evident, promo_directory=promo_dir)
+        s += points; why.extend(reasons)
         if d.get("medium") == "video":
             points, weak, reasons = _video_evidence(
                 d, nm, longer, promo_dir, directory_points, short_attachments.get(d["id"], ""))
@@ -745,10 +754,15 @@ def _scored_candidates(database, *, asset_ids, roots) -> tuple[list[dict], froze
         # 有真实创作者归属、且名字剥完仍有实质描述的，是被打了水印的正片，不是广告。
         if real_owner and residue >= 14 and not (attachment_reason or attachment_reasons):
             s -= 45
+        s, weak, reasons = junk_visual.adjust_score(d, visual.get(d['id']), s)
+        review_only += weak
+        why.extend(reasons)
         if review_only and s - review_only < AUTO_TRASH_SCORE:
             s = min(s, AUTO_TRASH_SCORE - 1)
         if s >= JUNK_REVIEW_SCORE:
-            d["score"] = s; d["why"] = " · ".join(why)
+            if _repeated_copy_reason(d, copies):
+                d['copy_group'] = json.dumps([name.casefold(), int(d['size']), d['junk_kind']], ensure_ascii=False)
+            d["score"] = s; d["why"] = " · ".join(why); d["why_parts"] = why_parts(why)
             out.append(d)
     out.sort(key=lambda x: (-x["score"], -(x["size"] or 0)))
     return out, frozenset(dismissed_ids)
@@ -760,8 +774,9 @@ def isolate(database, *, asset_ids=None, roots=None, protected_ids=()) -> dict:
     人工保留、个人记录、文件自身作品身份和调用方点名的正片受保护。写入前重查评分依据，
     扫描或人工操作在计算期间改变了资产时留待下一次判定。
     """
+    from . import junk_visual
     if asset_ids is None and roots is None:
-        raise ValueError("自动垃圾检查必须指定资产或来源目录")
+        raise ValueError("automatic junk check needs asset ids or source roots")
     if not isinstance(database, LedgerDatabase):
         database = LedgerDatabase(database)
     scored, dismissed = scored_candidates(database, asset_ids=asset_ids, roots=roots)
@@ -776,7 +791,7 @@ def isolate(database, *, asset_ids=None, roots=None, protected_ids=()) -> dict:
         holders = record_holders(connection, [row['id'] for row in chosen])
         for row in chosen:
             current = connection.execute("SELECT * FROM asset WHERE id=?", (row['id'],)).fetchone()
-            if not _can_isolate(connection, current, row, holders):
+            if not _can_isolate(connection, current, row, holders) or junk_visual.preserves_intro(database, current):
                 continue
             connection.execute(
                 "UPDATE asset SET disposal='trash',disposal_reason='junk',feedback_at=? WHERE id=? AND disposal IS NULL",

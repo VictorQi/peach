@@ -10,17 +10,15 @@ import time
 from collections import OrderedDict
 from pathlib import Path
 
-from . import timeline_sheets, timeline_sources
+from . import media_io, timeline_sheets, timeline_sources
+from .coded_text import coded
 from .config import FFMPEG_DIR, STATE_DIR
 from .ffmpeg import FFmpegResolver
 from .fsutil import atomic_path
-from .jobs import DiskGuard
+from .storage_budget import CapacityGuard
 from .media_processing_policy import metadata_only
-from .platform import system_volume
-
-#: 采集期间系统盘至少留这么多 GiB。数字和抽帧脚本的默认值同一个：真正会把系统盘写满的
-#: 是网盘缓存那一类第三方消耗方，与产物落在哪块盘无关。
-MIN_FREE_GB = 40.0
+from .task_stages import stage as stage_fields
+from .user_messages import UserValueError
 
 MODE_PATH = STATE_DIR / 'timeline-thumbnails.json'
 
@@ -46,10 +44,11 @@ def write_mode(mode: str, path: Path | None = None) -> None:
 
 
 def q_media_processing(contract, _args):
-    from .media_processing_policy import acceleration
+    from .media_processing_policy import acceleration, playback_max_height
     return {'metadata_only': metadata_only(contract.follow_state_root),
             'preview_acceleration': acceleration(contract.follow_state_root, purpose='preview'),
-            'playback_acceleration': acceleration(contract.follow_state_root)}
+            'playback_acceleration': acceleration(contract.follow_state_root),
+            'playback_max_height': playback_max_height(contract.follow_state_root)}
 
 
 def w_media_processing(contract, body):
@@ -131,15 +130,25 @@ def external_timeline(contract, asset_id: int) -> timeline_sources.Timeline | No
         return None
     raw, duration = str(row[0]), float(row[1] or 0)
 
+    def pair():
+        from .media import normalized_path
+        source = normalized_path(raw)
+        # SMB 来源没有本机目录可列，旁边的预览文件读不到。
+        return timeline_sources.discover(source, duration) if isinstance(source, Path) else None
+
     def read():
+        from .media import absolute_path
         try:
-            from .media import normalized_path
-            source = normalized_path(raw)
-            # SMB 来源没有本机目录可列，旁边的预览文件读不到。
-            return timeline_sources.discover(source, duration) if isinstance(source, Path) else None
+            return media_io.bounded(media_io.mount_key(absolute_path(raw)), pair)
+        except TimeoutError:
+            # 网盘答不上不记进缓存：记了这段时间里就一直当作没有预览。
+            raise
         except (OSError, TypeError, ValueError):
             return None
-    result = _SIDECARS.get((asset_id, raw, duration), read)
+    try:
+        result = _SIDECARS.get((asset_id, raw, duration), read)
+    except TimeoutError:
+        return None
     return result if isinstance(result, timeline_sources.Timeline) else None
 
 
@@ -149,7 +158,11 @@ def external_frame(contract, timeline: timeline_sources.Timeline, number: int) -
         return None
     frame = timeline.frames[number]
     key = (str(frame.path), frame.start, frame.box, frame.bif_number)
-    return _FRAMES.get(key, lambda: timeline_sources.frame_bytes(timeline, number))
+    try:
+        return _FRAMES.get(key, lambda: media_io.bounded(
+            media_io.mount_key(frame.path), timeline_sources.frame_bytes, timeline, number))
+    except TimeoutError:
+        return None
 
 
 def q_thumbnail_jobs(contract, _args):
@@ -163,7 +176,7 @@ def q_thumbnail_jobs(contract, _args):
             'job_id': state.get('job_id') or '',
             'total': state.get('total') or 0, 'done': state.get('done') or 0,
             'made': state.get('made') or 0, 'skipped': state.get('skipped') or 0,
-            'failed': state.get('failed') or 0, 'stopped': state.get('stopped') or ''}
+            'failed': state.get('failed') or 0, **coded('stopped', state.get('stopped') or '')}
 
 
 def _with_progress(fields: dict) -> dict:
@@ -176,21 +189,23 @@ def w_thumbnail_jobs(contract, body):
     事，走数据管理页那条清理链，不在切换开关时顺手做掉。"""
     mode = str((body or {}).get('mode') or timeline_sheets.OFF)
     if mode not in timeline_sheets.MODES:
-        raise ValueError('采集密度无效')
+        raise UserValueError("api.timelineThumbnails.invalidMode")
     if mode != timeline_sheets.OFF and metadata_only(contract.follow_state_root):
-        raise ValueError('视频预览生成已关闭，请先在媒体库设置中开启')
+        raise UserValueError("api.timelineThumbnails.previewsDisabled")
     write_mode(mode)
     if mode == timeline_sheets.OFF:
         contract.thumbnail_job.stop(resume=False)
         return q_thumbnail_jobs(contract, {})
     choice = FFmpegResolver(FFMPEG_DIR).ffmpeg()
     if choice is None:
-        raise ValueError('未找到 ffmpeg，无法采集缩略图')
+        raise UserValueError("api.timelineThumbnails.ffmpegMissing")
     interval = timeline_sheets.INTERVALS[mode]
     root = contract.timeline_root
 
     def work(job_id):
-        guard = DiskGuard(system_volume(), MIN_FREE_GB)
+        from .settings_file import load_config
+        config = getattr(contract, 'upgrade_config', None) or load_config()
+        guard = CapacityGuard(config)
         result = timeline_sheets.generate_library(
             contract.db_path, root, interval, ffmpeg=str(choice.path),
             active=lambda: ((contract.thumbnail_job.snapshot() or {}).get('job_id') == job_id
@@ -200,16 +215,17 @@ def w_thumbnail_jobs(contract, body):
             checkpoint=lambda **fields: contract.thumbnail_job.checkpoint(job_id, **fields))
         # 磁盘触线停下来的那一轮不能记成完成：队列后面还剩几千部，而页面上「完成」
         # 和「跑完了」是同一个意思。按停是用户自己做的，不算故障。
-        stopped = str(result.get('stopped') or '')
+        # 磁盘闸门那句带 code（`Said`），失败原因随它按界面语言显示。
+        stopped = result.get('stopped') or ''
         failed = bool(stopped) and stopped != timeline_sheets.STOPPED_BY_USER
         contract.thumbnail_job.update(
             job_id, **_with_progress(result), completed_at=time.time(),
             status='failed' if failed else 'complete',
-            error=stopped if failed else '')
+            **coded('error', stopped if failed else ''))
 
     contract.thumbnail_job.start(work, restart=True, recovery={'mode': mode},
                                  initial={'mode': mode, 'interval': interval,
-                                          'stage': '采集缩略图', 'checked': 0,
+                                          **stage_fields('thumbnails.fetch'), 'checked': 0,
                                           'total': 0, 'done': 0, 'made': 0,
                                           'skipped': 0, 'failed': 0, 'stopped': ''})
     return q_thumbnail_jobs(contract, {})

@@ -7,12 +7,48 @@ import { ITEM, openItemPage } from './item-fixture.ts';
 import {
   DESKTOP, MOBILE, tokenColor, openAccess, settledRun, openActivity, qualityGoal, openQualityGoals,
   openScraping, openProcessing, openCatalog, openCatalogBars, openCatalogFixture, RUNNING_JOB, FAILED_JOB,
-  installDesignBrowser, openReview,
+  installDesignBrowser, openReview, openJunkWith, junkItem,
 } from './design-fixture.ts';
 
 describe('设计决定：控件、状态与首页顶部', () => {
   let browser: Browser;
   installDesignBrowser((next) => { browser = next; });
+
+  it('垃圾单项回收单击执行，全部回收在确认弹窗长按执行', { timeout: 60_000 }, async () => {
+    for (const viewport of [DESKTOP, MOBILE]) {
+      const opened = await openJunkWith(browser, [junkItem(1, 'video', 'promo.mp4'), junkItem(2, 'image', 'promo.jpg')], viewport);
+      try {
+        const { page, state } = opened;
+        const controls = page.locator('[data-junk-filters-frame]');
+        const shapes = await controls.locator('[data-select-all], [data-junk-dispose-all]').evaluateAll(elements =>
+          elements.map(element => ({ height: element.getBoundingClientRect().height, radius: getComputedStyle(element).borderRadius })));
+        assert.equal(shapes.length, 2);
+        assert.deepEqual(shapes, [{ height: 32, radius: '8px' }, { height: 32, radius: '8px' }]);
+        await page.locator('#grid [data-junk-action="dispose"]').first().click();
+        await page.waitForFunction(() => document.querySelectorAll('#grid [data-junk-card]').length === 1);
+        assert.deepEqual(state.batches, [{ ids: [1], operation: 'dispose', disposal_reason: 'junk' }]);
+
+        const disposed: unknown[] = [];
+        await page.route('**/api/ads/dispose-all', route => {
+          disposed.push(JSON.parse(route.request().postData() || '{}'));
+          state.items = [];
+          return route.fulfill({ json: { ok: true, changed: 1, ids: [2] } });
+        });
+        await page.locator('[data-junk-dispose-all]').click();
+        const confirm = page.locator('dialog[open] [data-hold-confirm]');
+        await confirm.waitFor();
+        await confirm.click();
+        assert.deepEqual(disposed, []);
+        await confirm.focus();
+        await page.keyboard.down('Space');
+        await page.waitForFunction(() => !document.querySelector('dialog[open] [data-hold-confirm]'));
+        await page.keyboard.up('Space');
+        assert.deepEqual(disposed, [{ kind: '', status: 'pending', expected: 1 }]);
+      } finally {
+        await opened.close();
+      }
+    }
+  });
 
   it('复核状态沿用首页玻璃控件尺寸，空分类保留选中玻璃与状态入口', { timeout: 60_000 }, async () => {
     for (const viewport of [DESKTOP, MOBILE]) {
@@ -226,20 +262,22 @@ describe('设计决定：控件、状态与首页顶部', () => {
     }
   });
 
-  it('高清版卡片的封面是 150px 宽的 16/10 方块，长标题从头显示、最多两行', { timeout: 60_000 }, async () => {
+  it('高清版卡片是探索卡那一副：封面铺满卡宽、16:9，长标题从头显示、最多两行', { timeout: 60_000 }, async () => {
     const long = '这是一个长到必须省略才放得下的文件名，用来盯住标题从头显示而番号不被截掉.mp4';
     const opened = await openQualityGoals(browser, [
       qualityGoal(1, long), qualityGoal(2, 'short.mp4'),
     ]);
     try {
-      const cover = opened.page.locator('li[data-goal-id="1"] button').first();
-      const box = await cover.evaluate((element) => ({
-        width: getComputedStyle(element).width,
-        ratio: getComputedStyle(element).aspectRatio,
-      }));
-      assert.equal(box.width, '150px');
-      assert.equal(box.ratio.replaceAll(' ', ''), '16/10');
-      const title = opened.page.locator('li[data-goal-id="1"] h3 button');
+      const card = opened.page.locator('[data-goal-id="1"]');
+      const box = await card.evaluate((element) => {
+        const pic = element.querySelector('[data-media-pic]')!;
+        return { card: element.getBoundingClientRect().width, cover: pic.getBoundingClientRect().width,
+          ratio: getComputedStyle(pic).aspectRatio };
+      });
+      assert.ok(Math.abs(box.cover - box.card) < 1, `封面没铺满卡宽：${JSON.stringify(box)}`);
+      const [w, h] = box.ratio.split('/').map(Number);
+      assert.ok(Math.abs(w! / h! - 16 / 9) < 0.001, `封面不是 16:9：${box.ratio}`);
+      const title = card.locator('[data-media-title]');
       await title.waitFor({ timeout: 5_000 });
       const shown = await title.evaluate((element) => ({
         clamp: getComputedStyle(element).webkitLineClamp,
@@ -473,7 +511,7 @@ describe('设计决定：控件、状态与首页顶部', () => {
         };
         // `divide-y` 把线画在每条的下缘（末条除外），所以量的是第一条的下边。
         const first = element.querySelectorAll('li')[0]!;
-        const log = element.querySelector('[aria-label="在资源管理器中显示"]')!.closest('.text-text-secondary')!.querySelector('p')!;
+        const log = element.querySelector('[aria-label="查看文件位置"]')!.closest('.text-text-secondary')!.querySelector('p')!;
         return {
           divider: parseFloat(getComputedStyle(first).borderBottomWidth),
           dividerInk: paint(getComputedStyle(first).borderBottomColor),
@@ -493,7 +531,7 @@ describe('设计决定：控件、状态与首页顶部', () => {
 
   it('一趟的问题收在同一块提示里，「7 天内不再问」、完整记录与导出都跟着它', { timeout: 60_000 }, async () => {
     const notes = { fetching_cover: 84, querying_metadata: 18 };
-    const button = '[aria-label="在资源管理器中显示"]';
+    const button = '[aria-label="查看文件位置"]';
     const reveal = `#libraryProcessing ${button}`;
     const failed = await openProcessing(browser, '/data-cleanup', { ...FAILED_JOB, notes });
     try {
@@ -800,6 +838,46 @@ describe('设计决定：控件、状态与首页顶部', () => {
       })));
       assert.equal(await opened.page.locator('.search > .cleardissolve').count(), 0,
         '输入法开始组字后旧残影仍覆盖候选字');
+    } finally {
+      await opened.close();
+    }
+  });
+
+  it('搜索框空着且没聚焦时占位推荐词隔几秒换一句，聚焦、打字或组字就停', { timeout: 60_000 }, async () => {
+    const opened = await openCatalog(browser);
+    try {
+      await opened.page.emulateMedia({ reducedMotion: 'no-preference' });
+      const input = opened.page.locator('#q');
+      const ghost = opened.page.locator('.search > .placeholderroll');
+      // 推荐词池在页面空闲时取，取到就把第一句换上去；之后每隔几秒换一句。
+      await opened.page.waitForFunction(() => document.querySelector<HTMLInputElement>('#q')?.dataset.suggestion,
+        null, { timeout: 15_000 });
+      // 第一句换上去时也走一次换句动画，等它走完再记「换之前」的那一句。
+      await ghost.waitFor({ state: 'detached', timeout: 2_000 });
+      const before = await input.getAttribute('placeholder');
+      await ghost.waitFor({ timeout: 8_000 });
+      const after = await input.getAttribute('placeholder');
+      assert.notEqual(after, before, '换句时 placeholder 没有改成新的一句');
+      assert.equal(after, await input.getAttribute('data-suggestion'), '占位字与空回车要搜的词对不上');
+      assert.equal(await input.evaluate((element) => getComputedStyle(element, '::placeholder').opacity), '0',
+        '换句的那一层在场时框里自己的占位字没有收起');
+      await ghost.waitFor({ state: 'detached', timeout: 2_000 });
+      assert.equal(await input.evaluate((element) => element.classList.contains('placeholderrolling')), false,
+        '换完之后仍压着输入框的占位字');
+
+      await ghost.waitFor({ timeout: 8_000 });
+      await input.type('新');
+      assert.equal(await ghost.count(), 0, '开始打字后换句的那一层仍盖在输入框上');
+      // 聚焦时不换句：人正对着这一句，换掉了回车搜的就不是刚看见的词。
+      await input.fill('');
+      await opened.page.waitForTimeout(6_000);
+      assert.equal(await ghost.count(), 0, '聚焦在搜索框上时占位字仍在换句');
+      await input.blur();
+      await ghost.waitFor({ timeout: 8_000 });
+      await input.evaluate((element) => element.dispatchEvent(new CompositionEvent('compositionstart', {
+        bubbles: true, data: '候',
+      })));
+      assert.equal(await ghost.count(), 0, '输入法开始组字后换句的那一层仍盖着候选字');
     } finally {
       await opened.close();
     }

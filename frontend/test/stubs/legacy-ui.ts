@@ -21,14 +21,13 @@ export {closeAnchoredMenu, dialSliderHtml, iconSwitchHtml, wireAnchoredMenu, wir
 export {configurationSkeletonHtml, revealSkeleton, SKELETON_REVEAL_DELAY, skeletonHtml} from '../../src/ui-kit';
 // 微光的视口照看与底板动画的撤销用正式实现。
 export {cancelGlide, gateSweep, releaseSweep} from '../../src/ui-kit';
+// 后台推进的语义动画与那一行状态用正式模板（封面格「抓取中」、列表续页）。
+export {activityMotionHtml, activityStatusHtml} from '../../src/ui-kit';
 /* 测试环境没有布局，骨架补齐量不出东西，这里什么都不做。 */
 export const fitSkeleton = (_root: Element | null): void => {};
-export const loadingDotsHtml = (label: string): string => `<span>${label}</span>`;
 export {LOAD_MORE_STATUS} from '../../src/ui-kit';
 export const spinnerHtml = (label: string): string => `<span role="status" aria-label="${label}"></span>`;
 export const checkboxHtml = (attrs = ''): string => `<span class="ui-pcheck"><input type="checkbox" ${attrs}></span>`;
-export const progressHtml = (label: string, value: number, max = 100): string =>
-  `<progress role="progressbar" aria-label="${label}" value="${value}" max="${max}" aria-valuenow="${value}" aria-valuemax="${max}"></progress>`;
 export const confirmModal = async (_options: unknown) => ({confirmed:false});
 /* 菜单开合：测试环境不放动画，退场当场藏起。 */
 export const presentMenu = (menu: HTMLElement): void => { menu.hidden = false };
@@ -42,7 +41,6 @@ export const MEDIA_SOURCE_ICONS: Record<string,string> = {local:'hard-drive','11
 export const selectOptionIconHtml = (mark?: string): string => mark ? `<i data-source-icon="${mark}"></i>` : '';
 
 // 设置面板的选项、change 与持久化回归使用正式下拉控件。
-export {selectFieldHtml, wireSelectField} from '../../src/ui-kit';
 export const wireCollapse = (_root: ParentNode, _selector: string, _idPrefix: string): void => {};
 /* 只落位，不动画：jsdom 没有布局，量出来处处是零，那段弹簧也就没有什么可跑的。
    动作本身由 `frontend/e2e/design-*.test.ts` 在浏览器中验证。 */

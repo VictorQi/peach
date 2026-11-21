@@ -42,6 +42,21 @@ const source = (id: number, author: string, extra: Partial<FollowSource> = {}): 
   id, provider: 'kemono', provider_label: 'Kemono', author_key: `name:${author}`, last_status: 'ok', ...extra,
 });
 
+it('关注作品右键显示状态对应操作，打开菜单不打开详情', async () => {
+  const openDetail = vi.fn();
+  const onStatus = vi.fn();
+  const host = await mount(<FollowCard group={group(item(21, { status: 'ignored' }))} authorSources={[]} media="videos"
+    context={{ sources: [], aliases: [], credentials: new Set<string>() }} selected={false} selectMode={false} busy="" failure=""
+    actions={{ openDetail, openAuthor: vi.fn(), canFlip: () => false }} onStatus={onStatus} onSave={vi.fn()} />);
+  await act(async () => { host.querySelector('[data-follow-item]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })) });
+  const menu = document.querySelector('[role="menu"]')!;
+  expect(menu.textContent).toContain('保存到数据库');
+  expect(menu.textContent).toContain('恢复未看');
+  expect(openDetail).not.toHaveBeenCalled();
+  const ignored = [...menu.querySelectorAll('[role="menuitem"]')].find(node => node.textContent === '忽略');
+  expect(ignored?.getAttribute('aria-disabled')).toBe('true');
+});
+
 it('失败封面随数据刷新重试，可用图片保持同一节点', async () => {
   const common = { group: group(item(1)), authorSources: [], media: 'videos' as const,
     context: { sources: [], aliases: [], credentials: new Set<string>() }, selected: false, selectMode: false,
@@ -196,7 +211,7 @@ describe('底栏与排序', () => {
   it('组合条按维度撤条件，同一个字符串在两个维度里各算各的', () => {
     const current = view({ author: 'loop', tags: ['loop', 'solo'] });
     const rows = followConditions(current, { authors: new Map([['loop', 'Loop 本人']]), providers: new Map(), works: new Map() });
-    expect(rows.map((row) => `${row.kind}:${row.label}`)).toEqual(['创作者:Loop 本人', '标签:loop', '标签:solo']);
+    expect(rows.map((row) => `${row.kind}:${row.label}`)).toEqual(['creator:Loop 本人', 'tag:loop', 'tag:solo']);
     expect(dropCondition(current, rows[1]!)).toEqual({ ...current, tags: ['solo'] });
     expect(dropCondition(current, rows[0]!)).toEqual({ ...current, author: '' });
   });

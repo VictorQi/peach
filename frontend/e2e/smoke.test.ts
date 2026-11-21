@@ -20,7 +20,7 @@ import type { Browser, Locator, Page } from 'playwright-core';
 
 import { configurationBody, expectBody, layout, launch, requiredEnv, settle, unmanagedScrollers, visit, VIEWPORTS } from './harness.ts';
 import { mockJavDetail } from './jav-detail-fixture.ts';
-import { prepareKnownHomeFeed } from './home-feed-fixture.ts';
+import { CLEANUP_HASH_REDIRECTS } from '../src/cleanup-routes.ts';
 
 interface Route {
   path: string;
@@ -130,9 +130,10 @@ const ROUTES: readonly Route[] = [
     body: (page) => [heading(page, '#main', '垃圾文件'), heading(page, '#grid', '没有待判断的垃圾文件')],
   },
   {
-    // 骨架只写「正在比对重复内容」；汇总块上那一格「重复内容」有没有重复组都会画，只有真页面有。
+    // 骨架的读数格只有「重复内容 · 」加一条微光；读数里写出组数的那一版有没有重复组都会画，只有真页面有。
     path: '/duplicates',
-    body: (page) => [heading(page, '#main', '重复文件'), page.locator('#stats').getByText('重复内容', { exact: true })],
+    body: (page) => [heading(page, '#main', '重复文件'),
+      page.locator('#stats [data-duplicates-frame] [data-catalog-readout]', { hasText: /^重复内容 · \d+ 组/ })],
   },
   {
     // 旧直达地址进入资源同步二级页。
@@ -158,6 +159,8 @@ const ROUTES: readonly Route[] = [
   ...['', '/appearance', '/playback', '/jav', '/search', '/content'].map(section => ({ path: '/settings' + section,
     body: (page: Page) => [page.getByRole('dialog', { name: /外观与导航|浏览与播放|JAV 与新作|搜索与推荐|内容显示/ })] })),
   ...['subscriptions', 'downloads', 'network', 'maintenance'].map(section => ({ path: `/settings/${section}`, body: configurationBody })),
+  { path: '/settings/maintenance/repairs', body: page => [pageTitle(page, '修复与迁移'), page.locator('#main [data-manage-crumb] a[href="/settings/maintenance"]'),
+    page.locator('#stats section[aria-labelledby="repair-items"], #stats section[aria-labelledby^="repair-group-"]').first()] },
   {
     path: `/assets/${requiredEnv('PEACH_E2E_ITEM')}`,
     body: (page) => {
@@ -165,6 +168,14 @@ const ROUTES: readonly Route[] = [
       return [stage, stage.locator('video.vjs-tech')];
     },
   },
+];
+
+const LEGACY_ROUTES: readonly Route[] = [
+  ...Object.entries(CLEANUP_HASH_REDIRECTS).map(([hash, path]) => ({
+    path: '/data-cleanup' + hash, body: ROUTES.find(route => route.path === path)!.body,
+  })),
+  { path: '/subscriptions?tab=wants', body: ROUTES.find(route => route.path === '/jav?tab=wants')!.body },
+  { path: '/subscriptions?tab=source', body: page => [page.locator('#stats form[aria-label="资源搜索"]')] },
 ];
 
 async function assertHolds(page: Page, problems: string[], where: string): Promise<void> {
@@ -196,8 +207,42 @@ describe('路由冒烟', () => {
     await browser.close();
   });
 
+  it('入库 toast 打开真实详情，标题使用番号或文件名，返回与前进恢复对应页面', { timeout: 60_000 }, async () => {
+    const id = Number(requiredEnv('PEACH_E2E_ITEM'));
+    let items: Array<{ id: number; kind: string; asset_id: number; label: string; at: number }> = [];
+    let reads = 0;
+    const opened = await visit(browser, '/stats', DESKTOP, async page => {
+      await page.route('**/api/result-updates', route => {
+        reads += 1;
+        return route.fulfill({ json: { ok: true, busy: true, result_versions: {}, ingest_notices: { epoch: 'toast-navigation', items } } });
+      });
+    });
+    try {
+      await expectBody(opened.page, '/stats', [statsInventoryTab(opened.page)]);
+      await opened.page.waitForFunction(() => document.title === '统计 · Peach');
+      assert.ok(reads > 0, '通知基线没有读取');
+      const response = await opened.page.request.get(`${requiredEnv('PEACH_E2E_ORIGIN')}/api/item?id=${id}`);
+      const item = await response.json();
+      const label = [item.display_code, item.code, item.name].map(value => String(value || '').trim()).find(Boolean);
+      assert.ok(label, '样本作品缺少番号与文件名');
+      items = [{ id: 1, kind: 'download', asset_id: id, label, at: 0 }];
+      const open = opened.page.locator('[data-sonner-toast]').filter({ hasText: '已入库并整理完成' }).getByRole('button', { name: '打开', exact: true });
+      await open.click({ timeout: 15_000 });
+      const stage = opened.page.getByRole('dialog', { name: '作品详情', exact: true });
+      await stage.locator('[data-item-detail] [data-item-title]').waitFor({ state: 'visible' });
+      assert.equal(new URL(opened.page.url()).pathname, `/assets/${id}`);
+      await opened.page.waitForFunction(expected => document.title === expected, `${label} · Peach`);
+      await opened.page.goBack();
+      await statsInventoryTab(opened.page).waitFor({ state: 'visible' });
+      await opened.page.waitForFunction(() => document.title === '统计 · Peach');
+      await opened.page.goForward();
+      await stage.locator('[data-item-detail] [data-item-title]').waitFor({ state: 'visible' });
+      await opened.page.waitForFunction(expected => document.title === expected, `${label} · Peach`);
+    } finally { await opened.close() }
+  });
+
   for (const viewport of VIEWPORTS) {
-    for (const route of ROUTES) {
+    for (const route of [...ROUTES, ...LEGACY_ROUTES]) {
       // 单条超时远小于 Python 侧的整轮超时：卡住的那一条自己报名字，不拖垮整轮输出。
       it(`${route.path} @ ${viewport.name}`, { timeout: 60_000 }, async () => {
         const opened = await visit(browser, route.path.startsWith('/works/') ? '/stats' : route.path, viewport);
@@ -229,22 +274,23 @@ describe('路由冒烟', () => {
     }
   }
 
-  /* 任务页与常驻结果更新分别查询：离页停止完整任务读取，结果更新继续低频读取。
-     固定空态让轮询保持十秒间隔；回到任务页前撤掉拦截，再读取服务端真实任务。
+  /* 任务页读完整任务列表，常驻的结果更新只读轻量版本：离页卸掉任务页后不再读任务列表，
+     结果更新继续低频读取。固定空态让轮询保持十秒间隔；回到任务页前撤掉拦截，再读取服务端真实任务。
      换页走 pushState + popstate：侧栏按钮、抽屉和浏览器后退最后走的都是这一条路。 */
   it('离开任务页卸载旧根，全局结果轮询持续，返回读取真实任务', { timeout: 120_000 }, async () => {
     const polls: number[] = [];
-    const fullPolls: number[] = [];
+    const updates: number[] = [];
     const opened = await visit(browser, '/tasks', DESKTOP, async (page) => {
       await page.route('**/api/tasks', route => route.fulfill({ json: {
         available: true, running: [], skipped: [], finished: [], finished_has_more: false,
       } }));
       await page.route('**/api/result-updates', route => route.fulfill({ json: {
-        busy: false, result_versions: {},
+        ok: true, busy: false, result_versions: {}, ingest_notices: { epoch: 'smoke', items: [] },
       } }));
       page.on('request', (request) => {
-        if (new URL(request.url()).pathname === '/api/result-updates') polls.push(performance.now());
-        if (new URL(request.url()).pathname === '/api/tasks') fullPolls.push(performance.now());
+        const path = new URL(request.url()).pathname;
+        if (path === '/api/tasks') polls.push(performance.now());
+        if (path === '/api/result-updates') updates.push(performance.now());
       });
     });
     try {
@@ -268,7 +314,7 @@ describe('路由冒烟', () => {
       await expectBody(opened.page, '/stats', [statsInventoryTab(opened.page)]);
       await settle(opened.page);
       const leftAt = polls.length;
-      const fullAt = fullPolls.length;
+      const updatesAt = updates.length;
       // 统计页自己也是 React 档：管理区正文里应当只剩它那一棵根。
       assert.equal(await opened.page.locator('#stats .peach-react').count(), 1,
         '管理区正文里不是只剩统计页那一棵 React 根');
@@ -278,13 +324,14 @@ describe('路由冒烟', () => {
       // 十二秒覆盖一次十秒轮询；允许观察窗口跨过两次，但每次必须至少相隔八秒。
       // 两秒余量容纳导航与计时误差，也能拒绝活跃任务的两秒节律或并行的重复请求。
       await opened.page.waitForTimeout(12_000);
-      const continued = polls.slice(leftAt);
-      assert.equal(fullPolls.length, fullAt, '离开任务页后不再组装完整任务列表');
+      // 离开任务页后，全局轮询只读轻量的结果版本，不再组装整张任务列表。
+      assert.equal(polls.length, leftAt, `离开任务页后仍在读取完整任务列表：${polls.length - leftAt} 次`);
+      const continued = updates.slice(updatesAt);
       assert.ok(continued.length >= 1 && continued.length <= 2,
         `离开任务页后全局结果轮询应持续单路低频读取，十二秒内看到 ${continued.length} 次请求`);
-      for (let index = leftAt; index < polls.length; index += 1) {
-        assert.ok(polls[index] - polls[index - 1] >= 8_000,
-          `全局任务轮询间隔过短：${Math.round(polls[index] - polls[index - 1])}ms`);
+      for (let index = Math.max(1, updatesAt); index < updates.length; index += 1) {
+        assert.ok(updates[index] - updates[index - 1] >= 8_000,
+          `全局结果轮询间隔过短：${Math.round(updates[index] - updates[index - 1])}ms`);
       }
 
       await opened.page.unroute('**/api/tasks');
@@ -335,7 +382,7 @@ describe('路由冒烟', () => {
       const beforeReturn = served;
       await go('/');
       await expectBody(opened.page, '/', [feedCards.first()]);
-      assert.equal(served, beforeReturn, '返回首页沿用新作缓存');
+      assert.equal(served, beforeReturn + 1, '返回首页读取最新新作');
       await go('/junk-files');
       await opened.page.locator('#count [data-junk-filters]').waitFor();
       assert.equal(await opened.page.locator('#feedNew').isHidden(), true, '垃圾文件页不展示订阅新作');

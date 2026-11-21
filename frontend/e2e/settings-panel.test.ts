@@ -27,8 +27,8 @@ async function posted(page: Page, server: Server, path: string, key: string): Pr
 const stored = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('peach.settings.v1') || '{}'));
 
 async function pick(page: Page, field: string, value: string): Promise<void> {
-  await page.locator(`${field} [data-select-trigger]`).click();
-  await page.locator(`${field} [data-select-option="${value}"]`).click();
+  await page.locator(`${field} button[aria-haspopup="listbox"]`).click();
+  await page.getByRole('listbox').locator(`[data-select-option="${value}"]`).click();
 }
 
 /** 自建一份上下文：起始设置只在本地还没有时写一次，刷新之后不会被冲掉。 */
@@ -154,6 +154,44 @@ describe('设置面板', () => {
     } finally {
       await context.close();
     }
+  });
+
+  it('改过的 SFW 快捷键按物理键位生效，原来的 Shift+S 不再切换', { timeout: 60_000 }, async () => {
+    const opened = await openHome(browser);
+    try {
+      const page = opened.page;
+      const censored = () => page.evaluate(() => document.body.classList.contains('censor'));
+      await page.evaluate(() => localStorage.setItem('peach.sfw-shortcut', 'Alt+KeyH'));
+      await page.reload({ waitUntil: 'load' });
+      await settle(page);
+      await page.locator('body').click({ position: { x: 1, y: 1 } });
+      await page.keyboard.press('Shift+S');
+      assert.equal(await censored(), false);
+      await page.keyboard.press('Alt+KeyH');
+      assert.equal(await censored(), true);
+      await openPanel(page);
+      await page.locator(PANEL).getByRole('tab', { name: '内容显示', exact: true }).click();
+      assert.equal(await page.locator(`${PANEL} [data-shortcut-keys]`).innerText(), 'Alt+H');
+      assert.deepEqual(opened.problems, []);
+    } finally { await opened.close() }
+  });
+
+  it('Shift+S 在页面上切换 SFW 并记住，在输入框里不切换', { timeout: 60_000 }, async () => {
+    const opened = await openHome(browser);
+    try {
+      const page = opened.page;
+      const censored = () => page.evaluate(() => document.body.classList.contains('censor'));
+      await page.locator('body').click({ position: { x: 1, y: 1 } });
+      await page.keyboard.press('Shift+S');
+      assert.equal(await censored(), true);
+      assert.equal(await page.evaluate(() => localStorage.getItem('peach-censor')), '1');
+      await page.keyboard.press('Shift+S');
+      assert.equal(await censored(), false);
+      await page.locator('#q').focus();
+      await page.keyboard.press('Shift+S');
+      assert.equal(await censored(), false, '在搜索框里打大写 S 不该切换 SFW');
+      assert.deepEqual(opened.problems, []);
+    } finally { await opened.close() }
   });
 
   it('界面音效关掉后点按不再出声，打开后又出声', { timeout: 60_000 }, async () => {

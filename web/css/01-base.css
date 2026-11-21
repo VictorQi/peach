@@ -84,6 +84,10 @@
   --control-h-compact:32px; /* 紧凑档：行操作、卡片悬浮动作、卡内次级操作、筛选条 */
   --control-h:36px; /* 默认档：表单字段与同组按钮、页面与分区操作、页签外框、导航 */
   --control-h-large:40px; /* 大档：顶栏搜索与图标键、播放器控制条、首页厂牌胶囊 */
+  /* 旧模板与 React 新作卡共用窄卡头像几何，避免两条渲染路径各自漂移。 */
+  --media-avatar-tight:30px;
+  --media-avatar-tight-step:8px;
+  --media-avatar-tight-max:64px;
   /* 框体上下两条横条的统一高度。写成变量是因为它同时管数据管理的卡片、链接管理
      和资源同步：这三处任何一处单独调，页面上就会出现两种「同一种条」。 */
   --fieldset-bar-h:52px;
@@ -270,7 +274,8 @@ button,[role="button"],summary{user-select:none;-webkit-user-select:none;-webkit
   user-select:auto;-webkit-user-select:auto;-webkit-touch-callout:default}
 /* React 子树的焦点环由 BoardUI 组件自己画（输入框画在外框上）；`:where` 让特指度保持 0,1,0。 */
 :where(:not(.peach-react *)):focus-visible{outline:2px solid var(--tungsten);outline-offset:2px}
-@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* 伪元素一并选上：遗留骨架的微光写在 `::after` 上，只写 `*` 时减少动效也照样扫。 */
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 /* 静态搜索框：React 接管前的骨架里用（索引页标题行），接管后换成 BoardUI 的 InputBase。
    两者是同一只框的前后两帧，几何与面照 InputBase 取：无边框的填充底、20px 图标距左 8px、
    文字从 34px 起（8 + 20 + 2 + 4），框高跟同一行按钮共用 --control-h。 */
@@ -392,6 +397,9 @@ button.danger.danger:disabled{
 .ov-x .ovthumb{left:0;bottom:0;height:3px}
 .ov-y:hover .ovthumb,.ov-y.dragging .ovthumb{width:6px}
 .ov-x:hover .ovthumb,.ov-x.dragging .ovthumb{height:6px}
+/* 横排、表格按住拖动（`wireHorizontalScroller`）时整页锁成「抓取中」并且不选字：只给滚动容器写光标的话，
+   内容在指针底下移动，按钮的手形、文字的竖线轮流冒出来，看着一直在闪。 */
+html[data-drag-scrolling],html[data-drag-scrolling] *{cursor:grabbing!important;user-select:none!important}
 .ovtrack.page{position:fixed;top:0;bottom:0;right:0;z-index:91;pointer-events:none}
 @media (pointer:fine){.ovtrack.page .ovthumb{pointer-events:auto}}
 .ovtrack.page:hover .ovthumb{width:3px}
@@ -429,31 +437,6 @@ body.settings-open>.ovtrack.page,body.photolight-open>.ovtrack.page{display:none
 /* 进顶层的那几个要把 popover 的默认盒子拆掉：浏览器给 `[popover]` 的是 inset:0 加
    margin:auto 的居中盒，菜单会被拉宽并落在屏幕正中，而定位算的是 left/top。 */
 .popmenu[popover]{inset:auto;margin:0}
-
-/* Geist Select：触发器穿输入框那身盒子，面板就是上面那个锚定菜单。为什么不用原生
-   下拉、几何取自哪里，见 frontend/src/ui-kit/select-field.ts 的头注释。 */
-.gselectfield{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:space-between;
-  gap:8px;width:100%;min-width:0;height:var(--control-h);padding:0 10px 0 12px;
-  border:1px solid var(--field-ring);border-radius:var(--control-radius);
-  background:var(--ground);color:var(--ink);font:inherit;font-size:var(--fs-md);line-height:20px;
-  text-align:left;cursor:pointer;transition:border-color .12s ease,background-color .12s ease,box-shadow .12s ease}
-.gselectfield>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.gselectmenu [data-select-content]{display:flex;align-items:center;gap:8px;min-width:0}
-.gselectfield .gselectmark{vertical-align:-3px;margin-inline-end:8px}
-.gselectmark{width:var(--icon-inline);height:var(--icon-inline);flex:none;object-fit:contain;stroke:currentColor;fill:none;stroke-width:2}
-.gselectfield>svg{width:16px;height:16px;flex:none;stroke:currentColor;fill:none;color:var(--muted)}
-.gselectfield:hover:not(:disabled){border-color:var(--field-ring-hover)}
-/* 展开时按住焦点态：菜单开着而触发器看起来没被点中，读起来像两个控件。 */
-.gselectfield[aria-expanded="true"]{box-shadow:inset 0 0 0 2px var(--color-border-button-active)}
-.gselectfield:disabled{background:var(--surface);color:var(--muted);cursor:not-allowed}
-.gselectfield:focus-visible{outline:2px solid var(--tungsten);outline-offset:2px}
-/* 行首是站标，不是勾：选中态只有填充，行里也就没有一枚勾要占位。几何以 board.css 那条
-   浮层菜单项为准，这里是遗留层自己的基线，两边的内边距写同一个值。 */
-.popmenu.gselectmenu button{display:flex;align-items:center;justify-content:flex-start;gap:8px;width:100%;min-height:var(--control-h);
-  padding:0 8px;border:0;border-radius:var(--control-radius);background:transparent;color:var(--ink-2);
-  font:inherit;font-size:var(--fs-md);text-align:left;cursor:pointer}
-.popmenu.gselectmenu button:hover{background:var(--hover);color:var(--ink)}
-.popmenu.gselectmenu button[aria-selected="true"]{background:var(--hover);color:var(--ink)}
 
 /* Geist Modal 的操作条；弹层本身、正文与表单的几何在 frontend/src/ui-kit/modal.css。 */
 .geist-modal-footer{position:sticky;bottom:0;display:flex;justify-content:space-between;gap:16px;

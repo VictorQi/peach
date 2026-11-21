@@ -9,13 +9,14 @@ A local-first video metadata scraper and media manager.
 [![Release](https://img.shields.io/github/v/release/VictorQi/peach?include_prereleases&sort=semver&label=release&logo=github)](https://github.com/VictorQi/peach/releases)
 [![CI pipelines](https://img.shields.io/github/actions/workflow/status/VictorQi/peach/test.yml?branch=master&label=CI&logo=githubactions&logoColor=white)](https://github.com/VictorQi/peach/actions/workflows/test.yml)
 [![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue?logo=gnu&logoColor=white)](LICENSE)
+[![Translation status](https://hosted.weblate.org/widget/peach/svg-badge.svg)](https://hosted.weblate.org/engage/peach/)
 [![Windows x64](https://img.shields.io/badge/Windows-x64-0078D4)](docs/TESTING_DESKTOP.md)
 [![macOS DMG](https://img.shields.io/badge/macOS-DMG-555555?logo=apple&logoColor=white)](docs/OPERATIONS.md#macos-独立测试包)
 [![Age restrictions](https://img.shields.io/badge/age-18%2B-555555)](#license)
 
 ## Screenshots
 
-[![Video library with search, filters and posters](https://peach.video/assets/screenshots/home-wide-20261025-2-1280.webp)](https://peach.video/assets/screenshots/home-wide-20261025-2.png)
+[![Video library with search, filters and posters](https://peach.video/assets/screenshots/home-wide-20261118-2-en-1280.webp)](https://peach.video/assets/screenshots/home-wide-20261118-2-en.png)
 
 Movie demo data; see [asset credits and licenses](https://peach.video/en/credits/).
 
@@ -24,19 +25,19 @@ Movie demo data; see [asset credits and licenses](https://peach.video/en/credits
 
 **People and works**
 
-[![Charlie Chaplin's profile and films](https://peach.video/assets/screenshots/profile-wide-20261025-2-1280.webp)](https://peach.video/assets/screenshots/profile-wide-20261025-2.png)
+[![Charlie Chaplin's profile and films](https://peach.video/assets/screenshots/profile-wide-20261118-2-en-1280.webp)](https://peach.video/assets/screenshots/profile-wide-20261118-2-en.png)
 
 **Creator updates**
 
-[![Creator follows and new works](https://peach.video/assets/screenshots/follow-wide-20261025-2-1280.webp)](https://peach.video/assets/screenshots/follow-wide-20261025-2.png)
+[![Creator follows and new works](https://peach.video/assets/screenshots/follow-wide-20261118-2-en-1280.webp)](https://peach.video/assets/screenshots/follow-wide-20261118-2-en.png)
 
 **Library statistics**
 
-[![Library, storage and viewing statistics](https://peach.video/assets/screenshots/stats-wide-20261025-3-1280.webp)](https://peach.video/assets/screenshots/stats-wide-20261025-3.png)
+[![Library, storage and viewing statistics](https://peach.video/assets/screenshots/stats-wide-20261118-2-en-1280.webp)](https://peach.video/assets/screenshots/stats-wide-20261118-2-en.png)
 
 **Player**
 
-[![Big Buck Bunny player](https://peach.video/assets/screenshots/play-wide-20261025-2-1280.webp)](https://peach.video/assets/screenshots/play-wide-20261025-2.png)
+[![Big Buck Bunny player](https://peach.video/assets/screenshots/play-wide-20261118-2-en-1280.webp)](https://peach.video/assets/screenshots/play-wide-20261118-2-en.png)
 
 </details>
 
@@ -78,6 +79,10 @@ Development: [Contributing](CONTRIBUTING.md) · [Development guide](AGENTS.md) �
 ## Reporting problems
 
 This Fork has no public issue tracker enabled. Report problems through the channel where you obtained it; code changes go through [pull requests](https://github.com/VictorQi/peach/pulls). Include your version, steps and error message. Use demo data in public screenshots and redact private information; do not upload videos or databases.
+
+## Translation
+
+Peach is translated on [Hosted Weblate](https://hosted.weblate.org/engage/peach/). The current English is an AI draft, so suggestions and votes are welcome. See [Contributing](CONTRIBUTING.md#翻译) for the details.
 
 ## Related projects
 

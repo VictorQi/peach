@@ -129,7 +129,7 @@ class WebUiPolicyTests(unittest.TestCase):
 
     TUNGSTEN_ALLOWED_SELECTORS = (
         ":focus",              # 焦点环：:focus / :focus-visible / :focus-within
-        ".watchprogress", ".vjs-play-progress", ".vjs-progress-holder",  # 进度与数据
+        ".watchprogress", ".vjs-play-progress", ".vjs-progress-holder", ".navprogress",  # 进度与数据
         ".ptoggle:checked",  # Toggle 开态：Geist Toggle 实测轨道 rgb(0,112,243)
         ".flink", ".taste-history-guide-content a",  # 真正的链接
         ".vjs-subtitles-control>button[aria-pressed=true]:after", "[data-player-quality-badge]",  # 播放器字幕开态与清晰度
@@ -176,7 +176,6 @@ class WebUiPolicyTests(unittest.TestCase):
         ".brandpill",       # 顶栏厂牌胶囊，全站一颗
         ".playerstatsbtn",  # 播放器覆盖层，悬停走 ::after 另一层
         ".fb .like",        # 这一排彩色反馈按钮的既有约定就是悬停预览按下后的颜色
-        ".popmenu.gselectmenu button",  # 同上；2026-09-04 实测 vercel.com 后台的菜单行，悬停与选中共用同一枚 5% 填充
     )
 
     STATE_TOKENS = ('[aria-pressed="true"]', '[aria-selected="true"]',
@@ -184,7 +183,6 @@ class WebUiPolicyTests(unittest.TestCase):
 
     SELECTED_ON_GROUND = (
         '.chip[aria-pressed="true"]',                     # 产地选择站在对话框的 --ground 上
-        '.popmenu.gselectmenu button[aria-selected="true"]',  # 浮层菜单填 --ground
         '.ib[aria-pressed="true"]',                       # 顶栏填 --ground
     )
 

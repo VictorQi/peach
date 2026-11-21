@@ -27,7 +27,7 @@ export function SetupQuickStart({ setup, onDone, onAdvanced, onRestore }: {
     action.setError(details || (cause instanceof Error ? cause.message : '添加失败，请重试'));
   };
   const pick = () => void action.run('pick', async signal => {
-    const selected = await pickFolder(path, signal);
+    const selected = await pickFolder(path, 'media', signal);
     if (!selected) return null;
     setPath(selected);
     return save(selected, signal);

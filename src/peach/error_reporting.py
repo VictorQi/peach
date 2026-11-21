@@ -210,6 +210,30 @@ class ErrorHandler(logging.Handler):
             pass
 
 
+def _tidy_process_logs() -> None:
+    """正常退出时收走本进程没写进任何问题的日志（#485）：空的崩溃日志、只有启动记录的事件日志。
+
+    崩溃时解释器来不及跑 `atexit`，崩溃日志自然留下；写过事件的日志也留下。"""
+    global _fault_stream
+    if _fault_stream is not None:
+        try:
+            faulthandler.disable()
+            _fault_stream.close()
+        except (OSError, ValueError):
+            pass
+        _fault_stream = None
+    from .log_retention import idle_process_log
+    with _write_lock:
+        for directory in log_directories():
+            for name in (f"crash-{os.getpid()}.log", f"errors-{os.getpid()}.log"):
+                path = directory / name
+                if idle_process_log(path):
+                    try:
+                        path.unlink()
+                    except OSError:
+                        pass
+
+
 def install(log_dir: Path | None = None) -> None:
     global _hooks_installed, _log_dir, _fault_stream
     if log_dir is not None:
@@ -250,6 +274,8 @@ def install(log_dir: Path | None = None) -> None:
                 _fault_stream.close()
                 _fault_stream = None
     event("entry")
+    import atexit
+    atexit.register(_tidy_process_logs)
     try:
         from . import remote_reporting
         remote_reporting.usage()
@@ -266,14 +292,22 @@ def console_ready() -> None:
 
 
 def failure_details(stage: str, error: BaseException) -> str:
+    """托盘弹窗与通知里的一段：异常本身加诊断报告或错误日志的位置，跟本机语言（`tray.failure.*`）。"""
+    from . import interface_text
+    from .user_messages import UserFacingError
+    language = interface_text.local_language()
+    shown = (interface_text.text(f"server:{error.code}", error.params, language)
+             if isinstance(error, UserFacingError) else str(error))
     path = event(stage, error)
     try:
         from .support_bundle import save_bundle
         report = save_bundle()
-        return f"{error}\n\n诊断报告：{report}"
+        return interface_text.text("server:tray.failure.report", {"error": shown, "path": report}, language)
     except Exception as report_error:
         event("report-failed", report_error)
-        return f"{error}\n\n错误日志：{path}" if path else f"{error}\n\n错误日志未能写入，请保留此弹窗。"
+        if path:
+            return interface_text.text("server:tray.failure.log", {"error": shown, "path": path}, language)
+        return interface_text.text("server:tray.failure.noLog", {"error": shown}, language)
 
 
 def tray_main() -> int:
@@ -285,13 +319,17 @@ def tray_main() -> int:
         message = failure_details("tray-import", error)
         if os.name == "nt":
             import ctypes
-            ctypes.windll.user32.MessageBoxW(None, message, "Peach 启动失败", 0x10)
+            from . import interface_text
+            title = interface_text.text("server:tray.title.startFailed", None, interface_text.local_language())
+            ctypes.windll.user32.MessageBoxW(None, message, title, 0x10)
         elif sys.stderr is not None:
             print(message, file=sys.stderr)
         return 1
 
 
 def cli_main() -> int:
+    from .docker_entrypoint import drop_root_for_cli
+    drop_root_for_cli()
     install()
     try:
         from .cli import main
@@ -391,13 +429,25 @@ def _rearm_listener(loop, uvicorn_server, listener) -> bool:
     if not any(sock.fileno() == listener.fileno()
                for server in getattr(uvicorn_server, "servers", ()) for sock in server.sockets):
         return False
-    task = loop.create_task(_listen_again(uvicorn_server, listener.getsockname(), listener.family))
+    task = loop.create_task(_listen_again(uvicorn_server, listener.getsockname(), listener.family,
+                                          dualstack=_dualstack(listener)))
     _rearm_tasks.add(task)
     task.add_done_callback(_rearm_tasks.discard)
     return True
 
 
-async def _listen_again(uvicorn_server, address, family) -> None:
+def _dualstack(listener) -> bool:
+    """`listening.bind` 的 `::` 套接字关着 `IPV6_V6ONLY`，IPv4 连接也从它进来；重新监听要照样关。"""
+    import socket
+    if listener.family != socket.AF_INET6:
+        return False
+    try:
+        return listener.getsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY) == 0
+    except OSError:
+        return False
+
+
+async def _listen_again(uvicorn_server, address, family, *, dualstack=False) -> None:
     """任务排在处理器所在回调之后执行，此时旧监听已关。绑不上就让服务退出，交给托盘重拉。
 
     旧的 `asyncio.Server` 原样留着：主机名解析出多个地址时，它的其余监听还在服务；
@@ -419,7 +469,8 @@ async def _listen_again(uvicorn_server, address, family) -> None:
             return
         listener = None
         try:
-            listener = socket.create_server(address, family=family, backlog=config.backlog)
+            listener = socket.create_server(address, family=family, backlog=config.backlog,
+                                            dualstack_ipv6=dualstack)
             server = await asyncio.get_running_loop().create_server(
                 create_protocol, sock=listener, ssl=config.ssl, backlog=config.backlog)
         except OSError as error:

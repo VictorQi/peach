@@ -109,7 +109,7 @@ def picture(candidate: Candidate, data: bytes) -> Picture:
     落进 `.jpg` 之后卡片就一直在动。"""
     with Image.open(io.BytesIO(data)) as image:
         if getattr(image, "is_animated", False):
-            raise ValueError(f"{candidate.url} 是动图")
+            raise ValueError(f"{candidate.url} is animated")
         image.load()
         return Picture(candidate, image.size, data, fingerprint(image))
 
@@ -166,7 +166,10 @@ def same_scene(data: bytes, other: bytes) -> bool:
 
 def _download(transport, candidate: Candidate, *, deadline: float | None) -> tuple[Picture | None, str]:
     """一张候选图：下载得到、宽度够小图门槛的静态图，再报这一张的下落：`fetched` 下载到了，
-    `paused` 来源正在冷却，`failed` 断在连接、5xx 或 404 上。"""
+    `paused` 来源正在冷却，`failed` 断在连接、5xx 或 404 上。
+
+    JavDB 匿名接口的图床可能给 XOR 包装过的字节，先按公开前端的包装解开再比对。"""
+    from .javdb_public import decode_image, public_image_url
     try:
         data = _fetch(transport, candidate.url, referer=candidate.referer, limit=IMAGE_LIMIT, deadline=deadline)
     except SourcePaused:
@@ -174,7 +177,7 @@ def _download(transport, candidate: Candidate, *, deadline: float | None) -> tup
     except (NotFound, Unavailable, httpx.TransportError, OSError):
         return None, "failed"
     try:
-        found = picture(candidate, data)
+        found = picture(candidate, decode_image(data, original=True) if public_image_url(candidate.url) else data)
     except (OSError, ValueError, Image.DecompressionBombError):
         return None, "fetched"
     return (found if found.size[0] >= SMALL_MIN_WIDTH else None), "fetched"
@@ -208,41 +211,58 @@ def _pictures(transport, urls: dict[str, Candidate], reference, siblings: tuple[
     return pool, fetched, len(pool) - official, missed
 
 
-def _unverified(pool: list[Picture], usable: int, fetched: int,
-                missed: list[str]) -> tuple[Candidate, tuple[int, int], bytes, tuple[str, ...]]:
+def _unverified(pool: list[Picture], usable: int, fetched: int, missed: list[str],
+                allow_watermarked: bool = False) -> tuple[Candidate, tuple[int, int], bytes, tuple[str, ...]]:
     """没有两个图源对得上时的退路：图全出自一个图源就取最大那张，印证图源留空。
 
     `usable` 是池子里社区来源那几张，不算官方小图与它的同页图。`missed` 是没下载到的那几张的下落
-    （`_download`），交给 `_settled` 决定落空是不是确定答复。"""
+    （`_download`），交给 `_settled` 决定落空是不是确定答复。
+
+    `allow_watermarked` 是设置里的「没有别的封面时用 JavDB 带水印的图」（#531，默认关）：只在池子里
+    一张不带水印的都没有时才取 JavDB 那张，官方与别家的图永远在前。"""
     if not usable:
         if fetched:
-            raise _settled("社区来源给的封面都是动图或太小", missed)
-        raise Unavailable("社区来源的封面下载失败")
+            raise _settled("errors.communityCatalog.animatedOrSmall", missed)
+        raise Unavailable("errors.communityCatalog.downloadFailed")
     origins = sorted({one.origin for one in pool})
     if len(origins) > 1:
         # 几家都答了、图都下到了，只是互相对不上：再问还是这几张，交 `NotFound` 让采集任务记住。
-        raise _settled(f"{'、'.join(origins)} 给的封面不是同一张图，无法互相印证", missed)
+        raise _settled("errors.communityCatalog.mismatch", missed, {"origins": origins})
     allowed = [one for one in pool if not is_javdb_image(one.candidate.url)]
+    if not allowed and allow_watermarked and not missed:
+        # 另有图没下载到时不退到水印图：那一张可能正是不带水印的（与 `_settled` 同一个理由）。
+        allowed = pool
     if not allowed:
-        raise _settled('未取得无 JavDB 水印的封面', missed)
+        raise _settled(NO_UNWATERMARKED, missed)
     largest = max(allowed, key=lambda one: one.pixels)
     return largest.candidate, largest.size, largest.data, ()
 
 
-def _settled(message: str, missed: list[str]) -> Exception:
+#: 只剩 JavDB 水印图时那一句的 code；`cover_artwork` 拦水印图时也用它。
+NO_UNWATERMARKED = "errors.communityCatalog.noUnwatermarked"
+#: `_settled` 的几句落空原因各自带「另有几张没下载到」的那一版。
+_PARTLY_MISSED = {
+    "errors.communityCatalog.animatedOrSmall": "errors.communityCatalog.animatedOrSmallPartlyMissed",
+    "errors.communityCatalog.mismatch": "errors.communityCatalog.mismatchPartlyMissed",
+    NO_UNWATERMARKED: "errors.communityCatalog.noUnwatermarkedPartlyMissed",
+}
+
+
+def _settled(code: str, missed: list[str], params: dict | None = None) -> Exception:
     """图都下载到了才交 `NotFound`。有图没下载到时不下「没有」的结论（#342）：那一张可能正是能印证的、
     或不带 JavDB 水印的那张，下次再问答案可能就变了，交 `NotFound` 会被采集任务记成一周不问。
     没下到的全在冷却就是本趟没轮到（`SourcePaused`）。"""
     if not missed:
-        return NotFound(message)
+        return NotFound(code, params)
     kind = SourcePaused if all(outcome == "paused" for outcome in missed) else Unavailable
-    return kind(f"{message}；另有 {len(missed)} 张封面没下载到")
+    return kind(_PARTLY_MISSED[code], {**(params or {}), "count": len(missed)})
 
 
 def verified_cover(transport, code: str, works: list[tuple[str, dict]], *,
                    reference: tuple[Candidate, tuple[int, int], bytes] | None = None,
                    siblings: tuple[Candidate, ...] = (),
-                   deadline: float | None = None) -> tuple[Candidate, tuple[int, int], bytes, tuple[str, ...]]:
+                   deadline: float | None = None,
+                   allow_watermarked: bool = False) -> tuple[Candidate, tuple[int, int], bytes, tuple[str, ...]]:
     """社区来源给的封面里，至少两个图源对得上的最大那张；返回值末尾是参与印证的图源。
 
     `reference` 是官方渠道取到的小图，它也算一个图源：javdb 的大图和 DMM 的小图是同一张
@@ -255,7 +275,7 @@ def verified_cover(transport, code: str, works: list[tuple[str, dict]], *,
     urls = {url: _candidate(url) for _source, payload in works for url in payload.get("cover_urls") or []
             if not is_cross_product_cover(code, url)}
     if not urls:
-        raise NotFound("社区来源没有这部片的封面")
+        raise NotFound("errors.communityCatalog.noCovers")
     siblings = tuple(one for one in siblings if not is_cross_product_cover(code, one.url))
     pool, fetched, usable, missed = _pictures(transport, urls, reference, siblings, deadline=deadline)
     best = None
@@ -266,5 +286,5 @@ def verified_cover(transport, code: str, works: list[tuple[str, dict]], *,
         if len(origins) >= 2 and (best is None or one.pixels > best[0].pixels):
             best = (one, tuple(sorted(origins)))
     if best is None:
-        return _unverified(pool, usable, fetched, missed)
+        return _unverified(pool, usable, fetched, missed, allow_watermarked)
     return best[0].candidate, best[0].size, best[0].data, best[1]

@@ -19,6 +19,7 @@ from peach import downloads_clouddrive, web_downloads
 from peach.api import create_app
 from peach.config import PeachSettings
 from peach.push_discovery import CloudPrefix, PushDiscoveryConfig
+from peach.user_messages import UserValueError
 from support.ledger import fresh_ledger
 
 HASH = "c9e15763f722f23e98a29decdfae341b98d53056"
@@ -61,7 +62,7 @@ class FakeBrowserLogin:
 
     def start(self):
         if not self.is_available:
-            raise ValueError("这台电脑上没有找到 Chrome 或 Edge，用不了浏览器登录")
+            raise UserValueError("errors.downloadsPikpakBrowser.browserMissing")
         self.started += 1
         self.state = {"state": "waiting", "message": "浏览器窗口已打开，在里面登录 PikPak"}
         return self.status()
@@ -163,6 +164,14 @@ class RouteTests(_App):
         last = self.client.get(f"/api/downloads?limit=2&before_id={first['next_before_id']}").json()
         self.assertEqual(len(last["tasks"]), 1)
         self.assertFalse(last["has_more"])
+        numbered = self.client.get('/api/downloads?limit=2&page=2').json()
+        self.assertEqual([row['id'] for row in numbered['tasks']], [row['id'] for row in last['tasks']])
+        self.assertEqual(numbered['total'], 3)
+        self.assertEqual(numbered['page'], 2)
+        beyond = self.client.get('/api/downloads?limit=2&page=99').json()
+        self.assertEqual(beyond['page'], 2)
+        for page in ('0', '-1', 'invalid'):
+            self.assertEqual(self.client.get(f'/api/downloads?page={page}').status_code, 400)
         for position in ("nope", "0", "-1"):
             self.assertEqual(self.client.get(f"/api/downloads?before_id={position}").status_code, 400)
 
@@ -215,6 +224,7 @@ class RouteTests(_App):
             source=f"magnet:?xt=urn:btih:{HASH}&dn=ABC-123", provider="115",
             target="/115/云下载", code="ABC-123")
         result.task.state = dl.INGESTED
+        result.task.next_check_at = None
         result.task.postprocess_state = dl.POSTPROCESS_PENDING
         self.service.store.save(result.task)
         contract = self.app.state.web_contract
@@ -229,6 +239,67 @@ class RouteTests(_App):
         second = download_postprocess.enqueue(contract, self.service.store.get(result.task.id))
         self.assertEqual(second, first)
         self.assertEqual(self.service.store.get(result.task.id).postprocess_run_id, first)
+
+    def test_postprocess_cancelled_before_enqueue_returns_stays_cancelled_and_can_be_retried(self):
+        task = self.service.store.save(dl.DownloadTask(
+            id=0, info_hash=HASH, provider="115", source_uri="", display_name="ABC-123",
+            target="/115/云下载", state=dl.INGESTED, postprocess_state=dl.POSTPROCESS_PENDING))
+        contract = self.app.state.web_contract
+        enqueue = contract.task_runs.enqueue_followups
+
+        def cancel_after_enqueue(*args, **kwargs):
+            result = enqueue(*args, **kwargs)
+            run_id = result["queued"][0]
+            response = self.client.post(f"/api/tasks/{run_id}/control", json={"action": "cancel"})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(contract.task_runs.get(run_id).status, "cancelled")
+            return result
+
+        with mock.patch.object(contract.followups, "wake"), \
+                mock.patch.object(contract.task_runs, "enqueue_followups", side_effect=cancel_after_enqueue):
+            run_id = download_postprocess.enqueue(contract, task)
+        payload = self.client.get("/api/downloads").json()["tasks"][0]
+        self.assertEqual((payload["postprocess_state"], payload["postprocess_run_id"]),
+                         (dl.POSTPROCESS_CANCELLED, run_id))
+        self.assertEqual(payload["postprocess_label_code"], "download.state.cancelled")
+        self.assertFalse(payload["postprocess_active"])
+        self.assertTrue(payload["postprocess_retryable"])
+        self.assertIsNone(payload["postprocess_retry_at"])
+        self.assertEqual(self.service.poll_once(), 0)
+        self.assertIsNone(download_postprocess.enqueue(contract, task))
+
+        queued = []
+        self.service.after_ingest = lambda item: queued.append(item.id)
+        response = self.client.post("/api/downloads/postprocess", json={"id": task.id})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["task"]["postprocess_state"], dl.POSTPROCESS_PENDING)
+        self.assertEqual(queued, [task.id])
+        self.assertEqual(self.provider.submitted, [])
+
+    def test_start_recovers_older_download_postprocess_with_a_cancelled_run(self):
+        task = self.service.store.save(dl.DownloadTask(
+            id=0, info_hash=HASH, provider="115", source_uri="", display_name="ABC-123",
+            target="/115/云下载", state=dl.INGESTED, postprocess_state=dl.POSTPROCESS_PENDING))
+        contract = self.app.state.web_contract
+        with mock.patch.object(contract.followups, "wake"):
+            run_id = download_postprocess.enqueue(contract, task)
+        with contract.database.write_transaction() as connection:
+            # 模拟旧版只结算任务中心、下载卡片仍显示排队。
+            connection.execute("UPDATE task_run SET status='cancelled',finished_at=? WHERE id=?",
+                               ("2026-11-17T10:00:00Z", run_id))
+        other = self.service.store.save(dl.DownloadTask(
+            id=0, info_hash="2" * 40, provider="115", source_uri="", display_name="DEF-456",
+            target="/115/云下载", state=dl.INGESTED, postprocess_state=dl.POSTPROCESS_QUEUED,
+            postprocess_run_id=run_id))
+        self.service.after_ingest = mock.Mock()
+        self.addCleanup(self.service.stop)
+        with mock.patch.object(self.service, "_loop"):
+            self.service.start()
+        repaired = self.service.store.get(task.id)
+        self.assertEqual((repaired.postprocess_state, repaired.postprocessed_at),
+                         (dl.POSTPROCESS_CANCELLED, "2026-11-17T10:00:00Z"))
+        self.assertEqual(self.service.store.get(other.id).postprocess_state, dl.POSTPROCESS_QUEUED)
+        self.service.after_ingest.assert_not_called()
 
 
 class SettingsBlockTests(_App):
@@ -269,6 +340,8 @@ class SettingsBlockTests(_App):
         self.assertEqual(state["config"], raw)
         self.assertTrue(state["token_set"])
         self.assertTrue(any("端口" in problem for problem in state["problems"]))
+        self.assertEqual(len(state["problem_codes"]), len(state["problems"]))
+        self.assertIn("errors.downloads.addressPortInvalidIpv6", [item["code"] for item in state["problem_codes"]])
         self.assertEqual(state["providers"], [])
         self.assertNotIn("test-only-token", response.text)
         self.assertEqual(self.service.settings.path.read_bytes(), before)
@@ -430,6 +503,7 @@ class SettingsBlockTests(_App):
             transport=httpx.MockTransport(handler))
         self.assertEqual((result["ok"], result["captcha_url"]),
                          (False, "https://user.mypikpak.com/captcha"))
+        self.assertEqual(result["message_code"], "errors.downloadsPikpak.captchaRequired")
         self.assertFalse(result["settings"]["pikpak"]["logged_in"])
         self.assertNotIn("pw", self.secrets().get("download-pikpak.json", ""))
 
@@ -516,12 +590,15 @@ class ResourceIndexerRoutes(_App):
         Indexers(self.service.credentials).save({"indexers": [{
             "key": "one", "name": "测试源", "url": "http://indexer.test/api", "enabled": True}]})
         with mock.patch("peach.web_resource_search.direct_search", return_value={
-                "items": [], "warnings": [], "trace": [],
-                "next_sources": [], "reference_only": []}) as direct, \
+                "items": [], "warnings": ["JavDB：未取得"], "trace": [], "unfetched_sources": ["JavDB"],
+                "retry_after": 900.0, "next_sources": [], "reference_only": []}) as direct, \
              mock.patch("peach.web_resource_search._SEARCH.run", return_value={
                 "ok": True, "state": "ready", "items": [], "warnings": [], "error": ""}) as search:
             response = self.client.get("/api/resources/search?code=ABC-123&goal=chinese")
         self.assertEqual(response.status_code, 200, response.text)
+        # 索引器答复了，整体仍是 ready；没查成的直连来源单独列出，供浏览器添加等来源恢复。
+        body = response.json()
+        self.assertEqual((body["state"], body["unfetched_sources"], body["retry_after"]), ("ready", ["JavDB"], 900.0))
         args = search.call_args.args
         self.assertEqual((args[0][0]["key"], args[1], args[2].goal), ("one", "ABC-123", "chinese"))
         self.assertEqual(direct.call_args.kwargs["goal"], "chinese")
@@ -533,8 +610,10 @@ class ResourceIndexerRoutes(_App):
         hd = {"source": "manko.fun", "resolution": 1080, "info_hash": failed, "name": "ABC-123"}
         fallback = {"source": "sukebei", "resolution": 1080, "info_hash": other, "name": "ABC-123 FHD"}
         with mock.patch("peach.web_resource_search.direct_search", return_value={
-                "items": [hd, fallback], "warnings": [], "trace": [], "next_sources": [], "reference_only": []}) as direct,              mock.patch("peach.web_resource_search._SEARCH.run", return_value={
-                "ok": True, "state": "ready", "items": [], "warnings": [], "error": ""}) as search,              mock.patch("peach.web_resource_search.rank_candidates", side_effect=lambda rows, goal: rows):
+                "items": [hd, fallback], "warnings": [], "trace": [], "next_sources": [], "reference_only": []}) as direct, \
+             mock.patch("peach.web_resource_search._SEARCH.run", return_value={
+                "ok": True, "state": "ready", "items": [], "warnings": [], "error": ""}) as search, \
+             mock.patch("peach.web_resource_search.rank_candidates", side_effect=lambda rows, goal, **kwargs: rows):
             result = q_resource_search(self.app.state.web_contract, {"code": "ABC-123", "skip": [failed]})
             self.assertFalse(direct.call_args.kwargs["stop_on_preferred"])
             self.assertIn(failed, search.call_args.args[3])

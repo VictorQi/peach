@@ -8,8 +8,8 @@ from pathlib import PureWindowsPath
 
 from google.protobuf.empty_pb2 import Empty
 
-from .downloads import CLOUDDRIVE_CREDENTIAL, PIKPAK_CREDENTIAL, DownloadError
-from .downloads_clouddrive import CloudDriveClient, PROBE_TIMEOUT
+from .downloads import CLOUDDRIVE_CREDENTIAL, PIKPAK_CREDENTIAL, DownloadError, Problem
+from .downloads_clouddrive import CloudDriveClient, PROBE_TIMEOUT, legacy_cloud_path, token_path, within_token_root
 from .media_sources import SOURCES
 from .clouddrive_proxy import media_remote_path
 from .push_discovery import normalise_prefix
@@ -42,28 +42,27 @@ class LibraryChannels:
             cloud = service.credentials.load(CLOUDDRIVE_CREDENTIAL)
         except CredentialError:
             cloud = None
-            problems.append("CloudDrive2 令牌无法读取，请重新填写。")
+            problems.append(Problem("labels.downloadsChannels.clouddriveTokenUnreadable"))
         token = str(cloud.values.get("token", "")) if cloud else ""
         try:
             pikpak = service.credentials.describe(PIKPAK_CREDENTIAL)
         except CredentialError:
             pikpak = {"fields": []}
-            problems.append("PikPak 登录信息无法读取，请重新登录。")
+            problems.append(Problem("labels.downloadsChannels.pikpakSignInUnreadable"))
         logged_in = "refresh_token" in pikpak["fields"]
-        fingerprint = (repr(config.payload()), repr(roots), repr(prefixes), repr(names),
+        fingerprint = (repr(config), repr(roots), repr(prefixes), repr(names),
                        repr(getattr(service.landing, "mounts", {})), logged_in,
                        hashlib.sha256(token.encode()).digest(), tuple(problems))
         with self._lock:
             now = self.clock()
             if self._cached and self._cached[0] == fingerprint and now - self._cached[1] < 30:
                 return self._cached[2]
-            result = self._discover(roots, prefixes, names, token, logged_in)
+            result = self._discover(config, roots, prefixes, names, token, logged_in)
             result["problems"] = list(dict.fromkeys((*problems, *result["problems"])))
             self._cached = fingerprint, now, result
             return result
 
-    def _discover(self, roots, prefixes, names, token, logged_in):
-        config = self.service.config
+    def _discover(self, config, roots, prefixes, names, token, logged_in):
         rows, problems = [], []
         direct_root = roots.get(root_key(config.pikpak_root)) if config.pikpak_root else None
         if logged_in and direct_root and direct_root[0] == "pikpak" and config.targets.get("pikpak"):
@@ -73,41 +72,58 @@ class LibraryChannels:
             try:
                 with self.client(config.clouddrive_address, token, timeout=PROBE_TIMEOUT) as client:
                     phase = 'token_permissions'
-                    permissions = client.token_info().permissions
+                    info = client.token_info()
+                    permissions = info.permissions
                     if not (permissions.allow_add_offline_download and permissions.allow_list_offline_downloads):
-                        problems.append("CloudDrive2 令牌需要提交和查看离线任务权限。")
+                        problems.append(Problem("labels.downloadsChannels.tokenNeedsOffline"))
                     else:
                         mounts = []
                         if getattr(permissions, "allow_get_mounts", False):
                             try:
-                                mounts = client.call("GetMountPoints", Empty(), "读取媒体库挂载点").mountPoints
+                                mounts = client.call("GetMountPoints", Empty(), "readLibraryMounts").mountPoints
                             except DownloadError as error:
                                 local_event('download-channel-probe', error, operation='mount_points',
                                             source='clouddrive', failure=error.failure)
                         phase = 'library_mapping'
-                        candidates = self._candidates(roots, prefixes, mounts, rows, names, problems)
+                        token_root = getattr(info, "rootDir", "") or "/"
+                        candidates = self._candidates(config, token_root, roots, prefixes, mounts,
+                                                      rows, names, problems)
                         seen = set()
-                        for key, source, root, target, prefix in candidates:
+                        upgrades = {}
+                        for key, mapping_key, source, root, target, prefix, confirm_saved in candidates:
                             if key in seen:
                                 continue
                             seen.add(key)
                             try:
                                 folder = client.folder(target)
                                 if folder.can_offline:
-                                    rows.append(self._row(key, source, root, target, names, cloud_root=prefix,
-                                                          can_cancel=folder.can_manage and bool(
-                                                              permissions.allow_modify_offline_downloads)))
+                                    row = self._row(key, source, root, target, names, cloud_root=prefix,
+                                                    can_cancel=folder.can_manage and bool(
+                                                        permissions.allow_modify_offline_downloads))
+                                    if key != mapping_key:
+                                        row["legacy_key"] = mapping_key
+                                    rows.append(row)
+                                    if confirm_saved:
+                                        upgrades[source] = target
                             except DownloadError as error:
                                 local_event('download-channel-probe', error, operation='folder_capabilities',
                                             source=source, failure=error.failure)
-                                problems.append(f"{names.get(root_key(root)) or SOURCES[source].name}的云下载能力未取得。")
+                                name = names.get(root_key(root)) or SOURCES[source].name
+                                problems.append(Problem("labels.downloadsChannels.libraryCapabilityUnavailable",
+                                                        {"name": name}))
+                        if upgrades:
+                            try:
+                                self.service.upgrade_cloud_targets(config, upgrades)
+                            except OSError as error:
+                                local_event('download-channel-probe', error, operation='upgrade_targets',
+                                            source='clouddrive')
             except DownloadError as error:
                 local_event('download-channel-probe', error, operation=phase,
                             source='clouddrive', failure=error.failure)
-                problems.append("CloudDrive2 云下载能力未取得，请检查连接与令牌。")
+                problems.append(Problem("labels.downloadsChannels.clouddriveCapabilityUnavailable"))
         return {"providers": rows, "problems": list(dict.fromkeys(problems))}
 
-    def _candidates(self, roots, prefixes, mounts, direct, names, problems):
+    def _candidates(self, config, token_root, roots, prefixes, mounts, direct, names, problems):
         candidates = []
         landing = self.service.landing
         for source, root in roots.values():
@@ -118,15 +134,31 @@ class LibraryChannels:
             mount = mapped[index] if index < len(mapped) else root
             remote = media_remote_path(root, mount, prefixes, mounts)
             if not remote:
-                problems.append(f"{names.get(root_key(root)) or SOURCES[source].name}尚未关联云端目录，请检查挂载或推送发现配置。")
+                problems.append(Problem("labels.downloadsChannels.libraryNotMapped",
+                                         {"name": names.get(root_key(root)) or SOURCES[source].name}))
                 continue
-            prefix = normalise_prefix(remote)
-            target = self.service.config.targets.get(source, "")
-            use_saved = target and (target == prefix or target.startswith(prefix + "/"))
+            raw_prefix = prefix = normalise_prefix(remote)
+            saved = config.targets.get(source, "")
+            old_target = (legacy_cloud_path(token_root, saved)
+                          if source in config.legacy_cloud_targets and within_token_root(token_root, saved) == saved
+                          else None)
+            relative_prefix = legacy_cloud_path(token_root, prefix)
+            if relative_prefix and within_token_root(token_root, prefix) == prefix and (
+                    (saved and token_path(token_root, saved) is not None
+                     and token_path(relative_prefix, saved) is not None)
+                    or (old_target and token_path(prefix, saved) is not None)):
+                prefix = relative_prefix
+            upgrade = bool(old_target and token_path(prefix, old_target) is not None)
+            target = old_target if upgrade else saved
+            use_saved = bool(target and token_path(prefix, target) is not None)
             target = target if use_saved else prefix
-            key = "115" if source == "115" and use_saved else (
-                f"clouddrive:{source}:" + hashlib.sha256((prefix + "\0" + root_key(root)).encode()).hexdigest()[:16])
-            candidates.append((key, source, root, target, prefix))
+            verified_setting = use_saved and source in config.legacy_cloud_targets and (
+                token_path(token_root, target) is not None)
+            digest = hashlib.sha256((raw_prefix + "\0" + root_key(root)).encode()).hexdigest()[:16]
+            mapping_key = f"clouddrive:{source}:{digest}"
+            key = "115" if source == "115" and use_saved else mapping_key
+            candidates.append((key, mapping_key, source, root, within_token_root(token_root, target), prefix,
+                               verified_setting))
         return candidates
 
     @staticmethod
