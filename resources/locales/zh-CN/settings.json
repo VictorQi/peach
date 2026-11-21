@@ -981,6 +981,8 @@
     "awaitingConfirmation": "等你确认",
     "backupCleaned": "修复前的备份已清理",
     "changedCount": "改动 {{count, number}} 项",
+    "coverAutomatic": "启动后自动补修封面",
+    "coverAutomaticHelp": "开启后从下次启动起自动执行。也可随时手动开始。",
     "deferReasonCount": "{{reason}} {{count, number}} 部",
     "deferReasons": {
       "mount": "所在目录读不到",

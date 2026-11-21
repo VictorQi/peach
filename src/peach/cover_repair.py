@@ -259,7 +259,7 @@ def face_of(path: Path, detector, parts=None) -> dict | None:
 # ---------------------------------------------------------------- 修复与迁移里的封面一项
 
 class CoverRepair:
-    """「修复与迁移」里的封面补修：升级后服务起来，估算出有待处理的封面就在后台按上面三步做完。
+    """「修复与迁移」里的封面补修由用户手动开始，也可在本机开启启动后的自动补修。
 
     只改程序算出来的取景、主脸与来源查得到的封面，手工框与用户换的封面不碰，改前整组备份，所以按
     自动修复处理，不等确认。几千张封面要逐张认字、可能还要联网补判，几十分钟到一两个小时：开服务后
@@ -291,6 +291,8 @@ class CoverRepair:
         if self._service is not None and self._service.is_alive():
             return
         self._stopping.clear()
+        if not self.automatic_enabled():
+            return
         wait = self.START_DELAY if delay is None else delay
         self._service = threading.Thread(target=self._automatic, args=(wait,), name='cover-artwork-service',
                                          daemon=True)
@@ -301,14 +303,26 @@ class CoverRepair:
         self._stopping.set()
 
     def _automatic(self, wait: float) -> None:
-        if self._stopping.wait(wait) or not self.available():
+        if self._stopping.wait(wait) or not self.available() or not self.automatic_enabled():
             return
         self.status()
         worker = self.worker
         if worker is not None:
             worker.join()
-        if not self._stopping.is_set() and self.status().get('covers'):
-            self.begin()
+        self.begin(automatic=True)
+
+    @property
+    def settings_path(self) -> Path:
+        return self.state_root / 'cover-artwork-settings.json'
+
+    def automatic_enabled(self) -> bool:
+        return read(self.settings_path).get('automatic') is True
+
+    def set_automatic(self, enabled: bool) -> None:
+        from .fsutil import atomic_write_text
+
+        with self._lock:
+            atomic_write_text(self.settings_path, json.dumps({'automatic': enabled}))
 
     @property
     def checked_path(self) -> Path:
@@ -355,13 +369,15 @@ class CoverRepair:
         with self._lock:
             self._state = state
 
-    def begin(self) -> bool:
-        """估算好了就开工；还在估算或已经在做时什么都不做，返回 False。"""
+    def begin(self, *, automatic: bool = False) -> bool:
+        """只有估算完成且仍有待补修封面时才开工。"""
         with self._lock:
-            if self._state['phase'] != 'ready':
+            if self._stopping.is_set() or self._state['phase'] != 'ready' or not self._state.get('covers'):
+                return False
+            if automatic and not self.automatic_enabled():
                 return False
             self._state = {'phase': 'running', 'done': 0, 'total': 0}
-            self.worker = threading.Thread(target=self._run, name='cover-artwork-repair', daemon=True)
+            self.worker = threading.Thread(target=self._run, args=(automatic,), name='cover-artwork-repair', daemon=True)
             self.worker.start()
             return True
 
@@ -375,13 +391,14 @@ class CoverRepair:
             LOGGER.warning('Failed to record the cover repair in the task center', exc_info=True)
             return None
 
-    def _run(self) -> None:
+    def _run(self, automatic: bool) -> None:
         from .task_control import Cancelled, bind, checkpoint
 
         counts: Counter = Counter()
         status, error = 'succeeded', None
         backup = self.state_root / f'cover-artwork-{time.strftime("%Y%m%d-%H%M%S")}'
-        run = self._task(lambda: self.runs.start(TASK_KEY, trigger='scheduled', mutex_key=TASK_KEY,
+        run = self._task(lambda: self.runs.start(TASK_KEY, trigger='scheduled' if automatic else 'manual',
+                                                 mutex_key=TASK_KEY,
                                                  label=Said('labels.coverRepair.runLabel')))
         run_id = getattr(run, 'id', None)
         try:

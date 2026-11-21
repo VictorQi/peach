@@ -13,6 +13,7 @@ import { fmtSize } from '@peach/legacy/core';
 import { confirmModal } from '@peach/legacy/ui';
 import { Button } from '@/components/base/buttons/button';
 import { LinkButton } from '@/components/base/buttons/link-button';
+import { Switch } from '@/components/base/switch/switch';
 import { apiSend } from '../../api';
 import { withBackoff } from '../../polling';
 import { repairCenterPanelSkeleton } from '../../management-skeletons';
@@ -94,14 +95,15 @@ function reading(item: RepairItem) {
   return item.changed ? t('settings:repairCenter.changedCount', { count: item.changed }) : '';
 }
 
-function Row({ title, description, progress, children }: {
-  title: string; description: string; progress?: ReactNode; children: ReactNode;
+function Row({ title, description, progress, options, children }: {
+  title: string; description: string; progress?: ReactNode; options?: ReactNode; children: ReactNode;
 }) {
   return (
     <div className={`${RESULT_SECTION} flex flex-wrap items-center justify-between gap-x-4 gap-y-2`}>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="text-body-medium text-text-primary">{title}</span>
         <span className="text-body-2-regular text-text-secondary">{description}</span>
+        {options}
         {progress ? <div className="pt-2">{progress}</div> : null}
       </div>
       <div className="flex shrink-0 items-center gap-3">{children}</div>
@@ -135,6 +137,9 @@ export function RepairCenterPage() {
   const update = (next: RepairCenterData) => queryClient.setQueryData(REPAIRS_KEY, next);
   const post = async (item: RepairItem, signal?: AbortSignal) => localizeRepairs(await apiSend<RepairCenterData>(
     `/api/configuration/repairs/${item.id}`, {}, 'POST', signal));
+  const setCoverAutomatic = (enabled: boolean) => void action.run('cover-automatic', async signal =>
+    localizeRepairs(await apiSend<RepairCenterData>('/api/configuration/repairs/cover-artwork/automatic',
+      { enabled }, 'PUT', signal)), update);
   const start = (item: RepairItem) => item.backed_up
     ? void confirmModal({
       title: t('settings:repairCenter.applyTitle', { title: item.title }),
@@ -201,6 +206,15 @@ export function RepairCenterPage() {
               const text = reading(item);
               return (
                 <Row key={item.id} title={item.title} description={item.summary}
+                  options={item.automatic === undefined ? null : <div className="flex flex-col gap-1 pt-2">
+                    <Switch isSelected={item.automatic} isDisabled={!data.available || !!action.busy} onChange={setCoverAutomatic}
+                      aria-describedby="cover-automatic-help">
+                      {t('settings:repairCenter.coverAutomatic')}
+                    </Switch>
+                    <span id="cover-automatic-help" className="text-body-2-regular text-text-secondary">
+                      {t('settings:repairCenter.coverAutomaticHelp')}
+                    </span>
+                  </div>}
                   progress={detail(item)}>
                   {text ? <span className="text-body-2-regular text-text-secondary">{text}</span> : null}
                   {item.mode === 'confirm' && item.state === 'waiting'

@@ -548,6 +548,36 @@ class FastApiContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         apply.assert_called_once_with('case-duplicates')
 
+    async def test_cover_repair_switch_and_manual_action_are_independent(self):
+        app = create_app(replace(self.settings, db_path=fresh_ledger(self.root, 'cover-repair.db')))
+        client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test')
+        self.addAsyncCleanup(client.aclose)
+        path = '/api/configuration/repairs/cover-artwork'
+        switch_path = f'{path}/automatic'
+        covers = app.state.cover_repair
+        service = app.state.upgrade_repairs
+        self.assertTrue(covers.settings_path.is_relative_to(self.root))
+        with patch.object(service, 'available', True), patch.object(
+                covers, 'status', return_value={'phase': 'ready', 'covers': 2}), patch.object(
+                covers, 'begin', return_value=True) as begin:
+            initial = await client.get('/api/configuration/repairs?t=secret')
+            self.assertEqual(initial.status_code, 200)
+            cover = next(item for item in initial.json()['items'] if item['id'] == 'cover-artwork')
+            self.assertEqual((cover['automatic'], cover['state'], cover['covers']), (False, 'waiting', 2))
+            denied = await client.put(switch_path, json={'enabled': True})
+            self.assertEqual(denied.status_code, 401)
+            invalid = await client.put(f'{switch_path}?t=secret', json={'enabled': 'true'})
+            self.assertEqual(invalid.status_code, 422)
+            for enabled in (True, False):
+                saved = await client.put(f'{switch_path}?t=secret', json={'enabled': enabled})
+                self.assertEqual(saved.status_code, 200)
+                self.assertIs(covers.automatic_enabled(), enabled)
+            begin.assert_not_called()
+            manual = await client.post(f'{path}?t=secret', json={})
+            self.assertEqual(manual.status_code, 200)
+            begin.assert_called_once_with()
+            self.assertFalse(covers.automatic_enabled())
+
     async def test_installation_confirmation_rejects_manual_repairs(self):
         with patch('peach.api._installation_in_progress', return_value=True), patch.object(
                 self.app.state.upgrade_repairs, 'retry') as retry:
