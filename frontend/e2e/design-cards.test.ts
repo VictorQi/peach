@@ -1395,8 +1395,8 @@ describe('设计决定：作品卡、管理页与复核', () => {
       try {
         const page = opened.page;
         await stubFollowManage(page);
-        const release = await holdApi(page);
-        await page.reload({ waitUntil: 'load' });
+        const release = await holdApi(page, url => url.pathname.startsWith('/dist/peach-app.follow-manage-page-'));
+        await page.reload({ waitUntil: 'commit' });
         await page.locator('[data-skeleton="board/subscriptions"] .ui-follow-skeleton-toolbar').waitFor({ timeout: 15_000 });
         const toolbar = '[data-skeleton] .ui-follow-skeleton-toolbar';
         const skeleton = await controlFaces(page, {

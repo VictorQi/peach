@@ -75,8 +75,9 @@ describe('设计决定：数据管理、索引页与资料页头', () => {
       try {
         const page = opened.page;
         await page.route('**/api/library-processing', route => route.fulfill({ json: { status: 'idle' } }));
-        const release = await holdApi(page);
-        await page.reload({ waitUntil: 'load' });
+        const release = await holdApi(page, url => item.skeleton === 'cleanup'
+          && url.pathname.startsWith('/dist/peach-app.data-cleanup-page-'));
+        await page.reload({ waitUntil: 'commit' });
         const card = `section[aria-label="${item.label}"]`;
         await page.locator(`[data-skeleton="${item.skeleton}"] ${card} footer`).waitFor({ timeout: 15_000 });
         const geometry = () => page.locator(card).evaluateAll(cards => cards.map(card => {
@@ -873,9 +874,10 @@ describe('设计决定：数据管理、索引页与资料页头', () => {
       try {
         const page = opened.page;
         // 后登记的路由先拿到请求：桩要排在挂住 /api/ 那条之后，不然它也被挂住。
-        await holdApi(page);
+        await holdApi(page, url => (path === '/data-cleanup' && url.pathname.startsWith('/dist/peach-app.data-cleanup-page-'))
+          || (path === '/subscriptions' && url.pathname.startsWith('/dist/peach-app.follow-manage-page-')));
         await prepare?.(page);
-        await page.goto(new URL(path, page.url()).href, { waitUntil: 'load' });
+        await page.goto(new URL(path, page.url()).href, { waitUntil: 'commit' });
         await page.locator(ready).first().waitFor({ state: 'visible', timeout: 15_000 });
         for (const target of targets) {
           const node = page.locator(target).first();

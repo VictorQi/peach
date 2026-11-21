@@ -126,7 +126,7 @@ class MdatLayoutTests(unittest.TestCase):
         journal.write_text(json.dumps(record))
         replaced = b'other file'
         self.source.write_bytes(replaced)
-        with self.assertRaisesRegex(ValueError, '已变更'):
+        with self.assertRaisesRegex(ValueError, 'The MP4 changed'):
             with prepare_local(self.source, root):
                 self.fail('替换后的文件不能改写')
         self.assertEqual(self.source.read_bytes(), replaced)

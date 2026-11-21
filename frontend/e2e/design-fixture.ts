@@ -500,12 +500,12 @@ export async function stubFollowManage(page: Page, { counts, extra = [] }: Follo
     ? route.fulfill(json({ status: 'idle' })) : route.fallback()));
 }
 
-/** 把 `/api/` 请求挂住，直到调用返回的 `release()`：首屏骨架停在屏幕上，量完再放行。
+/** 把 `/api/` 请求和指定的页面模块挂住，量完骨架后再调用 `release()`。
  *  先注册的桩照常生效：放行走 `fallback()`，交给它们或真实服务端。 */
-export async function holdApi(page: Page): Promise<() => void> {
+export async function holdApi(page: Page, pageModule?: (url: URL) => boolean): Promise<() => void> {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
-  await page.route((url) => url.pathname.startsWith('/api/') && url.pathname !== '/api/settings', async (route) => {
+  await page.route((url) => (url.pathname.startsWith('/api/') && url.pathname !== '/api/settings') || !!pageModule?.(url), async (route) => {
     await gate;
     await route.fallback().catch(() => {});
   });
