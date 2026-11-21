@@ -207,7 +207,8 @@ function seekPreview(card: HTMLElement | null, delta: number) {
   video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + delta));
 }
 
-function VideoCard({ item, variant, layout, selected, selectMode, seekSeconds, helpers, actions, onOpen, grouped = true }: MediaCardProps) {
+function VideoCard({ item, variant, layout, selected, selectMode, seekSeconds, helpers, actions, onOpen,
+  grouped = true, priority = false }: MediaCardProps) {
   const context = useMediaContextMenu();
   useEntityNames();
   const card = useRef<HTMLElement | null>(null);
@@ -239,8 +240,9 @@ function VideoCard({ item, variant, layout, selected, selectMode, seekSeconds, h
      不走官方封面，「JAV 默认封面」设置在这里不起作用：那张封面是整部作品的宣传图，多是横图，
      和这一卷竖屏视频不是同一个画面。没有图时写缺的是什么、为什么缺（`./artwork-gap.tsx`）。 */
   const frameOnly = ratio === PORTRAIT_RATIO && !!item.is_jav;
-  const drawn = frameOnly ? frameArtwork(item, false) : cardArtwork(item, size, false, layout.javImage);
-  const identity = frameOnly || size === 'small' ? drawn.html : cardArtwork(item, 'small', false, layout.javImage).html;
+  const baseArtwork = frameOnly ? frameArtwork(item, priority) : cardArtwork(item, size, priority, layout.javImage);
+  const drawn = priority ? { ...baseArtwork, html: baseArtwork.html.replace('<img ', '<img fetchpriority="high" ') } : baseArtwork;
+  const identity = frameOnly || size === 'small' ? baseArtwork.html : cardArtwork(item, 'small', priority, layout.javImage).html;
   /* 取失败记在当时那段片段上：换了图（补到封面、改了「JAV 默认封面」）就不再算失败。重试给地址
      添一个序号，身份跟着变，`ArtSlot` 才会换一个新元素重新取。 */
   const [failure, setFailure] = useState<{ html: string; gap: ArtworkGap | null } | null>(null);

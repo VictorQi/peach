@@ -412,6 +412,8 @@ class WebE2ESmokeTests(unittest.TestCase):
                                                        windows=os.name == 'nt', config=config)
         config = media_identity.configure_sources(config, sources, windows=os.name == 'nt')
         settings_file.write(config)
+        from peach.automatic_updates import AutomaticUpdates
+        AutomaticUpdates(config.directory('state'), available=True).save({'mode': 'off', 'interval_hours': 24})
         cls.import_root = cls.root / 'import-media'
         cls.import_sample = next(media.rglob('*.mp4'))
         generated = config.directory("generated")

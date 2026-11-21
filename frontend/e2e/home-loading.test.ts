@@ -195,8 +195,8 @@ describe('馆藏首屏独立于可选请求',()=>{
     await image.evaluate(img=>(img as HTMLImageElement).decode());
     const firstId=await card.getAttribute('data-id');
     console.info(JSON.stringify({viewport:viewport.name,firstUsableCardMs:Date.now()-started,optionalRequestsPending:[...requested],includesInlineRetry:true}));
-    await card.locator('[data-media-pic]').click();
-    await page.waitForURL(/\/assets\/\d+/);
+    await card.locator('button[data-media-title]').click();
+    await page.waitForURL(url=>url.pathname===`/assets/${firstId}`);
     await page.locator('#stage [data-stage-close]').waitFor({state:'visible'});
     assert.equal(released,false,'打开详情也不等待可选接口');
     await page.goBack();

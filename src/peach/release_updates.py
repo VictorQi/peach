@@ -8,13 +8,12 @@ import sys
 
 import httpx
 
-from . import __version__, distribution, docker_update
+from . import RELEASE_REPOSITORY as REPOSITORY, __version__, distribution, docker_update
 from .http import HttpRequest, HttpxTransport
 from .update_packages import TOOL_PATHS
 from . import interface_text, release_words
 from .user_messages import UserValueError, message_fields
 
-REPOSITORY = "VictorQi/peach"
 RELEASES_URL = f"https://github.com/{REPOSITORY}/releases"
 API_URL = f"https://api.github.com/repos/{REPOSITORY}/releases?per_page=100"
 #: 检查结果的形状；改了就让缓存的旧结果作废、后台按新规则重查一次。v2 起带更新说明 `notes`，

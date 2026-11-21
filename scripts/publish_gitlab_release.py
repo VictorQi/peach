@@ -19,7 +19,7 @@ if not __package__:
 from peach.interface_text import dev as t
 from peach.user_agent import USER_AGENT
 from peach.peach_proxy import http_client, read_url
-from peach.release_updates import REPOSITORY
+from peach import RELEASE_REPOSITORY
 
 
 def verify_local_assets(root: Path, assets: list[dict]) -> None:
@@ -92,7 +92,7 @@ def gitgud_package_links(root: Path, release: dict, project_url: str) -> list[di
 
 def r2_release_notes(body: str, version: str, base: str, project_url: str) -> str:
     """镜像源的 Release 正文：同一份正文，下载地址换成镜像目录，文档链接指向标签上的副本。"""
-    for repo in (REPOSITORY, 'peach-mitao/peach'):
+    for repo in (RELEASE_REPOSITORY, 'peach-mitao/peach'):
         body = body.replace(f'https://github.com/{repo}/releases/download/v{version}/',
                             f'{base.rstrip("/")}/v{version}/')
         body = body.replace(f'https://github.com/{repo}/blob/master/',

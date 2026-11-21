@@ -20,7 +20,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from peach.interface_text import dev as t  # noqa: E402
-from peach.release_updates import REPOSITORY  # noqa: E402
+from peach import RELEASE_REPOSITORY  # noqa: E402
 
 #: 版本号的唯一来源。GitHub Release 的 `v<版本>` tag 必须与它相等。
 VERSION_FILE = "src/peach/__init__.py"
@@ -30,7 +30,7 @@ VERSION_PATTERN = re.compile(r'(__version__\s*=\s*")(\d+)\.(\d+)\.(\d+)(")')
 #: 制品齐了以后才把它们换到新版本，发布前后读者都拿得到能下载的链接。
 README_FILES = ("README.md", "README.zh-CN.md")
 DOWNLOAD_LINK = re.compile(r"releases/download/v(\d+\.\d+\.\d+)/Peach-(\d+\.\d+\.\d+)-([^)\s]+)")
-RELEASE_PAGE = f"https://github.com/{REPOSITORY}/releases"
+RELEASE_PAGE = f"https://github.com/{RELEASE_REPOSITORY}/releases"
 FIRST_RELEASE_ASSETS = frozenset({"windows-x64-setup.exe", "windows-x64.zip", "macos-arm64.dmg", "macos-x86_64.dmg"})
 FIRST_RELEASE_LINK = re.compile(
     rf"(?m)^\[peach-({'|'.join(map(re.escape, sorted(FIRST_RELEASE_ASSETS)))})\]: {re.escape(RELEASE_PAGE)}$"
