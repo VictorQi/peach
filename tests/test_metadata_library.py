@@ -3087,7 +3087,7 @@ class LibraryNfoTests(unittest.TestCase):
         self.assertEqual((seen['fc2ppvdb'], seen['javten']), (190.0, 190.0))
         self.assertEqual(provider.excused, 0.0)
 
-    def test_previously_browser_backed_sources_use_http_request_budgets(self):
+    def test_fc2_sources_use_http_request_budgets(self):
         from peach.jav_cover_fetch import request_timeout
         self.assertEqual(request_timeout('https://fc2ppv-db.com/ja/articles/1', 10.0), 10.0)
         self.assertEqual(request_timeout('https://javten.com/video/1', None), 30.0)
