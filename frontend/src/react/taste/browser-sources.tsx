@@ -65,9 +65,7 @@ export function BrowserSources({ browsers, sources, range, children }:
         <Button variant="secondary" size="small" {...busyProps(change.isPending)} iconOnly
           leadingIcon={browser.enabled ? RiPauseLine : RiPlayLine}
           aria-label={`${browser.enabled ? t('manage:tasteSources.stopReading') : t('manage:customSources.enable')} ${browser.name}`} onClick={() => {
-            if (!browser.enabled) change.mutate({ operation: 'enable', id: browser.id });
-            else void confirmModal({ title: t('manage:tasteSources.stopReadingTitle', { browser: browser.name }), body: t('manage:tasteSources.stopReadingBody'), confirmLabel: t('manage:tasteSources.stopReading'),
-              onConfirm: () => change.mutateAsync({ operation: 'disable', id: browser.id }) });
+            change.mutate({ operation: browser.enabled ? 'disable' : 'enable', id: browser.id });
           }} />
         <Button variant="secondary" size="small" iconOnly leadingIcon={RiDeleteBinLine} {...busyProps(change.isPending)}
           aria-label={t('manage:tasteSources.deleteBrowserTitle', { browser: browser.name })} onClick={() => {

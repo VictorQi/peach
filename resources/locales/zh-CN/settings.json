@@ -1308,6 +1308,11 @@
     "title": "卸载 Peach"
   },
   "upgradeRepairs": {
+    "pause": "停止派发",
+    "resume": "继续更新",
+    "start": "开始更新",
+    "idle": "尚未开始",
+    "paused": "已停止派发",
     "deferred": "延后",
     "deferredHelp": "剩下的要等挂载恢复或来源放开，到时间自动继续。",
     "downloadReviewLog": "下载复核记录",

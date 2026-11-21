@@ -34,7 +34,7 @@ it('用户打开时立即呈现教程，读取失败只在已打开页面内反�
   await act(async () => openGuide());
   expect(document.querySelector('[role="dialog"]')).not.toBeNull();
   await late.release({ ok: false, json: async () => ({}) });
-  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('未取得账本中的教程状态');
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('未取得教程进度');
   await click(document.querySelector('[aria-label="关闭新手教程"]'));
   expect(document.querySelector('[role="dialog"]')).toBeNull();
   expect(document.querySelector('[role="alert"]')).toBeNull();

@@ -161,11 +161,11 @@ const menuItem = (label: string) =>
 
 const startFrom = async (element: Element | null | undefined) => {
   await click(element);
+  const dialog = document.querySelector('dialog form');
+  if (dialog) await submit(dialog);
 };
 
 it.each([
-  ['同步新增文件', '同步新增文件', '新增文件与待补全影片', {incremental:true}, {stage:'all',incremental:'1'}],
-  ['补全待处理影片', '补全待处理影片', '已登记的待补全影片', {stage:'collect',scope:'new'}, {stage:'collect',scope:'new'}],
   ['同步所有媒体库', '同步所有媒体库', '全部文件与影片', {}, {stage:'all'}],
   ['仅扫描文件', '扫描全部文件', '全部文件与影片', {stage:'scan'}, {stage:'scan'}],
   ['补全资料与预览', '补全已入库影片', '全部文件与影片', {stage:'collect'}, {stage:'collect'}],

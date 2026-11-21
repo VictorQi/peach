@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  defaultCatalogLoc, homeCatalogState, homePath, initialCatalogFilters, onlineDefaultLoc,
+  homeCatalogState, homePath, initialCatalogFilters,
   resetCatalogFilters, resolveSort, verticalRouting,
 } from '../../src/react/catalog-grid/catalog-state';
 

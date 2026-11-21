@@ -134,11 +134,10 @@ it('首屏用 prefetch 缓存画出来源与任务，挂载时不重复请求', 
 it('受限来源的 Cookie 只在主动打开的设置页可选配置', async () => {
   const { host } = await open(quiet({ source: 'fc2ppvdb', label: 'FC2PPV-DB' }));
   const card = section(host, 'FC2PPV-DB');
-  expect(card?.textContent).toContain('运行 Peach 的电脑上的浏览器会自动完成人机验证');
-  expect(card?.textContent).toContain('不需要 Cookie');
-  expect(password(host), '浏览器自己带 Cookie，这一格不该出现').toBeNull();
-  expect(card?.textContent).not.toContain('任选一种方式提供 Cookie');
-  expect(host.querySelector('[aria-haspopup=listbox]'), '连接方式仍由用户选，浏览器按它换出口').not.toBeNull();
+  expect(card?.textContent).not.toContain('运行 Peach 的电脑上的浏览器会自动完成人机验证');
+  expect(card?.textContent).toContain('Cookie 未配置');
+  expect(password(host)).not.toBeNull();
+  expect(host.querySelector('[aria-haspopup=listbox]')).not.toBeNull();
 });
 
 it('保存后清空秘密输入，列表就地换成服务端回的那一条，撤销随之可操作', async () => {

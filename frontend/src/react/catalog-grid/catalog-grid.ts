@@ -56,12 +56,13 @@ export const entityKey = (key: string, revision: number): QueryKey => ['catalog-
 
 /** 目录的一页。网格续页省略总数，分页表格显式保留；首批空结果另查馆藏空态。 */
 export async function fetchCatalogPage(
-  params: string, offset: number, batch: number, trash: boolean, signal: AbortSignal, includeTotal = true,
+  params: string, offset: number, batch: number, trash: boolean, signal: AbortSignal, includeTotal = offset === 0,
 ): Promise<GridPage> {
   const query = new URLSearchParams(params);
   query.set('limit', String(batch));
   query.set('offset', String(offset));
-  if (offset || !includeTotal) query.set('count', '0');
+  if (includeTotal) query.delete('count');
+  else query.set('count', '0');
   const page = await apiGet<MediaPage>(`/api/items?${query}`, signal);
   const result: GridPage = { ...page, items: page.items || [], offset, batch };
   if (!offset && !result.items.length && !trash) {

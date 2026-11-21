@@ -2,7 +2,7 @@
 (function() {
 	try {
 		var e = typeof globalThis < "u" ? globalThis : typeof window < "u" ? window : typeof global < "u" ? global : typeof self < "u" ? self : {}, t = new e.Error().stack;
-		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "369548d3-15c5-4556-be58-34216f3bf88c", e._sentryDebugIdIdentifier = "sentry-dbid-369548d3-15c5-4556-be58-34216f3bf88c");
+		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "f612b352-2a6e-42c9-8118-f3ee5e74df41", e._sentryDebugIdIdentifier = "sentry-dbid-f612b352-2a6e-42c9-8118-f3ee5e74df41");
 	} catch {}
 })();
 var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescriptor, r = Object.getOwnPropertyNames, i = Object.getPrototypeOf, a = Object.prototype.hasOwnProperty, o = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e = null), t.exports), s = (e, i, o, s) => {
@@ -2832,6 +2832,28 @@ var Ge = "peach.settings.v1", Ke = {
 		unhideConfirm_other: "Returns {{count, number}} entries to the roster.",
 		unhideDone_one: "Returned {{count, number}} entry to the roster",
 		unhideDone_other: "Returned {{count, number}} entries to the roster"
+	},
+	libraryImport: {
+		addFolder: "Add folder",
+		readExisting: "Start scanning your library",
+		firstContent: "Add your first videos",
+		scanDetails: "Peach scans the selected folders for videos and local metadata. Files stay in place. You can configure online metadata later.",
+		paused: "The folder scan is paused. You can resume it in Tasks.",
+		scanning: "Scanning folders. Videos will appear as they are found.",
+		failed: "The folder scan did not finish. Try again.",
+		empty: "The scan found no media to display. Select another folder or clear your filters.",
+		retry: "Retry",
+		loading: "Loading folder settings",
+		offline: "The folder is unavailable. Check that it is connected.",
+		scan: "Start scan",
+		folderPath: "Folder path",
+		serverPath: "Folder path on the Peach server",
+		fullPath: "Enter the full path",
+		fullServerPath: "Enter the full path to a folder mounted on the server",
+		addAndScan: "Add and scan",
+		enterPath: "Enter a path",
+		followSources: "Add a subscription source",
+		remote: "Add folders on the computer running Peach."
 	}
 }, qe = {
 	duplicates: {
@@ -7281,6 +7303,11 @@ var Ge = "peach.settings.v1", Ke = {
 		title: "Uninstall Peach"
 	},
 	upgradeRepairs: {
+		pause: "Pause dispatch",
+		resume: "Resume repairs",
+		start: "Start repairs",
+		idle: "Ready to start",
+		paused: "Dispatch paused",
 		deferred: "Deferred",
 		deferredHelp: "The rest waits for the mount to come back or the source to reopen, and continues automatically.",
 		downloadReviewLog: "Download review log",
@@ -9312,6 +9339,27 @@ var Ge = "peach.settings.v1", Ke = {
 	bulkAction: {
 		canUndo: " You can undo this from the receipt.",
 		cannotUndo: " This can't be undone."
+	},
+	setupQuick: {
+		failed: "Could not add the folder. Try again.",
+		title: "Add your first videos",
+		intro: "Choose a folder containing videos to start browsing.",
+		details: "Files stay in place. Peach starts with local metadata, and access is local for now. You can change these settings later.",
+		folderPath: "Folder path",
+		fullPath: "Enter the full path",
+		addAndStart: "Add and start",
+		addFolder: "Add folder",
+		enterPath: "Enter a path",
+		selectFolder: "Choose a folder",
+		prepareLibrary: "Preparing your library",
+		skip: "Skip for now",
+		restore: "Use existing data",
+		advanced: "More settings",
+		opening: "Opening Peach",
+		openingScan: "Starting the library scan",
+		retryConnection: "Retry connection",
+		unavailable: "Peach is still getting ready. Check that it is running.",
+		whenReady: "Your library will open when Peach is ready."
 	}
 }, tt = {
 	seedName: {
@@ -10572,6 +10620,28 @@ var Ge = "peach.settings.v1", Ke = {
 		unhide: "恢复显示",
 		unhideConfirm: "{{count, number}} 项回到名册。",
 		unhideDone: "已恢复显示 {{count, number}} 项"
+	},
+	libraryImport: {
+		addFolder: "添加文件夹",
+		readExisting: "开始读取你的内容",
+		firstContent: "添加第一份内容",
+		scanDetails: "读取所选文件夹中的视频和本地资料，文件保留在原处。联网补全可稍后设置。",
+		paused: "文件夹读取已暂停，可在任务中心继续。",
+		scanning: "正在读取文件夹，内容会逐步出现。",
+		failed: "文件夹未读取完成，请重试。",
+		empty: "文件夹已读取，当前没有可显示的媒体。可以选择其他文件夹或清除筛选。",
+		retry: "重试",
+		loading: "正在读取文件夹设置",
+		offline: "文件夹当前不可用，请确认它已连接。",
+		scan: "开始读取",
+		folderPath: "文件夹路径",
+		serverPath: "Peach 服务器上的文件夹路径",
+		fullPath: "输入完整路径",
+		fullServerPath: "输入服务器上已挂载的完整路径",
+		addAndScan: "添加并读取",
+		enterPath: "输入路径",
+		followSources: "添加关注来源",
+		remote: "请在运行 Peach 的电脑上添加文件夹。"
 	}
 }, nt = {
 	duplicates: {
@@ -14715,6 +14785,11 @@ var Ge = "peach.settings.v1", Ke = {
 		title: "卸载 Peach"
 	},
 	upgradeRepairs: {
+		pause: "停止派发",
+		resume: "继续更新",
+		start: "开始更新",
+		idle: "尚未开始",
+		paused: "已停止派发",
 		deferred: "延后",
 		deferredHelp: "剩下的要等挂载恢复或来源放开，到时间自动继续。",
 		downloadReviewLog: "下载复核记录",
@@ -16677,6 +16752,27 @@ var Ge = "peach.settings.v1", Ke = {
 	bulkAction: {
 		canUndo: "完成后可在回执里撤销。",
 		cannotUndo: "不能撤销。"
+	},
+	setupQuick: {
+		failed: "添加失败，请重试",
+		title: "添加你的第一份内容",
+		intro: "选择存放视频的文件夹，开始浏览。",
+		details: "文件保留在原处，先使用本地资料。此时只有这台电脑可以访问，其他设置可稍后修改。",
+		folderPath: "文件夹路径",
+		fullPath: "输入完整路径",
+		addAndStart: "添加并开始",
+		addFolder: "添加文件夹",
+		enterPath: "输入路径",
+		selectFolder: "请选择文件夹",
+		prepareLibrary: "正在准备你的媒体库",
+		skip: "暂不添加",
+		restore: "使用已有数据",
+		advanced: "其他设置",
+		opening: "正在打开 Peach",
+		openingScan: "正在开始读取内容",
+		retryConnection: "重试连接",
+		unavailable: "Peach 暂时还未准备好，请确认它仍在运行。",
+		whenReady: "准备好后会自动显示内容。"
 	}
 }, ut = ["zh-CN", "en"], dt = "zh-CN", ft = {
 	"zh-CN": {
@@ -40002,8 +40098,8 @@ function nx({ setup: e, onDone: t, onAdvanced: n, onRestore: r }) {
 		...Object.fromEntries(e.questions.filter((e) => e.key === "data_root" || e.key === "port").map((e) => [e.key, e.default]))
 	}, n), u = (e) => {
 		e instanceof I_ && e.status === 501 && s(!0);
-		let t = e instanceof I_ && e.errors ? Object.values(e.errors).flat().filter(Boolean).join("；") : "";
-		c.setError(t || (e instanceof Error ? e.message : "添加失败，请重试"));
+		let t = e instanceof I_ && e.errors ? Object.values(e.errors).flat().filter(Boolean).join(" / ") : "";
+		c.setError(t || (e instanceof Error ? e.message : F("shell:setupQuick.failed")));
 	};
 	return /* @__PURE__ */ (0, V.jsx)(Z_, {
 		step: 1,
@@ -40027,17 +40123,17 @@ function nx({ setup: e, onDone: t, onAdvanced: n, onRestore: r }) {
 							children: [/* @__PURE__ */ (0, V.jsx)("h1", {
 								id: "auth-card-title",
 								className: "text-title-1-semibold text-text-primary",
-								children: "添加你的第一份内容"
+								children: F("shell:setupQuick.title")
 							}), /* @__PURE__ */ (0, V.jsx)("p", {
 								className: "text-body-regular text-text-secondary",
-								children: "选择存放视频的文件夹，开始浏览。"
+								children: F("shell:setupQuick.intro")
 							})]
 						}), /* @__PURE__ */ (0, V.jsxs)("div", {
 							className: "flex min-w-0 flex-col gap-4",
 							children: [
 								/* @__PURE__ */ (0, V.jsx)("p", {
 									className: "text-body-2-regular text-text-secondary",
-									children: "文件保留在原处，先使用本地资料。此时只有这台电脑可以访问，其他设置可稍后修改。"
+									children: F("shell:setupQuick.details")
 								}),
 								o ? /* @__PURE__ */ (0, V.jsxs)("form", {
 									onSubmit: (e) => {
@@ -40045,15 +40141,15 @@ function nx({ setup: e, onDone: t, onAdvanced: n, onRestore: r }) {
 									},
 									className: "flex min-w-0 flex-col gap-3",
 									children: [/* @__PURE__ */ (0, V.jsx)(Tg, {
-										label: "文件夹路径",
-										"aria-label": "文件夹路径",
+										label: F("shell:setupQuick.folderPath"),
+										"aria-label": F("shell:setupQuick.folderPath"),
 										value: i,
 										onChange: a,
-										placeholder: "输入完整路径"
+										placeholder: F("shell:setupQuick.fullPath")
 									}), /* @__PURE__ */ (0, V.jsx)(Mr, {
 										type: "submit",
 										disabled: !!c.busy || !i.trim(),
-										children: "添加并开始"
+										children: F("shell:setupQuick.addAndStart")
 									})]
 								}) : /* @__PURE__ */ (0, V.jsxs)("div", {
 									className: "flex flex-wrap gap-2",
@@ -40066,18 +40162,18 @@ function nx({ setup: e, onDone: t, onAdvanced: n, onRestore: r }) {
 										}, (e) => {
 											e && t(e);
 										}, u),
-										children: "添加文件夹"
+										children: F("shell:setupQuick.addFolder")
 									}), /* @__PURE__ */ (0, V.jsx)(Mr, {
 										variant: "ghost",
 										disabled: !!c.busy,
 										onClick: () => s(!0),
-										children: "输入路径"
+										children: F("shell:setupQuick.enterPath")
 									})]
 								}),
 								c.busy ? /* @__PURE__ */ (0, V.jsx)("p", {
 									role: "status",
 									className: "text-body-2-regular text-text-secondary",
-									children: c.busy === "pick" && !i ? "请选择文件夹" : "正在准备你的媒体库"
+									children: c.busy === "pick" && !i ? F("shell:setupQuick.selectFolder") : F("shell:setupQuick.prepareLibrary")
 								}) : null,
 								c.error ? /* @__PURE__ */ (0, V.jsx)(Eg, {
 									tone: "error",
@@ -40096,21 +40192,21 @@ function nx({ setup: e, onDone: t, onAdvanced: n, onRestore: r }) {
 							variant: "ghost",
 							disabled: !!c.busy,
 							onClick: () => void c.run("skip", (e) => l(null, e), t, u),
-							children: "暂不添加"
+							children: F("shell:setupQuick.skip")
 						}),
 						/* @__PURE__ */ (0, V.jsx)(Mr, {
 							size: "small",
 							variant: "ghost",
 							disabled: !!c.busy,
 							onClick: r,
-							children: "使用已有数据"
+							children: F("shell:setupQuick.restore")
 						}),
 						/* @__PURE__ */ (0, V.jsx)(Mr, {
 							size: "small",
 							variant: "ghost",
 							disabled: !!c.busy,
 							onClick: n,
-							children: "其他设置"
+							children: F("shell:setupQuick.advanced")
 						})
 					]
 				})
@@ -40158,7 +40254,7 @@ function rx({ done: e }) {
 						children: /* @__PURE__ */ (0, V.jsx)("h1", {
 							id: "auth-card-title",
 							className: "text-title-1-semibold text-text-primary",
-							children: e.skip_media ? "正在打开 Peach" : "正在开始读取内容"
+							children: e.skip_media ? F("shell:setupQuick.opening") : F("shell:setupQuick.openingScan")
 						})
 					}), r ? /* @__PURE__ */ (0, V.jsx)(Eg, {
 						tone: "error",
@@ -40167,13 +40263,13 @@ function rx({ done: e }) {
 							onClick: () => {
 								i(!1), n((e) => e + 1);
 							},
-							children: "重试连接"
+							children: F("shell:setupQuick.retryConnection")
 						}),
-						children: "Peach 暂时还未准备好，请确认它仍在运行。"
+						children: F("shell:setupQuick.unavailable")
 					}) : /* @__PURE__ */ (0, V.jsx)("p", {
 						role: "status",
 						className: "text-body-regular text-text-secondary",
-						children: "准备好后会自动显示内容。"
+						children: F("shell:setupQuick.whenReady")
 					})]
 				})
 			})]
@@ -40297,4 +40393,4 @@ Pt();
 var sx = document.getElementById("peach-page"), cx = sx ? ox[sx.dataset.page ?? ""] : void 0;
 sx && cx && (0, Ut.createRoot)(sx).render(/* @__PURE__ */ (0, V.jsx)(ax, { children: /* @__PURE__ */ (0, V.jsx)(cx, { data: { ...sx.dataset } }) }));
 
-//# debugId=369548d3-15c5-4556-be58-34216f3bf88c
+//# debugId=f612b352-2a6e-42c9-8118-f3ee5e74df41

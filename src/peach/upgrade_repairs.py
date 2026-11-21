@@ -1094,7 +1094,7 @@ class UpgradeRepairs:
                  {'id': 'background', **_coded('labels.upgradeRepairs.item.background', key='label'), 'state': state,
                   'pending': active, 'failed': failed, 'deferred': waiting, 'queued': len(queued)}]
         if not receipt.get('enabled') and not receipt.get('dispatch_complete') and not self.error:
-            state = 'paused' if receipt.get('scope') else 'idle'
+            state = 'paused' if active or receipt.get('scope') else 'idle'
         return {'state': state, 'items': items, 'available': self.available,
                 'enabled': bool(receipt.get('enabled')), 'started': bool(receipt.get('scope')), **self._message(paused)}
 
@@ -1141,12 +1141,13 @@ class UpgradeRepairs:
         self._prepare_local()
         if not self.available or not self.contract.task_runs.enabled:
             return
-        if not retry_media and _read(self.receipt).get('media_paused'):
-            return
         from .jobs import DiskSpaceDenied
         try:
             with FileLock(str(self.receipt) + '.lock', timeout=0):
-                self._prepare_display_dimensions()
+                receipt = _read(self.receipt)
+                self._adopt_control(receipt)
+                if retry_media or not receipt.get('media_paused'):
+                    self._prepare_display_dimensions()
         except DiskSpaceDenied as error:
             # 退出准备阶段的锁，再复用整批暂停；容量不足不关闭其他账本后台服务。
             self.pause_media(error)
@@ -1243,6 +1244,9 @@ class UpgradeRepairs:
                                                    + previous.get('media_ids', [])
                                                    + plan['text']['asset_ids'])),
                            'queued': dict(previous.get('queued', {})),
+                           'control_version': previous.get('control_version', 0),
+                           'scope': previous.get('scope', {}),
+                           'enabled': bool(previous.get('scope') and previous.get('enabled')),
                            'deferred': list(previous.get('deferred', [])),
                            'code_media_ids': list(previous.get('code_media_ids', [])),
                            'amane_media_ids': list(previous.get('amane_media_ids', [])),
@@ -2233,13 +2237,7 @@ class UpgradeRepairs:
             if action == 'start':
                 if not receipt.get('scope') or (receipt.get('dispatch_complete') and not any(
                         row['status'] in ('pending', 'running') for row in self._family(receipt))):
-                    from . import seed_followup
-                    with self.contract.database.read_connection() as connection:
-                        asset_max = connection.execute('SELECT coalesce(max(id),0) FROM asset').fetchone()[0]
-                        entity_max = connection.execute('SELECT coalesce(max(id),0) FROM entity').fetchone()[0]
-                        seeds = [dict(key=row.key, task_key=row.task_key, label=row.label)
-                                 for row in seed_followup.plan(connection, since_entity_id=entity_max)]
-                    receipt['scope'] = {'asset_max': asset_max, 'entity_max': entity_max, 'seeds': seeds}
+                    receipt['scope'] = self._scope()
                     receipt['dispatch_complete'] = False
                 receipt['scope']['at'] = time.time_ns()
                 receipt['enabled'] = True
@@ -2252,6 +2250,15 @@ class UpgradeRepairs:
         self.tick()
         return self.snapshot()
 
+    def _scope(self):
+        from . import seed_followup
+        with self.contract.database.read_connection() as connection:
+            asset_max = connection.execute('SELECT coalesce(max(id),0) FROM asset').fetchone()[0]
+            entity_max = connection.execute('SELECT coalesce(max(id),0) FROM entity').fetchone()[0]
+            seeds = [dict(key=row.key, task_key=row.task_key, label=row.label)
+                     for row in seed_followup.plan(connection, since_entity_id=entity_max)]
+        return {'asset_max': asset_max, 'entity_max': entity_max, 'seeds': seeds}
+
     def _plan(self, receipt: dict, *, media: bool = True, media_limit: int = MAX_FOLLOWUPS):
         """`media` 为假时只排资料与人物后继，影片补全等前面那批跑下去再派。"""
         from . import (avatar_followup, creator_identity_followup, performer_alias_followup,
@@ -2261,7 +2268,7 @@ class UpgradeRepairs:
         from .settings_file import load_config, DATA_ROOT_ENV
         config = load_config(environ={DATA_ROOT_ENV: str(self.config.data_root)}) if self.config is not None else load_config()
         seen = set(receipt.get('queued', {}))
-        scope = receipt['scope']
+        scope = receipt.get('scope') or self._scope()
 
         attempts = Attempts(attempts_root(self.contract.candidate_root))
         with self.contract.database.read_connection() as connection:
@@ -2379,7 +2386,7 @@ class UpgradeRepairs:
                 receipt = _read(self.receipt)
                 try:
                     self._adopt_control(receipt)
-                    if not receipt.get('enabled'):
+                    if not receipt.get('enabled') or not receipt.get('scope'):
                         return None
                     if self._stopped(receipt):
                         receipt['enabled'] = False

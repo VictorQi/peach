@@ -6,7 +6,7 @@ const client = vi.hoisted(() => ({ snapshot: { repairs: {
   state: 'idle', available: true, enabled: false,
   items: [{ id: 'background', label: '后台更新进度', state: 'idle', pending: 0, failed: 0 }],
 } } }));
-vi.mock('../../src/react/client-updates', () => ({ useClientUpdates: () => client }));
+vi.mock('../../src/react/client-updates', () => ({ useClientUpdates: () => client, checkClientUpdates: vi.fn() }));
 
 it('读取设置不开始更新；直接开始和停止，失败留在原处供重试', async () => {
   const fetcher = fetchMock(200, { ...client.snapshot.repairs, state: 'running', enabled: true });
@@ -25,7 +25,7 @@ it('读取设置不开始更新；直接开始和停止，失败留在原处供�
   await settle();
   expect(sentBody(failed)).toEqual({ action: 'pause' });
   expect(host.querySelector('[role="alert"]')?.textContent).toBe('处理记录暂时被占用');
-  const stopped = fetchMock(200, { ...client.snapshot.repairs, state: 'paused',
+  const stopped = fetchMock(200, { ...client.snapshot.repairs, state: 'paused', started: true,
     items: [{ id: 'background', state: 'paused', pending: 4, failed: 1 }] });
   vi.stubGlobal('fetch', stopped);
   await click(buttonNamed('停止派发', host));

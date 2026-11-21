@@ -174,17 +174,21 @@ it('编辑草稿随步骤匹配场景标题、说明和操作文字', async () =
   expect(buttonNamed('开始整理', host)).not.toBeNull();
 });
 
-it('首启版本统计与错误诊断默认勾选，取消后共同关闭', async () => {
-  const reporting = { usage: true, errors: true, available: false,
+it('首启诊断默认关闭，用户主动选择后共同开启', async () => {
+  const reporting = { usage: false, errors: false, available: true,
     fields: { usage: '版本与系统', errors: '异常链与错误码' }, notice: '不发送媒体信息' };
   const { host, sent } = await open({ remote_reporting: reporting, access_enabled: false },
     { [SETUP_URL]: { status: 200, body: done() } });
+  for (let step = 0; step < 3; step++) {
+    await click(buttonNamed('开始设置', host) || buttonNamed('继续', host));
+    await settle();
+  }
   const reportingSwitches = host.querySelectorAll<HTMLInputElement>('input[aria-label="发送版本统计与错误诊断"]');
   expect(reportingSwitches).toHaveLength(1);
-  expect(reportingSwitches[0]!.checked).toBe(true);
+  expect(reportingSwitches[0]!.checked).toBe(false);
   await click(reportingSwitches[0]!);
   await submitForm(host);
-  expect(sent(SETUP_URL).remote_reporting).toEqual({ usage: false, errors: false });
+  expect(sent(SETUP_URL).remote_reporting).toEqual({ usage: true, errors: true });
 });
 
 /** 这句错误在页面上只有一份，落在一个 `role="alert"` 里，并由框的 `aria-describedby` 指到。 */

@@ -2934,7 +2934,9 @@ class UpgradeRepairTests(unittest.TestCase):
             self.store.finish(child, 'succeeded')
             self.service.tick()
         self.assertEqual(self.service.snapshot()['state'], 'complete')
-        self.assertEqual(len(upgrade_repairs._read(self.service.receipt)['queued']), 1)
+        receipt = upgrade_repairs._read(self.service.receipt)
+        self.assertEqual(receipt['queued'], {})
+        self.assertEqual(receipt['scope']['asset_max'], 1)
 
     def test_cancelling_a_dispatched_parent_prevents_later_batches_and_restart(self):
         from peach.followups import Followup

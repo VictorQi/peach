@@ -68,6 +68,12 @@ export function FeedNewRow({ feedNew, host, wire, act, settled, error, retry, de
   const queued = (feedNew?.items || []).filter(item => item.code && item.cover_state === 'queued' && !item.cover_url
     && !handled.has(item.code)).map(item => item.code!);
   useLayoutEffect(() => {
+    if (deferred) {
+      host.removeAttribute('aria-busy');
+      host.hidden = true;
+      if (feedNew) settled?.(!!html);
+      return;
+    }
     if (!feedNew && reserve && !error) {
       host.setAttribute('aria-busy', 'true');
       host.hidden = false;
@@ -77,7 +83,7 @@ export function FeedNewRow({ feedNew, host, wire, act, settled, error, retry, de
     host.removeAttribute('aria-busy');
     host.hidden = !html && !error;
     if (feedNew) settled?.(!!html);
-  }, [host, html, feedNew, settled, reserve, error]);
+  }, [host, html, feedNew, settled, reserve, error, deferred]);
   useEffect(() => {
     if (html && !deferred) wire(box.current?.querySelector('.feednewrow') ?? null);
     setSourceFaces([...box.current?.querySelectorAll<HTMLElement>('[data-feed-source-avatar]') ?? []]);
@@ -133,6 +139,7 @@ export function FeedNewRow({ feedNew, host, wire, act, settled, error, retry, de
   };
   // 这一行显示着、封面还在排队的那几部一键插队：首页与女优页各是一行，各管自己的。宿主在 Tailwind 作用域外，
   // 提示条与进度条套一层 `peach-react` 进去（与骨架同一个写法）。
+  if (deferred) return null;
   if (error) return <RetryNote message={error} onRetry={() => retry?.()} />;
   if (!feedNew && reserve) return <div dangerouslySetInnerHTML={{ __html: feedNewSkeletonHtml() }} />;
   return html ? <><div className="peach-react" data-feed-cover-queue><CoverQueue scope={t('follow:newReleasesRow.coverQueueScope')} codes={queued} fetchOne={cover} /></div>

@@ -1263,5 +1263,27 @@
     "unhide": "恢复显示",
     "unhideConfirm": "{{count, number}} 项回到名册。",
     "unhideDone": "已恢复显示 {{count, number}} 项"
+  },
+  "libraryImport": {
+    "addFolder": "添加文件夹",
+    "readExisting": "开始读取你的内容",
+    "firstContent": "添加第一份内容",
+    "scanDetails": "读取所选文件夹中的视频和本地资料，文件保留在原处。联网补全可稍后设置。",
+    "paused": "文件夹读取已暂停，可在任务中心继续。",
+    "scanning": "正在读取文件夹，内容会逐步出现。",
+    "failed": "文件夹未读取完成，请重试。",
+    "empty": "文件夹已读取，当前没有可显示的媒体。可以选择其他文件夹或清除筛选。",
+    "retry": "重试",
+    "loading": "正在读取文件夹设置",
+    "offline": "文件夹当前不可用，请确认它已连接。",
+    "scan": "开始读取",
+    "folderPath": "文件夹路径",
+    "serverPath": "Peach 服务器上的文件夹路径",
+    "fullPath": "输入完整路径",
+    "fullServerPath": "输入服务器上已挂载的完整路径",
+    "addAndScan": "添加并读取",
+    "enterPath": "输入路径",
+    "followSources": "添加关注来源",
+    "remote": "请在运行 Peach 的电脑上添加文件夹。"
   }
 }

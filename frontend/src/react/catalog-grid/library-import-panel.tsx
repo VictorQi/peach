@@ -1,3 +1,4 @@
+import { t } from '../../i18n';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { RiFolderAddLine } from '@remixicon/react';
 import { Button, ButtonLink } from '@/components/base/buttons/button';
@@ -80,40 +81,40 @@ export function LibraryImportPanel({ empty, onContent }: { empty: boolean; onCon
   if (!empty && !data?.jobs.some(active) && !action.busy) return null;
   const library = sessionStorage.getItem('peach.library');
   const roots = data?.roots.filter(root => !library || root.library_id === library) || [];
-  return <section data-library-import="" aria-label="添加文件夹" className="flex min-w-0 flex-col gap-4 py-6">
+  return <section data-library-import="" aria-label={t('catalog:libraryImport.addFolder')} className="flex min-w-0 flex-col gap-4 py-6">
     {empty ? <div className="flex flex-col gap-1">
-      <h2 className="text-title-2-medium text-text-primary">{roots.length ? '开始读取你的内容' : '添加第一份内容'}</h2>
-      <p className="text-body-2-regular text-text-secondary">读取所选文件夹中的视频和本地资料，文件保留在原处。联网补全可稍后设置。</p>
+      <h2 className="text-title-2-medium text-text-primary">{roots.length ? t('catalog:libraryImport.readExisting') : t('catalog:libraryImport.firstContent')}</h2>
+      <p className="text-body-2-regular text-text-secondary">{t('catalog:libraryImport.scanDetails')}</p>
     </div> : null}
     {data?.jobs.filter(active).map(job => <Note key={job.id} tone="neutral" action={<TaskCenterLink />}>
-      {job.state === 'paused' ? '文件夹读取已暂停，可在任务中心继续。' : job.label || '正在读取文件夹，内容会逐步出现。'}
+      {job.state === 'paused' ? t('catalog:libraryImport.paused') : job.label || t('catalog:libraryImport.scanning')}
     </Note>)}
     {empty && data?.jobs.filter(job => job.state === 'failed' || job.state === 'interrupted').map(job =>
-      <Note key={job.id} tone="error">{job.error || '文件夹未读取完成，请重试。'}</Note>)}
+      <Note key={job.id} tone="error">{job.error || t('catalog:libraryImport.failed')}</Note>)}
     {empty && data?.jobs[0]?.state === 'succeeded' ? <p className="text-body-2-regular text-text-secondary">
-      文件夹已读取，当前没有可显示的媒体。可以选择其他文件夹或清除筛选。</p> : null}
+      {t('catalog:libraryImport.empty')}</p> : null}
     {failure || action.error ? <Note tone="error" action={failure ? <Button size="small" variant="secondary"
-      onClick={() => setRound(value => value + 1)}>重试</Button> : undefined}>{action.error || failure}</Note> : null}
-    {empty && !data ? <p role="status" className="text-body-2-regular text-text-secondary">正在读取文件夹设置</p> : null}
+      onClick={() => setRound(value => value + 1)}>{t('catalog:libraryImport.retry')}</Button> : undefined}>{action.error || failure}</Note> : null}
+    {empty && !data ? <p role="status" className="text-body-2-regular text-text-secondary">{t('catalog:libraryImport.loading')}</p> : null}
     {empty && data?.editable ? <>
       {roots.map(root => <div key={root.id} className="flex min-w-0 flex-wrap items-center justify-between gap-2">
         <div className="min-w-0 flex-1 text-body-2-regular text-text-secondary"><p className="wrap-anywhere">{root.path}</p>
-          {root.online === false ? <p>文件夹当前不可用，请确认它已连接。</p> : null}</div>
+          {root.online === false ? <p>{t('catalog:libraryImport.offline')}</p> : null}</div>
         <Button size="small" variant="secondary" disabled={!!action.busy || data.jobs.some(job => job.root_id === root.id && active(job))}
-          onClick={() => read(root)}>开始读取</Button>
+          onClick={() => read(root)}>{t('catalog:libraryImport.scan')}</Button>
       </div>)}
       {!data.native_picker || manual ? <form onSubmit={submit} className="flex min-w-0 flex-wrap items-end gap-2">
-        <Input aria-label="文件夹路径" label={data.native_picker ? '文件夹路径' : 'Peach 服务器上的文件夹路径'}
-          value={path} onChange={setPath} placeholder={data.native_picker ? '输入完整路径' : '输入服务器上已挂载的完整路径'}
+        <Input aria-label={t('catalog:libraryImport.folderPath')} label={data.native_picker ? t('catalog:libraryImport.folderPath') : t('catalog:libraryImport.serverPath')}
+          value={path} onChange={setPath} placeholder={data.native_picker ? t('catalog:libraryImport.fullPath') : t('catalog:libraryImport.fullServerPath')}
           className="min-w-0 flex-1" />
-        <Button type="submit" size="small" disabled={!!action.busy || !path.trim()}>添加并读取</Button>
+        <Button type="submit" size="small" disabled={!!action.busy || !path.trim()}>{t('catalog:libraryImport.addAndScan')}</Button>
       </form> : <div className="flex flex-wrap gap-2">
-        <Button size="small" leadingIcon={RiFolderAddLine} disabled={!!action.busy} onClick={pick}>添加文件夹</Button>
-        <Button size="small" variant="ghost" disabled={!!action.busy} onClick={() => setManual(true)}>输入路径</Button>
+        <Button size="small" leadingIcon={RiFolderAddLine} disabled={!!action.busy} onClick={pick}>{t('catalog:libraryImport.addFolder')}</Button>
+        <Button size="small" variant="ghost" disabled={!!action.busy} onClick={() => setManual(true)}>{t('catalog:libraryImport.enterPath')}</Button>
       </div>}
-      <ButtonLink size="small" variant="ghost" href="/subscriptions?tab=add" className="self-start">添加关注来源</ButtonLink>
+      <ButtonLink size="small" variant="ghost" href="/subscriptions?tab=add" className="self-start">{t('catalog:libraryImport.followSources')}</ButtonLink>
     </> : null}
     {empty && data && !data.editable ? <p className="text-body-2-regular text-text-secondary">
-      请在运行 Peach 的电脑上添加文件夹，或<a href="/subscriptions?tab=add" className="underline">添加关注来源</a>。</p> : null}
+      {t('catalog:libraryImport.remote')}{' '}<a href="/subscriptions?tab=add" className="underline">{t('catalog:libraryImport.followSources')}</a></p> : null}
   </section>;
 }

@@ -1,7 +1,7 @@
 (function() {
 	try {
 		var e = typeof globalThis < "u" ? globalThis : typeof window < "u" ? window : typeof global < "u" ? global : typeof self < "u" ? self : {}, t = new e.Error().stack;
-		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "39dc6c95-e93d-48d3-b936-524cdaf5b11b", e._sentryDebugIdIdentifier = "sentry-dbid-39dc6c95-e93d-48d3-b936-524cdaf5b11b");
+		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "7d5f7312-55bc-4285-b223-bf95f3dd8500", e._sentryDebugIdIdentifier = "sentry-dbid-7d5f7312-55bc-4285-b223-bf95f3dd8500");
 	} catch {}
 })();
 import { $542a13ca2fa5b484$export$5b6b19405a83ff9d as e, $b4f18e3395fe64d7$export$3d96ec278d3efce4 as t, $b4f18e3395fe64d7$export$3e41faf802a29e71 as n, $b4f18e3395fe64d7$export$b2539bed5023c21c as r, Button as i, ButtonLink as a, Disclosure as o, E3 as s, EmptyState as c, FLOW_LABEL_X as l, FLOW_VIEWBOX as u, Gg as d, Input as f, LEGACY_AVATAR_IMG as p, M6 as m, MENU_ITEM as h, MENU_ITEM_INTERACTIVE as g, MENU_POPOVER_SURFACE as _, MenuDialog as v, Note as y, OV as b, Progress as x, Rf as S, SEGMENT as C, SEGMENTED_TRACK as w, STAT_STRIP as T, SegmentedTabList as ee, Select$1 as te, SelectItem as ne, StatCard as E, TASTE_REFRESH_KEY as re, TASTE_REFRESH_TASK as ie, TASTE_WINDOWS as ae, TaskProgress as oe, Wt as D, Xt as se, _8 as ce, __toESM as le, aB as ue, activityKind as de, avatarInner as O, busyProps as k, cB as fe, cardClass as A, clsx as j, codedText as M, configureTasteBrowser as pe, confirmModal as N, cx as me, errorMessage as P, f1 as he, fetchTaste as ge, fetchTasteJob as _e, firstGrapheme as ve, flowGraph as ye, flowLabel as be, fmtSize as xe, g4 as Se, historySpan as Ce, importTasteExport as we, jobText as Te, joinList as Ee, keepPreviousData as De, mM as Oe, pv as ke, queryClient as F, r2 as Ae, radarRows as je, rankDetail as Me, rankShares as Ne, removeTasteSource as Pe, require_jsx_runtime as Fe, require_react as Ie, serverLabel as Le, serverLabelList as Re, siteMarkUrl as ze, startTasteRefresh as Be, statCardClass as Ve, t as I, tasteDate as He, tasteDimensions as Ue, tasteHours as We, tasteKey as L, tasteRefetchInterval as Ge, tasteTime as Ke, topScores as qe, uo as Je, useBackgroundJob as Ye, useMutation as Xe, useQuery as Ze } from "./peach-app.js";
@@ -1621,16 +1621,8 @@ function fa({ browsers: e, sources: t, range: n, children: r }) {
 									leadingIcon: e.enabled ? b : d,
 									"aria-label": `${e.enabled ? I("manage:tasteSources.stopReading") : I("manage:customSources.enable")} ${e.name}`,
 									onClick: () => {
-										e.enabled ? N({
-											title: I("manage:tasteSources.stopReadingTitle", { browser: e.name }),
-											body: I("manage:tasteSources.stopReadingBody"),
-											confirmLabel: I("manage:tasteSources.stopReading"),
-											onConfirm: () => p.mutateAsync({
-												operation: "disable",
-												id: e.id
-											})
-										}) : p.mutate({
-											operation: "enable",
+										p.mutate({
+											operation: e.enabled ? "disable" : "enable",
 											id: e.id
 										});
 									}
@@ -2569,4 +2561,4 @@ function Ka({ term: e, value: t, rest: n }) {
 }
 export { Ma as TASTE_GUIDE_KEY, Ga as TastePage };
 
-//# debugId=39dc6c95-e93d-48d3-b936-524cdaf5b11b
+//# debugId=7d5f7312-55bc-4285-b223-bf95f3dd8500

@@ -159,7 +159,7 @@ describe('检查更新', () => {
     expect(host.textContent).not.toContain('兜底原文');
   });
 
-  it('刷新后接着已准备好的更新，弹一次重启确认，确认前不发重启', async () => {
+  it('刷新后保留安装入口，主动点击并确认才重启', async () => {
     vi.useFakeTimers();
     const modal = vi.spyOn(legacyUi, 'confirmModal');
     const fetcher = fetchMock(200, { state: 'restarting', progress: 0 });
@@ -167,7 +167,6 @@ describe('检查更新', () => {
     const host = await mount(<ReleaseUpdates initial={release} initialJob={{ state: 'ready', progress: 100, version: '0.10.0' }} />);
     expect(host.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('100');
     expect(modal).not.toHaveBeenCalled();
-    expect(fetcher).not.toHaveBeenCalled();
     await click(buttonNamed('重启安装', host));
     expect(modal).toHaveBeenCalledTimes(1);
     expect(modal.mock.calls[0]?.[0]).toMatchObject({

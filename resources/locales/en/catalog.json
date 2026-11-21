@@ -1353,5 +1353,27 @@
     "unhideConfirm_other": "Returns {{count, number}} entries to the roster.",
     "unhideDone_one": "Returned {{count, number}} entry to the roster",
     "unhideDone_other": "Returned {{count, number}} entries to the roster"
+  },
+  "libraryImport": {
+    "addFolder": "Add folder",
+    "readExisting": "Start scanning your library",
+    "firstContent": "Add your first videos",
+    "scanDetails": "Peach scans the selected folders for videos and local metadata. Files stay in place. You can configure online metadata later.",
+    "paused": "The folder scan is paused. You can resume it in Tasks.",
+    "scanning": "Scanning folders. Videos will appear as they are found.",
+    "failed": "The folder scan did not finish. Try again.",
+    "empty": "The scan found no media to display. Select another folder or clear your filters.",
+    "retry": "Retry",
+    "loading": "Loading folder settings",
+    "offline": "The folder is unavailable. Check that it is connected.",
+    "scan": "Start scan",
+    "folderPath": "Folder path",
+    "serverPath": "Folder path on the Peach server",
+    "fullPath": "Enter the full path",
+    "fullServerPath": "Enter the full path to a folder mounted on the server",
+    "addAndScan": "Add and scan",
+    "enterPath": "Enter a path",
+    "followSources": "Add a subscription source",
+    "remote": "Add folders on the computer running Peach."
   }
 }

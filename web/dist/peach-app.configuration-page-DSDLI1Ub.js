@@ -1,7 +1,7 @@
 (function() {
 	try {
 		var e = typeof globalThis < "u" ? globalThis : typeof window < "u" ? window : typeof global < "u" ? global : typeof self < "u" ? self : {}, t = new e.Error().stack;
-		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "e2b6e44d-a7cf-49a1-ac1b-20712e92545c", e._sentryDebugIdIdentifier = "sentry-dbid-e2b6e44d-a7cf-49a1-ac1b-20712e92545c");
+		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "33ef2721-cf8a-4d9a-a880-8ea55daec888", e._sentryDebugIdIdentifier = "sentry-dbid-33ef2721-cf8a-4d9a-a880-8ea55daec888");
 	} catch {}
 })();
 import { $2ec61d1d4f780267$export$a8a3e93435678ff9 as e, $3a442827418ebe87$export$eb2fcfdbd7ba97d4 as t, $542a13ca2fa5b484$export$5b6b19405a83ff9d as n, $72abaeab4d80592f$export$78efe591171d7d45 as r, $bd263d78e9bf3c56$export$f5c9f3c2c4054eec as i, $ea3928288112382f$export$439d29a4e110a164 as a, $f2ff30fde7b014be$export$3ddf2d174ce01153 as o, $fe21c36db05242bb$export$a98f0dcb43a68a25 as s, $fe21c36db05242bb$export$d7b12c4107be0d61 as c, ACCENTS as l, ActivityStatus as u, ApiError as d, Button as f, ButtonLink as p, CLIENT_UPDATES_EVENT as m, CLOUD_LOCATIONS as h, CLOUD_PROXY_HELP as g, CONFIGURATION_KEY as _, CONFIGURATION_SECTIONS as v, CONFIGURATION_URL as y, CREDENTIAL_STATE as b, Checkbox as x, Chip as S, CommandSteps as C, Disclosure as w, EDITION_TONE as T, ENTRY_LINKS_HELP as E, ENTRY_LINKS_HINT as D, EmptyState as O, ErrorText as k, Eu as ee, ExternalLink as te, FOLLOW_CREDENTIALS_KEY as ne, FOLLOW_INITIAL_RANGE_OPTIONS as re, Fact as A, FactList as ie, FieldLabel as ae, Footer as j, Help as M, HintText as oe, Input as N, L1 as se, LIBRARY_FOLDER_HELP as ce, LIBRARY_PROCESSING_KEY as le, Label as ue, LinkButton as de, M6 as fe, MEDIA_PROCESSING_KEY as pe, MEDIA_PROCESSING_URL as me, MEDIA_SOURCE_ICONS as he, MENU_POPOVER_SURFACE as ge, NavigationOrderRows as _e, Note as P, PICK_FOLDER_URL as ve, POLICY_COLUMNS as ye, POLICY_COVER_NOTE as be, POLICY_MATRIX as xe, POLICY_SUMMARY as Se, PathLine as Ce, ProcessingMode as we, Progress as Te, REPAIR_CENTER_PATH as Ee, Rows as F, SCHEDULES as De, SCRAPING_KEY as Oe, SCRAPING_SETTINGS_URL as ke, SEGMENT as Ae, SEGMENTED_TRACK as je, SETTINGS_KEY as Me, SETTINGS_URL as Ne, Section as I, SectionSkeleton as Pe, SegmentedRadioGroup as Fe, Select as Ie, Select$1 as L, SelectItem as R, SettingsCard as Le, SettingsRow as z, SiteLabel as Re, SortableBoardTabs as ze, SourceLabel as Be, SourceMark as Ve, Stack as B, StatusLabel as V, Switch as H, THUMBNAIL_JOBS_KEY as He, TaskCenterLink as Ue, TaskProgress as We, TextField as Ge, TextFieldContext as Ke, Uz as qe, __toESM as Je, _p as Ye, activityKind as Xe, animate as Ze, apiGet as U, apiSend as W, appSettingsStore as Qe, bodyFieldErrors as $e, boundedPreference as et, busyProps as G, cardClass as tt, cloudProxySkeleton as nt, clsx as rt, cn as it, codedText as K, confirmModal as at, credentialDone as ot, credentialsSkeleton as st, cx as ct, d6 as lt, devicesSkeleton as ut, editionName as dt, errorMessage as q, fetchConfiguration as ft, fetchCredentials as pt, fetchLibraryProcessing as mt, fetchMediaProcessing as ht, fetchSettings as gt, fetchSources as _t, fetchThumbnailJobs as vt, fmtSize as yt, i2 as bt, indexersSkeleton as xt, interfaceLanguage as St, javBrowserSkeleton as Ct, jobText as wt, joinList as Tt, l1 as Et, ledgerBackupsSkeleton as Dt, localizedFact as Ot, momentText as kt, motion as At, overlayHost as jt, peachHistory$1 as Mt, pickServerFolder as Nt, pollUntil as Pt, previewLibraryColor as Ft, processingActive as It, providerIcon as Lt, queryClient as Rt, randomId as zt, rememberShape as Bt, require_jsx_runtime as Vt, require_react as Ht, require_react_dom as Ut, restartEffectText as Wt, saveCredential as Gt, schedulePollInterval as Kt, sectionTitle as qt, serverLabel as Jt, serverLabelList as Yt, serverText as Xt, settingsPath as Zt, shellNavigate as Qt, sortCx as $t, sourceDefaultCost as en, stageText as tn, t as J, translateWithNodes as nn, useAction as Y, useLibraryTints as rn, useMutation as an, useOrderedLibraries as on, useQuery as X, useQueryClient as sn, useReducedMotion as cn, useRunSchedule as ln, useSaveSchedule as un, useSaveSettings as dn, useSaveThumbnailMode as fn, we as pn, z3 as mn } from "./peach-app.js";
@@ -3432,6 +3432,8 @@ function Fs({ initial: e, initialJob: t }) {
 }
 // src/react/settings/upgrade-repairs.tsx
 var Is = {
+	idle: J("settings:upgradeRepairs.idle"),
+	paused: J("settings:upgradeRepairs.paused"),
 	pending: J("settings:upgradeRepairs.pending"),
 	running: J("settings:upgradeRepairs.repairing"),
 	failed: J("settings:repairCenter.needsRetry"),
@@ -3494,7 +3496,7 @@ function Rs() {
 						size: "small",
 						disabled: !i?.available || !!r.busy,
 						onClick: () => u(i?.enabled ? "pause" : "start"),
-						children: i?.enabled ? "停止派发" : i?.started ? "继续更新" : "开始更新"
+						children: i?.enabled ? J("settings:upgradeRepairs.pause") : i?.started ? J("settings:upgradeRepairs.resume") : J("settings:upgradeRepairs.start")
 					}),
 					/* @__PURE__ */ (0, Q.jsx)(f, {
 						size: "small",
@@ -7128,4 +7130,4 @@ function $l({ data: e, receipt: t, reopenTutorial: n, section: r, diagnostics: i
 }
 export { Xl as ConfigurationPage };
 
-//# debugId=e2b6e44d-a7cf-49a1-ac1b-20712e92545c
+//# debugId=33ef2721-cf8a-4d9a-a880-8ea55daec888

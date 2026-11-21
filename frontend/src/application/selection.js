@@ -59,9 +59,8 @@ export function toggleFollowSelection(id,range=false) {
   }
 
 /* 浮条上每颗键的确认文案与撤销方式都在 `batch-dock-api.ts` 声明；这里照声明弹窗、写入、回执。 */
-function declaredAction(operation){
-  const {context,junkDismissed}=selectionState.batchDockProps;
-  const action=batchAction(context,operation,junkDismissed);
+function declaredAction(operation, context){
+  const action=batchAction(context,operation,operation==='reconsider-junk'||!!selectionState.batchDockProps?.junkDismissed);
   if(!action?.confirm||!action.reversal)throw new Error(`batch action ${operation} is not declared`);
   return action;
 }
@@ -75,8 +74,8 @@ function declaredConfirm(action,count){
 export async function runCatalogBatch(operation,button){
   const done={like:'shell:batchCatalog.doneLike',seen:'shell:batchCatalog.doneSeen',later:'shell:batchCatalog.doneLater',dispose:'shell:batchCatalog.doneDispose',restore:'shell:batchCatalog.doneRestore',delete:'shell:batchCatalog.doneDelete'};
   const ids=[...selected];if(!ids.length)return;
-  const action=declaredAction(operation);
-  return confirmModal({...declaredConfirm(action,ids.length),onConfirm:async()=>{
+  const action=declaredAction(operation,operation==='restore'||operation==='delete'?'trash':'catalog');
+  const execute=async()=>{
   setActionBusy(button);
   try{const r=await api('/api/batch',{method:'POST',body:JSON.stringify({ids,operation})});
     if(r.blocked&&r.blocked.length)throw new Error(`${t('shell:trash.partlyPurged', { purged: r.purged, count: r.blocked.length })}\n`
@@ -94,9 +93,10 @@ export async function runCatalogBatch(operation,button){
         ...(r.previous?{previous:r.previous}:{})})});
       await reloadAfterWrite();
     }:null})}
-  catch(error){setActionBusy(button,false);throw error}
   finally{setActionBusy(button,false);paintSelection()}
-  }});
+  };
+  if(action.reversal==='irreversible')return confirmModal({...declaredConfirm(action,ids.length),onConfirm:execute});
+  try{return await execute()}catch(error){receiptsState.actionFailure(action.confirm.title,error)}
 }
 
 export async function pickBatchRegion(){
@@ -132,10 +132,9 @@ export async function pickBatchRegion(){
 export async function runFollowBatch(action,button){
   const items=[...followSelected];if(!items.length)return;
   const done={save:'shell:batchFollow.doneSave',seen:'shell:batchFollow.doneSeen',ignored:'shell:batchFollow.doneIgnored'};
-  const declared=declaredAction(action);
+  const declared=declaredAction(action,'follow');
   /* 关注页按地址重读；资料页的在线视图读的是同一族查询（`['follow-feed']`），让它们失效重取。 */
   const reload=()=>{if(location.pathname==='/follow')writeShell({pageOpens:pageOpens+1});else void queryClient.invalidateQueries({queryKey:['follow-feed']})};
-  return confirmModal({...declaredConfirm(declared,items.length),onConfirm:async()=>{
   setActionBusy(button);
   try{
     const path=action==='save'?'/api/follow/save':'/api/follow/status';
@@ -147,16 +146,14 @@ export async function runFollowBatch(action,button){
       await api('/api/follow/status',{method:'POST',body:JSON.stringify({items,previous:r.previous})});
       reload();
     }:null});
-  }catch(error){setActionBusy(button,false);throw error}
+  }catch(error){receiptsState.actionFailure(declared.confirm.title,error)}
   finally{setActionBusy(button,false);paintSelection()}
-  }});
 }
 
 export async function runJunkBatch(operation,button){
   const ids=[...selected];if(!ids.length)return;
   const done={'dismiss-junk':'shell:batchJunk.doneNotJunk','reconsider-junk':'shell:batchJunk.doneRecheck',dispose:'shell:batchJunk.doneDispose'};
-  const action=declaredAction(operation);
-  return confirmModal({...declaredConfirm(action,ids.length),onConfirm:async()=>{
+  const action=declaredAction(operation,'junk');
   setActionBusy(button);
   try{
     await api('/api/batch',{method:'POST',body:JSON.stringify({ids,operation,
@@ -168,9 +165,8 @@ export async function runJunkBatch(operation,button){
       await api('/api/batch',{method:'POST',body:JSON.stringify({ids,operation:inverse})});
       await loadCatalog();
     }:null});
-  }catch(error){setActionBusy(button,false);throw error}
+  }catch(error){receiptsState.actionFailure(action.confirm.title,error)}
   finally{setActionBusy(button,false);paintSelection()}
-  }});
 }
 
 export function mountBatchDock(){

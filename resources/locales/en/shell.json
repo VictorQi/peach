@@ -934,5 +934,26 @@
   "bulkAction": {
     "canUndo": " You can undo this from the receipt.",
     "cannotUndo": " This can't be undone."
+  },
+  "setupQuick": {
+    "failed": "Could not add the folder. Try again.",
+    "title": "Add your first videos",
+    "intro": "Choose a folder containing videos to start browsing.",
+    "details": "Files stay in place. Peach starts with local metadata, and access is local for now. You can change these settings later.",
+    "folderPath": "Folder path",
+    "fullPath": "Enter the full path",
+    "addAndStart": "Add and start",
+    "addFolder": "Add folder",
+    "enterPath": "Enter a path",
+    "selectFolder": "Choose a folder",
+    "prepareLibrary": "Preparing your library",
+    "skip": "Skip for now",
+    "restore": "Use existing data",
+    "advanced": "More settings",
+    "opening": "Opening Peach",
+    "openingScan": "Starting the library scan",
+    "retryConnection": "Retry connection",
+    "unavailable": "Peach is still getting ready. Check that it is running.",
+    "whenReady": "Your library will open when Peach is ready."
   }
 }

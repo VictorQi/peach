@@ -1334,6 +1334,11 @@
     "title": "Uninstall Peach"
   },
   "upgradeRepairs": {
+    "pause": "Pause dispatch",
+    "resume": "Resume repairs",
+    "start": "Start repairs",
+    "idle": "Ready to start",
+    "paused": "Dispatch paused",
     "deferred": "Deferred",
     "deferredHelp": "The rest waits for the mount to come back or the source to reopen, and continues automatically.",
     "downloadReviewLog": "Download review log",

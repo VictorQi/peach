@@ -6,8 +6,8 @@ import { $, api, esc, foldName, icon, isCatalogPath } from '../core';
 import { javTitleHtml } from '../core/jav-title';
 import { COVER_FRONT_RATIO } from './../appearance/layout';
 import { catalogState } from './catalog.js';
-import { state } from '../shell/index';
 import { feedNewSkeletonHtml } from '../feed-new-skeleton';
+import { state } from '../shell/index';
 import { managedTaken, openManagedRoute, releaseManagedRoute, updateManagedRoute } from './../history/managed';
 import { appSettingsStore } from './../appearance/settings';
 import { noteHtml, stopAutoScroll, wireAutoScroll } from '../ui-kit';
@@ -118,7 +118,9 @@ export function wireFeedNewRow(row){
 /* 首页这一行在不在场：设置里关掉「在首页显示新作」就哪条目录路径上都没有它，骨架也不铺。人物页那一行另走资料页。 */
 export function isFeedNewPath(path){return appSettingsStore().value.feedNewRows!==false&&isCatalogPath(path)&&path!=='/junk-files'}
 
-function homeFeedCurrent(){return isFeedNewPath(location.pathname)&&new URLSearchParams(location.search).get('browse')!=='folders'}
+function homeFeedCurrent(){
+  return isFeedNewPath(location.pathname)&&state.browse!=='folders'&&new URLSearchParams(location.search).get('browse')!=='folders';
+}
 
 export function renderHomeFeed(){
   if(!homeFeedCurrent()){clearHomeFeed();return}

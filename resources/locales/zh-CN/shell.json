@@ -869,5 +869,26 @@
   "bulkAction": {
     "canUndo": "完成后可在回执里撤销。",
     "cannotUndo": "不能撤销。"
+  },
+  "setupQuick": {
+    "failed": "添加失败，请重试",
+    "title": "添加你的第一份内容",
+    "intro": "选择存放视频的文件夹，开始浏览。",
+    "details": "文件保留在原处，先使用本地资料。此时只有这台电脑可以访问，其他设置可稍后修改。",
+    "folderPath": "文件夹路径",
+    "fullPath": "输入完整路径",
+    "addAndStart": "添加并开始",
+    "addFolder": "添加文件夹",
+    "enterPath": "输入路径",
+    "selectFolder": "请选择文件夹",
+    "prepareLibrary": "正在准备你的媒体库",
+    "skip": "暂不添加",
+    "restore": "使用已有数据",
+    "advanced": "其他设置",
+    "opening": "正在打开 Peach",
+    "openingScan": "正在开始读取内容",
+    "retryConnection": "重试连接",
+    "unavailable": "Peach 暂时还未准备好，请确认它仍在运行。",
+    "whenReady": "准备好后会自动显示内容。"
   }
 }

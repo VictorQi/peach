@@ -14,7 +14,8 @@ import { useAction } from './use-action';
 import { codedText } from '../../core/server-text';
 import { t } from '../../i18n';
 
-const LABELS: Record<string, string> = { pending: t('settings:upgradeRepairs.pending'), running: t('settings:upgradeRepairs.repairing'), failed: t('settings:repairCenter.needsRetry'),
+const LABELS: Record<string, string> = { idle: t('settings:upgradeRepairs.idle'), paused: t('settings:upgradeRepairs.paused'),
+  pending: t('settings:upgradeRepairs.pending'), running: t('settings:upgradeRepairs.repairing'), failed: t('settings:repairCenter.needsRetry'),
   deferred: t('settings:repairCenter.deferred'), review: t('settings:upgradeRepairs.needsReview'), complete: t('settings:shared.completed'), unavailable: t('settings:upgradeRepairs.unavailable') };
 
 /** 一格读数：滚动的数字加「项」。 */
@@ -53,7 +54,7 @@ export function UpgradeRepairs() {
     <Footer status={review ? <ExternalLink href="/api/configuration/upgrade-repairs/review">{t('settings:upgradeRepairs.downloadReviewLog')}</ExternalLink> : null}>
       <LinkButton href={REPAIR_CENTER_PATH} size="small" trailingIcon={RiArrowRightLine}>{t('settings:upgradeRepairs.repairCenterLink')}</LinkButton>
       <Button size="small" disabled={!data?.available || !!action.busy}
-        onClick={() => operate(data?.enabled ? 'pause' : 'start')}>{data?.enabled ? '停止派发' : data?.started ? '继续更新' : '开始更新'}</Button>
+        onClick={() => operate(data?.enabled ? 'pause' : 'start')}>{data?.enabled ? t('settings:upgradeRepairs.pause') : data?.started ? t('settings:upgradeRepairs.resume') : t('settings:upgradeRepairs.start')}</Button>
       <Button size="small" variant="secondary" disabled={!data?.available || state === 'running' || !!action.busy || (!failed && state !== 'failed')}
         onClick={() => operate('retry')}>{t('settings:upgradeRepairs.retryFailed')}</Button>
     </Footer>

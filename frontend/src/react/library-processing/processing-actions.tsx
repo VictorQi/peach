@@ -122,7 +122,7 @@ export function ProcessingActions({ busy, occupied = false, scan = false, metada
     if (occupied) { onOccupied?.(); return }
     command = { ...command, ...(libraryId ? { library_id: libraryId } : {}) };
     setOpen(false);
-    if (!scan || (command.incremental && command.stage === 'scan')) {
+    if (!scan || (command.incremental && (command.stage === 'scan' || !libraryId)) || command.scope === 'new') {
       void Promise.resolve(onRun(command)).catch(() => { /* 错误由任务入口留在原位 */ });
       return;
     }
