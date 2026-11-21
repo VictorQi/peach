@@ -322,7 +322,8 @@ class FollowBackfillTests(unittest.TestCase):
                               *(job.item for job in follow_backfill.JOBS)}, set(placed))
         modes = {item: mode for item, mode, _ in repair_center.ITEMS}
         self.assertEqual({item for item, mode in modes.items() if mode == "confirm"},
-                         {"display-cloud", "follow-evidence", *(rule.item for rule in legacy_repairs.CONFIRMS)})
+                         {"display-cloud", "follow-evidence", "cover-artwork",
+                          *(rule.item for rule in legacy_repairs.CONFIRMS)})
         # 关注组里补填在跑、旧快照等确认、蓝光去重做完：等确认的排最前，做完的垫底；组按登记顺序。
         with self.database.write_transaction() as connection:
             connection.execute("INSERT INTO ledger_upgrade_repair(id,applied_at,result_json) VALUES(?,?,?)",
@@ -332,8 +333,10 @@ class FollowBackfillTests(unittest.TestCase):
         with self.database.read_connection() as connection:
             center = repair_center.snapshot(
                 connection, {}, cloud_pending=0, follow_evidence_status={"phase": "ready", "files": 4, "bytes": 9},
-                follow_backfill_status={"rule34video-characters": {"phase": "running", "done": 1, "total": 3}})
+                follow_backfill_status={"rule34video-characters": {"phase": "running", "done": 1, "total": 3}},
+                cover_repair_status={"phase": "ready", "covers": 2})
         self.assertEqual([(row["group"], row["id"], row["state"]) for row in center["items"]], [
+            ("catalog", "cover-artwork", "waiting"),
             ("follow", "follow-evidence", "waiting"), ("follow", "rule34video-characters", "running"),
             ("follow", "bluray-duplicates", "done"), ("records", "interface-text", "done")])
 
