@@ -240,14 +240,10 @@ ISSUE_LINK = re.compile(
     r"(?:Refs|Close[sd]?|Fix(?:e[sd])?|Resolve[sd]?)[ \t]+"
     r"(?:(?:[\w.-]+/[\w.-]+)?#[1-9]\d*|https://github\.com/[\w.-]+/[\w.-]+/issues/[1-9]\d*)",
     re.IGNORECASE)
+PULL_REQUEST_FIELDS = ("url", "state", "headRefOid", "baseRefName")
 
 
-def require_pull_request(worker: Path, branch: str, target_branch: str, head: str) -> dict[str, object]:
-    """用工作树的 GitHub 仓库上下文取得当前分支 PR，绑定精确提交与目标分支。
-
-    正文里独占一行的 issue 关联行原样带出，写进合并提交；正文中顺带提到的编号不算。
-    来自 fork 的 PR 还要核对提交作者不是维护者，判据同 CI 的 `check_pr_identity.py`。
-    """
+def _tracking_github_repo(worker: Path, branch: str) -> str:
     remote = _git(worker, "config", "--get", f"branch.{branch}.remote", check=False).stdout.strip()
     if not remote or remote == ".":
         raise WorkspaceError(t("agent_worktree.pullRequestNoTracking"))
@@ -255,9 +251,29 @@ def require_pull_request(worker: Path, branch: str, target_branch: str, head: st
     match = re.fullmatch(r"(?:git@github\.com:|https://github\.com/)([\w.-]+/[\w.-]+?)(?:\.git)?", remote_url)
     if not match:
         raise WorkspaceError(t("agent_worktree.pullRequestNotGitHub"))
-    repository = match[1]
-    fields = ("url", "state", "headRefOid", "baseRefName")
-    options = ["--json", ",".join((*fields, "body", "isCrossRepository"))]
+    return match[1]
+
+
+def _read_public_pull_request(repository: str, branch: str, target_branch: str) -> dict:
+    query = urlencode({"state": "open", "head": f"{repository.split('/')[0]}:{branch}",
+                       "base": target_branch, "per_page": 100})
+    try:
+        rows = public_github_api(f"repos/{repository}/pulls?{query}")
+        rows = [row for row in rows if row["head"]["ref"] == branch
+                and row["head"]["repo"]["full_name"].casefold() == repository.casefold()
+                and row["base"]["repo"]["full_name"].casefold() == repository.casefold()]
+        if len(rows) != 1:
+            raise ValueError(t("agent_worktree.pullRequestNotUnique"))
+        row = rows[0]
+        return {"url": row["html_url"], "state": row["state"].upper(),
+                "headRefOid": row["head"]["sha"], "baseRefName": row["base"]["ref"],
+                "body": row.get("body"), "isCrossRepository": False}
+    except Exception as error:
+        raise WorkspaceError(t("agent_worktree.pullRequestUnavailable", error=error)) from error
+
+
+def _read_pull_request(worker: Path, repository: str, branch: str, target_branch: str):
+    options = ["--json", ",".join((*PULL_REQUEST_FIELDS, "body", "isCrossRepository"))]
     options_kwargs = dict(cwd=worker, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
     try:
         result = subprocess.run(
@@ -266,22 +282,7 @@ def require_pull_request(worker: Path, branch: str, target_branch: str, head: st
         if result.returncode and "no pull requests found for branch" in result.stderr:
             result = subprocess.run(["gh", "pr", "view", *options], **options_kwargs)
     except FileNotFoundError:
-        query = urlencode({"state": "open", "head": f"{repository.split('/')[0]}:{branch}",
-                           "base": target_branch, "per_page": 100})
-        try:
-            rows = public_github_api(f"repos/{repository}/pulls?{query}")
-            rows = [row for row in rows if row["head"]["ref"] == branch
-                    and row["head"]["repo"]["full_name"].casefold() == repository.casefold()
-                    and row["base"]["repo"]["full_name"].casefold() == repository.casefold()]
-            if len(rows) != 1:
-                raise ValueError(t("agent_worktree.pullRequestNotUnique"))
-            row = rows[0]
-            payload = {"url": row["html_url"], "state": row["state"].upper(),
-                       "headRefOid": row["head"]["sha"], "baseRefName": row["base"]["ref"],
-                       "body": row.get("body"), "isCrossRepository": False}
-            result = subprocess.CompletedProcess([], 0, json.dumps(payload), "")
-        except Exception as error:
-            raise WorkspaceError(t("agent_worktree.pullRequestUnavailable", error=error)) from error
+        return _read_public_pull_request(repository, branch, target_branch)
     except (OSError, subprocess.TimeoutExpired) as error:
         raise WorkspaceError(t("agent_worktree.pullRequestUnavailable", error=error)) from error
     if result.returncode:
@@ -290,7 +291,18 @@ def require_pull_request(worker: Path, branch: str, target_branch: str, head: st
         pr = json.loads(result.stdout)
     except json.JSONDecodeError as error:
         raise WorkspaceError(t("agent_worktree.pullRequestNotJson")) from error
-    if not isinstance(pr, dict) or any(not isinstance(pr.get(key), str) or not pr[key] for key in fields):
+    return pr
+
+
+def require_pull_request(worker: Path, branch: str, target_branch: str, head: str) -> dict[str, object]:
+    """用工作树的 GitHub 仓库上下文取得当前分支 PR，绑定精确提交与目标分支。
+
+    正文里独占一行的 issue 关联行原样带出，写进合并提交；正文中顺带提到的编号不算。
+    来自 fork 的 PR 还要核对提交作者不是维护者，判据同 CI 的 `check_pr_identity.py`。
+    """
+    repository = _tracking_github_repo(worker, branch)
+    pr = _read_pull_request(worker, repository, branch, target_branch)
+    if not isinstance(pr, dict) or any(not isinstance(pr.get(key), str) or not pr[key] for key in PULL_REQUEST_FIELDS):
         raise WorkspaceError(t("agent_worktree.pullRequestBadFields"))
     if not re.fullmatch(r"https://[^/\s]+/[^/\s]+/[^/\s]+/pull/[1-9]\d*", pr["url"]):
         raise WorkspaceError(t("agent_worktree.pullRequestBadUrl"))

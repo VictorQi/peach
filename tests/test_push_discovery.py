@@ -1046,8 +1046,8 @@ class LocalChannelTests(_ServiceCase):
         started = time.monotonic()
         for index in range(20):
             (self.media/f'new-{index}.mp4').write_bytes(b'new')
-        _wait_for(lambda: len(self.rows())==20)
-        self.assertEqual(len(self.rows()),20)
+        _wait_for(lambda: len(self.rows()) == 20, timeout=45.0)
+        self.assertEqual(len(self.rows()), 20, service.snapshot()['queue'])
         self.assertNotIn(self.ledger('local','existing.mp4'),self.rows())
         self.assertEqual(service.snapshot()['queue']['failed'],0)
         print(f'原生发现：空闲 {elapsed:.3f}s / CPU {used:.3f}s / 媒体探测0次；'

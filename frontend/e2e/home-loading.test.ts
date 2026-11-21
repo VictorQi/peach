@@ -173,8 +173,13 @@ describe('馆藏首屏独立于可选请求',()=>{
     });
     const started=Date.now();
     await page.goto(requiredEnv('PEACH_E2E_ORIGIN')+'/',{waitUntil:'domcontentloaded'});
-    const retry=page.locator('#grid').getByRole('button',{name:'立即重试',exact:true});
-    await retry.waitFor();
+    const grid=page.locator('#grid');
+    const retry=grid.locator('[data-media-error] button[data-note-action]');
+    try{
+     await retry.waitFor({timeout:12000});
+    }catch(cause){
+     throw new Error(`首屏错误没有给出重试按钮（目录读取 ${reads} 次，页面语言 ${await page.locator('html').getAttribute('lang')}）：${(await grid.innerText()).slice(0,400)}`,{cause});
+    }
     retrying=true;
     await retry.click();
     const card=page.locator('#grid [data-media-card]').first();
