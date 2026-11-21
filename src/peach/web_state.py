@@ -616,16 +616,8 @@ class WebContract:
                 for entry in entries:
                     if not entry.name.endswith(".jpg") or not entry.is_file():
                         continue
-                    from .cover_artwork import has_javdb_source
-                    if has_javdb_source(Path(entry.path)):
-                        continue
-                    stem = entry.path[:-len(".jpg")]
-                    record = self._poster_record(stem + jav_poster_crop.SIDECAR_SUFFIX)
                     scanned[entry.name[:-len(".jpg")].casefold()] = {
-                        "frame": self._with_poster_layout(self._cover_focus(stem + ".face.json"), record,
-                                                          Path(entry.path)),
-                        "poster": jav_poster_crop.projection(record),
-                        "version": f"{entry.stat().st_mtime_ns:x}",
+                        "path": entry.path, "version": f"{entry.stat().st_mtime_ns:x}",
                     }
         except OSError:
             return {}
@@ -878,11 +870,14 @@ class WebContract:
         from .cover_artwork import has_javdb_source
         path = Path(entry["path"])
         stem = str(path.with_suffix(""))
-        artwork = None if has_javdb_source(path) else {
-            "frame": self._cover_focus(stem + ".face.json"),
-            "poster": self._poster_box(stem + jav_poster_crop.SIDECAR_SUFFIX),
-            "version": entry["version"],
-        }
+        artwork = None
+        if not has_javdb_source(path):
+            record = self._poster_record(stem + jav_poster_crop.SIDECAR_SUFFIX)
+            artwork = {
+                "frame": self._with_poster_layout(self._cover_focus(stem + ".face.json"), record, path),
+                "poster": jav_poster_crop.projection(record),
+                "version": entry["version"],
+            }
         # 文件读取留在锁外；目录变更后的新索引不会接收旧索引的迟到结果。
         with self.cache_lock:
             return entry.setdefault("artwork", artwork)

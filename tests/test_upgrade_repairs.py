@@ -88,6 +88,15 @@ class UpgradeRepairTests(unittest.TestCase):
                                (encoded, upgrade_repairs.REVISION))
         self.service.receipt.write_text(encoded, encoding='utf-8')
 
+    def authorize_dispatch(self):
+        """Dispatch engine fixtures start after the user has approved the current scope."""
+        receipt = upgrade_repairs._read(self.service.receipt)
+        with patch('peach.seed_followup.plan', return_value=[]):
+            scope = self.service._scope()
+        scope['at'] = time.time_ns()
+        receipt.update(control_version=1, enabled=True, scope=scope)
+        self.seed_receipt(receipt)
+
     def display_sample(self, *, width=720, height=1280):
         from peach import artifact_rules
         from peach.settings_file import load_config
@@ -261,6 +270,7 @@ class UpgradeRepairTests(unittest.TestCase):
                 patch('peach.seed_followup.plan', return_value=[]), \
                 patch.object(upgrade_repairs, '_stale_previews', return_value=False), \
                 patch.object(media_probe, 'probe_file') as probe:
+            self.authorize_dispatch()
             self.service.tick()
         probe.assert_not_called()
         self.assertEqual(list(upgrade_repairs._read(self.service.receipt)['queued']),
@@ -282,6 +292,7 @@ class UpgradeRepairTests(unittest.TestCase):
         with patch('peach.library_processing._people_allowed', return_value=False), \
                 patch('peach.seed_followup.plan', return_value=[]), \
                 patch.object(upgrade_repairs, '_stale_previews', return_value=False):
+            self.authorize_dispatch()
             self.service.tick()
         after = upgrade_repairs._read(self.service.receipt)
         self.assertEqual(after['display_dimensions'], receipt['display_dimensions'])
@@ -301,6 +312,7 @@ class UpgradeRepairTests(unittest.TestCase):
         self.service._save_receipt(receipt)
         with patch.object(self.service, '_plan', wraps=self.service._plan) as plan:
             for _ in range(2):
+                self.authorize_dispatch()
                 self.tick_quietly()
         plan.assert_not_called()
         self.assertTrue(upgrade_repairs._read(self.service.receipt)['dispatch_complete'])
@@ -487,6 +499,7 @@ class UpgradeRepairTests(unittest.TestCase):
                 patch('peach.seed_followup.plan', return_value=[]), \
                 patch.object(upgrade_repairs, '_stale_previews', return_value=False), \
                 patch('peach.media_sources.cost_for', return_value='free'):
+            self.authorize_dispatch()
             self.service.tick()
             self.service.tick()
         receipt = upgrade_repairs._read(self.service.receipt)
@@ -511,6 +524,7 @@ class UpgradeRepairTests(unittest.TestCase):
             active.start()
             self.addCleanup(active.stop)
         for _ in range(3):
+            self.authorize_dispatch()
             self.service.tick()
         self.assertEqual(upgrade_repairs._read(self.service.receipt)['queued'], {})
         self.service.retry()
@@ -564,6 +578,7 @@ class UpgradeRepairTests(unittest.TestCase):
                     (-1, 0, 0, None, 0, 0, None, None, None, 1),
                     (60, 1440, 1280, None, 0, 0, None, 'landscape', '1080P', 2)]) as probe, \
                 patch('peach.library_processing.process_library') as process:
+            self.authorize_dispatch()
             self.service.tick()
             queued = dict(upgrade_repairs._read(self.service.receipt)['queued'])
             with self.assertLogs('peach.followups', level='WARNING'):
@@ -606,6 +621,7 @@ class UpgradeRepairTests(unittest.TestCase):
         self.add_display_targets(range(2, 67))
         with patch('peach.library_processing._people_allowed', return_value=False), \
                 patch('peach.seed_followup.plan', return_value=[]):
+            self.authorize_dispatch()
             self.service.tick()
             receipt = upgrade_repairs._read(self.service.receipt)
             first = next(iter(receipt['queued'].values()))
@@ -687,6 +703,7 @@ class UpgradeRepairTests(unittest.TestCase):
         probe.assert_not_called()
         with patch('peach.library_processing._people_allowed', return_value=False), \
                 patch('peach.seed_followup.plan', return_value=[]):
+            self.authorize_dispatch()
             self.service.tick()
         after = upgrade_repairs._read(self.service.receipt)
         self.assertIn(new_key, after['queued'])
@@ -725,6 +742,7 @@ class UpgradeRepairTests(unittest.TestCase):
         with patch('peach.library_processing._people_allowed', return_value=False), \
                 patch('peach.seed_followup.plan', return_value=[]), \
                 patch.object(upgrade_repairs, '_stale_previews', return_value=False):
+            self.authorize_dispatch()
             self.service.tick()
         run_id = upgrade_repairs._read(self.service.receipt)['queued'][self.display_key()]
         with patch('peach.library_processing._ffprobe_path', return_value='ffprobe'), \
@@ -787,6 +805,7 @@ class UpgradeRepairTests(unittest.TestCase):
         with patch('peach.library_processing._people_allowed', return_value=False), \
                 patch('peach.seed_followup.plan', return_value=[]), \
                 patch.object(upgrade_repairs, '_stale_previews', return_value=False):
+            self.authorize_dispatch()
             delay = self.service.tick()
             retry = self.display_items()['1']['retry_at']
             self.assertAlmostEqual(delay, retry - time.time(), delta=5)
@@ -869,6 +888,7 @@ class UpgradeRepairTests(unittest.TestCase):
             with self.assertLogs('peach.followups', level='WARNING'):
                 run = self.run_queued_display((-1, 0, 0, None, 0, 0, None, None, None, 1))
             self.assertEqual(run.status, 'failed')
+            self.authorize_dispatch()
             self.assertEqual(self.tick_quietly()['queued'], {})
             row = self.display_items()['1']
             self.assertEqual((row['state'], row['attempts']), ('failed', attempt))
@@ -908,6 +928,7 @@ class UpgradeRepairTests(unittest.TestCase):
         from peach.followups import FollowupRunner
         self.display_sample()
         self.contract.upgrade_repairs = self.service
+        self.authorize_dispatch()
         self.tick_quietly()
         run_id = upgrade_repairs._read(self.service.receipt)['queued'][self.display_key()]
         with patch('peach.storage_budget.CapacityGuard.check', side_effect=DiskSpaceDenied('errors.storageBudget.intakeStopped', {'reasons': '空间不足'})), \
@@ -1568,40 +1589,21 @@ class UpgradeRepairTests(unittest.TestCase):
             planned=self.service._plan(receipt)
         self.assertEqual([row.key for row in planned],[f'upgrade-library:processing-v2:text-{upgrade_rules.PROVIDER_TEXT}:1'])
 
-    def test_completed_dispatch_rereads_the_seed_pack_only_after_it_or_the_entities_change(self):
-        """派发完成后每分钟一问：包文件与实体都没变时不再整包读、算摘要。"""
-        import os
-        pack = self.root / 'entities.json'
-        pack.write_text('{}', encoding='utf-8')
-        revision = {'entity': 1}
-        self.contract.ledger_revision = lambda tables: revision['entity']
+    def test_completed_scope_checks_for_new_seed_only_after_another_explicit_start(self):
+        from peach.followups import Followup
         self.service.prepare()
-        receipt = upgrade_repairs._read(self.service.receipt)
-        receipt['dispatch_complete'] = True
-        self.service._save_receipt(receipt)
-        with patch('peach.seed_pack.DEFAULT_PACK', pack), \
-                patch('peach.seed_followup.plan', return_value=[]) as plan, \
-                patch('peach.library_processing._people_allowed', return_value=False):
+        with patch('peach.library_processing._people_allowed', return_value=False), patch(
+                'peach.seed_followup.plan', return_value=[]) as plan:
+            self.service.control('start')
+            self.assertTrue(upgrade_repairs._read(self.service.receipt)['dispatch_complete'])
+            seed = Followup('seed-import:new:digest', 'seed-import', '资料')
+            plan.return_value = [seed]
             self.service.tick()
             self.service.tick()
-            self.assertEqual(plan.call_count, 1)
-            revision['entity'] = 2
-            self.service.tick()
-            self.assertEqual(plan.call_count, 2)
-            changed = pack.stat().st_mtime_ns + 10 ** 9
-            os.utime(pack, ns=(changed, changed))
-            self.service.tick()
-            self.assertEqual(plan.call_count, 3)
-            # 包要派时不记指纹，下一轮照旧整包判断。
-            plan.return_value = [SimpleNamespace(key='seed-import:new')]
-            receipt = upgrade_repairs._read(self.service.receipt)
-            receipt['queued'] = {**receipt.get('queued', {}), 'seed-import:new': 1}
-            self.service._save_receipt(receipt)
-            revision['entity'] = 3
-            self.service.tick()
-            self.service.tick()
-            self.assertEqual(plan.call_count, 5)
-        self.assertTrue(upgrade_repairs._read(self.service.receipt)['dispatch_complete'])
+            plan.assert_called_once()
+            self.service.control('start')
+        self.assertEqual(plan.call_count, 2)
+        self.assertIn(seed.key, upgrade_repairs._read(self.service.receipt)['queued'])
 
     def test_completed_catalog_dispatch_preserves_deferred_work_across_text_revision(self):
         with patch.object(upgrade_repairs,'REVISION',upgrade_repairs.CATALOG_REVISION):
@@ -2095,6 +2097,7 @@ class UpgradeRepairTests(unittest.TestCase):
         receipt = upgrade_repairs._read(self.service.receipt)
         receipt['queued'] = {key: run_id}
         self.service._save_receipt(receipt)
+        self.authorize_dispatch()
         self.tick_quietly()
         with self.database.read_connection() as connection:
             state = connection.execute("SELECT state FROM ledger_upgrade_item WHERE asset_id=7").fetchone()[0]
@@ -2911,12 +2914,13 @@ class UpgradeRepairTests(unittest.TestCase):
                 self.service.tick()
             receipt = upgrade_repairs._read(self.service.receipt)
             self.assertEqual(len(receipt['queued']), 64)
-            for run_id in list(receipt['queued'].values())[:10]:
-                self.store.finish(run_id, 'succeeded')
+            first = next(iter(receipt['queued'].values()))
+            finished = sum(run_id == first for run_id in receipt['queued'].values())
+            self.store.finish(first, 'succeeded')
             self.service.tick()
         receipt = upgrade_repairs._read(self.service.receipt)
-        self.assertEqual(len(receipt['queued']), 70)
-        self.assertEqual(self.service.snapshot()['items'][1]['pending'], 60)
+        self.assertEqual(len(receipt['queued']), 70 - finished)
+        self.assertEqual(self.service.snapshot()['items'][1]['pending'], 70 - finished)
         self.assertEqual(self.service.snapshot()['state'], 'running')
 
     def test_pause_and_resume_keep_the_original_content_scope(self):
@@ -2961,19 +2965,28 @@ class UpgradeRepairTests(unittest.TestCase):
 
     def test_retry_contains_only_failed_items_and_preserves_cancellation(self):
         from peach.followups import Followup
+        for asset_id in range(1, 4):
+            self.asset(asset_id, duration=10)
         planned = [Followup(f'upgrade-library:processing-v2:{key}', 'upgrade-library', f'影片 {key}')
                    for key in range(1, 4)]
-        with patch.object(self.service, '_plan', return_value=planned):
+        with patch('peach.seed_followup.plan', return_value=[]), patch.object(self.service, '_plan', return_value=[]):
             self.service.control('start')
+        # 三次独立入队，以三个任务的状态覆盖失败、取消和完成。
+        parent = self.store.start(upgrade_repairs.TASK_KEY, trigger='scheduled')
+        queued = self.store.enqueue_followups(parent.id, [row.as_row() for row in planned])['queued']
+        self.store.finish(parent.id, 'succeeded')
         receipt = upgrade_repairs._read(self.service.receipt)
+        receipt['queued'] = dict(zip((row.key for row in planned), queued, strict=True))
+        self.service._save_receipt(receipt)
         for row, status in zip(planned, ('failed', 'cancelled', 'succeeded')):
             self.store.finish(receipt['queued'][row.key], status)
         self.service.retry()
         saved = upgrade_repairs._read(self.service.receipt)
         self.assertNotEqual(saved['queued'][planned[0].key], receipt['queued'][planned[0].key])
-        self.assertEqual(saved['queued'][planned[1].key], receipt['queued'][planned[1].key])
-        self.assertEqual(saved['queued'][planned[2].key], receipt['queued'][planned[2].key])
-        self.assertEqual(len(saved['queued']), 3)
+        self.assertNotIn(planned[1].key, saved['queued'])
+        self.assertNotIn(planned[2].key, saved['queued'])
+        self.assertEqual(self.store.get(receipt['queued'][planned[1].key]).status, 'cancelled')
+        self.assertEqual(self.store.get(receipt['queued'][planned[2].key]).status, 'succeeded')
         self.assertEqual(self.service.snapshot()['items'][1]['failed'], 0)
         retry_id = saved['queued'][planned[0].key]
         self.store.finish(retry_id, 'succeeded')
@@ -3132,6 +3145,7 @@ class UpgradeRepairTests(unittest.TestCase):
         with patch('peach.library_processing._people_allowed', return_value=False), patch(
                 'peach.media_sources.cost_for', return_value='free'):
             with patch('peach.seed_followup.plan', return_value=[]):
+                self.authorize_dispatch()
                 self.service.tick()
                 self.assertEqual(self.service._media_backlog(), 64)
                 self.service.tick()
@@ -3139,7 +3153,7 @@ class UpgradeRepairTests(unittest.TestCase):
             with patch('peach.seed_followup.plan', return_value=[seed]):
                 self.service.tick()
         receipt = upgrade_repairs._read(self.service.receipt)
-        self.assertIn(seed.key, receipt['queued'])
+        self.assertNotIn(seed.key, receipt['queued'])
         self.assertEqual(self.service._media_backlog(), 64)
         self.assertFalse(receipt['dispatch_complete'])
 
@@ -3159,6 +3173,7 @@ class UpgradeRepairTests(unittest.TestCase):
         for active in planning:
             active.start()
             self.addCleanup(active.stop)
+        self.authorize_dispatch()
         self.service.tick()
         queued = upgrade_repairs._read(self.service.receipt)['queued']
         self.assertEqual(sorted(queued), sorted(f'upgrade-library:processing-v2:{key}' for key in range(1, 21)))

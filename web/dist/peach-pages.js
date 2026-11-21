@@ -2,7 +2,7 @@
 (function() {
 	try {
 		var e = typeof globalThis < "u" ? globalThis : typeof window < "u" ? window : typeof global < "u" ? global : typeof self < "u" ? self : {}, t = new e.Error().stack;
-		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "f612b352-2a6e-42c9-8118-f3ee5e74df41", e._sentryDebugIdIdentifier = "sentry-dbid-f612b352-2a6e-42c9-8118-f3ee5e74df41");
+		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "4fee7381-a418-42c8-95e9-17f55fdd10c7", e._sentryDebugIdIdentifier = "sentry-dbid-4fee7381-a418-42c8-95e9-17f55fdd10c7");
 	} catch {}
 })();
 var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescriptor, r = Object.getOwnPropertyNames, i = Object.getPrototypeOf, a = Object.prototype.hasOwnProperty, o = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e = null), t.exports), s = (e, i, o, s) => {
@@ -6231,7 +6231,7 @@ var Ge = "peach.settings.v1", Ke = {
 		sectionsLabel: "Settings sections"
 	},
 	dataSharing: {
-		reportErrors: "Send version stats and error reports (recommended)",
+		reportErrors: "Send version stats and error reports",
 		reportErrorsHelp: "Uploads version, system info, failure type, code location, and occurrence count.",
 		title: "Data sharing"
 	},
@@ -13737,7 +13737,7 @@ var Ge = "peach.settings.v1", Ke = {
 		sectionsLabel: "配置分区"
 	},
 	dataSharing: {
-		reportErrors: "发送版本统计与错误诊断（推荐）",
+		reportErrors: "发送版本统计与错误诊断",
 		reportErrorsHelp: "上传版本、系统信息、故障类型、代码位置与发生次数。",
 		title: "数据上传"
 	},
@@ -40393,4 +40393,4 @@ Pt();
 var sx = document.getElementById("peach-page"), cx = sx ? ox[sx.dataset.page ?? ""] : void 0;
 sx && cx && (0, Ut.createRoot)(sx).render(/* @__PURE__ */ (0, V.jsx)(ax, { children: /* @__PURE__ */ (0, V.jsx)(cx, { data: { ...sx.dataset } }) }));
 
-//# debugId=f612b352-2a6e-42c9-8118-f3ee5e74df41
+//# debugId=4fee7381-a418-42c8-95e9-17f55fdd10c7

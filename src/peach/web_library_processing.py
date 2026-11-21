@@ -492,6 +492,7 @@ def _resume_request(previous, speed_mode):
            {'asset_ids': previous['asset_ids']} if previous.get('asset_ids') else {}),
         **({'allow_metered': True} if previous.get('allow_metered') else {}),
         **({'recheck': True} if previous.get('recheck') else {}),
+        **({'automatic': True} if previous.get('automatic') else {}),
         'speed_mode': speed_mode,
     }
 
@@ -607,8 +608,11 @@ def w_library_processing(contract, body, *, resume=False):
     control = control_for(config)
     mode = _initial_speed(contract, control, previous, body, resume=resume)
     control.request('set_speed', mode=mode)
+    automatic = bool((body or {}).get('automatic'))
     def work(job_id):
         try:
+            from .library_new_assets import finish, snapshot
+            versions = snapshot(contract.db_path, asset_ids) if automatic else {}
             result = process_library(config, contract.db_path, contract.candidate_root, contract.cover_root,
                 job_id=job_id, retry_ids=retry_ids, stage=stage, asset_ids=asset_ids, incremental=incremental, library_id=library_id,
                 allow_metered=allow_metered, recheck_existing=recheck,
@@ -621,6 +625,9 @@ def w_library_processing(contract, body, *, resume=False):
                 active=lambda:(contract.library_processing_job.snapshot() or {}).get('job_id') == job_id,
                 report=lambda state: contract.library_processing_job.update(job_id, **{
                     key: value for key, value in state.items() if key != 'job_id'}))
+            if versions and result.get('stage_code') == 'library.finished' and result.get('completed_at'):
+                # 已结束的问题交给任务重试入口。处理中到达的新版本仍留在扫描队列。
+                finish(contract.db_path, versions)
             contract.library_processing_job.update(job_id, **{key: value for key, value in result.items() if key != 'job_id'})
         finally:
             contract.cache_bust()
@@ -640,11 +647,13 @@ def w_library_processing(contract, body, *, resume=False):
                                     'library_id': library_id, 'library_name': library_name,
                                     **({'allow_metered': True} if allow_metered else {}),
                                     **({'recheck': True} if recheck else {}),
+                                    **({'automatic': True} if automatic else {}),
                                     **initial_estimate(config, contract.db_path, stage, estimate_ids, mode,
                                                        allow_metered=allow_metered)},
         recovery={'stage': stage, 'speed_mode': mode, 'incremental': incremental, 'library_id': library_id,
                   **({'allow_metered': True} if allow_metered else {}),
                   **({'recheck': True} if recheck else {}),
+                  **({'automatic': True} if automatic else {}),
                   **({'asset_ids': asset_ids or retry_ids}
                                     if asset_ids is not None or retry_ids is not None else {})})
     if not resume:

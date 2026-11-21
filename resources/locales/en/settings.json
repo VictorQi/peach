@@ -260,7 +260,7 @@
     "sectionsLabel": "Settings sections"
   },
   "dataSharing": {
-    "reportErrors": "Send version stats and error reports (recommended)",
+    "reportErrors": "Send version stats and error reports",
     "reportErrorsHelp": "Uploads version, system info, failure type, code location, and occurrence count.",
     "title": "Data sharing"
   },

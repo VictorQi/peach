@@ -174,11 +174,8 @@ it.each([
 ] as const)('%s 的确认范围、预估请求与提交保持一致', async (label, title, scope, command, estimate) => {
   const {fetcher, posts} = await open({status:'idle',new_asset_count:2});
   const host = await mount(card({toast:vi.fn()}));
-  if (label === '同步新增文件') await click(buttonNamed(label,host));
-  else {
-    await click(host.querySelector('[data-split-button] [aria-haspopup="dialog"]'));
-    await click(menuItem(label));
-  }
+  await click(host.querySelector('[data-split-button] [aria-haspopup="dialog"]'));
+  await click(menuItem(label));
   expect(document.querySelector('dialog')?.textContent).toContain(title);
   expect(document.querySelector('[data-processing-scope]')?.textContent).toBe(`处理范围：所有媒体库 · ${scope}`);
   const requested = fetcher.mock.calls.map(([path]) => String(path)).find(path => path.includes('estimate=1'))!;

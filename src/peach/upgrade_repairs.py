@@ -1003,8 +1003,6 @@ class UpgradeRepairs:
         #: 回执队列里派出、还没结算的后继任务 id；其中一条跑完就叫醒派发线程。
         self._watched: frozenset[int] = frozenset()
         self._listening = False
-        #: 上一次判过「种子包不用派」时的指纹（`_seed_fingerprint`）；没变就不再整包读、算摘要。
-        self._quiet_seed = None
         #: 这次启动里一次性规则共用的写入前备份，与领过它的规则数（`_upgrade_backup`）。
         self._backup: Path | None = None
         self._backup_claims = 0
@@ -1033,34 +1031,6 @@ class UpgradeRepairs:
                 backup.unlink(missing_ok=True)
                 self._backup = None
 
-    def _seed_fingerprint(self):
-        """种子包派发判断的廉价指纹：包文件的修改时间与大小，加实体与种子导入记录的账本版本。
-
-        派发完成后每分钟都要问一次「种子包要不要派」，整包 1.9 MB 读一遍、算摘要不划算。
-        读不到账本版本（库还没迁移到 0038，或测试替身）时返回 None，照旧整包判断。
-        """
-        from . import seed_pack
-        revision = getattr(self.contract, 'ledger_revision', None)
-        revision = revision(('entity', 'seed_pack_history')) if revision is not None else None
-        if revision is None:
-            return None
-        try:
-            stat = Path(seed_pack.DEFAULT_PACK).stat()
-        except FileNotFoundError:
-            return (str(seed_pack.DEFAULT_PACK), None, None, revision)
-        return (str(seed_pack.DEFAULT_PACK), stat.st_mtime_ns, stat.st_size, revision)
-
-    def _seed_pending(self, connection) -> list:
-        """种子包要派的后继；上次判过不用派、指纹也没变时直接答空。"""
-        from . import seed_followup
-        fingerprint = self._seed_fingerprint()
-        if fingerprint is not None and fingerprint == self._quiet_seed:
-            return []
-        maximum = connection.execute('SELECT coalesce(max(id),0) FROM entity').fetchone()[0]
-        seed = seed_followup.plan(connection, since_entity_id=maximum)
-        self._quiet_seed = fingerprint if not seed else None
-        return seed
-
     @property
     def receipt(self) -> Path:
         return self.root / 'receipt.json'
@@ -1076,9 +1046,9 @@ class UpgradeRepairs:
                     'available': True, **_coded('labels.upgradeRepairs.receiptRetry')}
         local = receipt.get('local', {})
         queued = receipt.get('queued', {})
-        states = [row['status'] for row in self._family(receipt)]
-        active = sum(state in ('pending', 'running') for state in states)
-        failed = sum(state in ('failed', 'interrupted') for state in states)
+        family = self._family(receipt)
+        active = sum(len(member_keys(row['followup_key'])) for row in family if row['status'] in ('pending', 'running'))
+        failed = sum(len(member_keys(row['followup_key'])) for row in family if row['status'] in ('failed', 'interrupted'))
         # 结算进状态表的失败与延后也要看得见：失败等用户决定，延后的到时间自己重派。
         settled_counts = self._item_counts()
         failed += settled_counts.get('failed', 0)
@@ -1093,7 +1063,7 @@ class UpgradeRepairs:
                   'changed': local.get('changed', {}), 'review_count': review},
                  {'id': 'background', **_coded('labels.upgradeRepairs.item.background', key='label'), 'state': state,
                   'pending': active, 'failed': failed, 'deferred': waiting, 'queued': len(queued)}]
-        if not receipt.get('enabled') and not receipt.get('dispatch_complete') and not self.error:
+        if not receipt.get('enabled') and not receipt.get('dispatch_complete') and not (self.error or paused or failed):
             state = 'paused' if active or receipt.get('scope') else 'idle'
         return {'state': state, 'items': items, 'available': self.available,
                 'enabled': bool(receipt.get('enabled')), 'started': bool(receipt.get('scope')), **self._message(paused)}
@@ -2330,6 +2300,8 @@ class UpgradeRepairs:
         selected = set(receipt.get('media_ids', []))
         from .display_dimensions_repair import ITEM_RULE, generation, task_key
         items = items or {}
+        selected.update(asset_id for (rule, asset_id), item in items.items()
+                        if rule.startswith('media:') and item['state'] in ('pending', 'failed', 'deferred'))
         now = time.time()
         deferred = []
         media_count = 0
@@ -2420,10 +2392,7 @@ class UpgradeRepairs:
                 if row['state'] in ('done', 'cancelled'):
                     _discard_settled(self.root, row['rule'], [row['asset_id']])
         if receipt.get('dispatch_complete'):
-            with self.contract.database.read_connection() as connection:
-                seed = self._seed_pending(connection)
-            if (not receipt.get('deferred') and not self._display_due(receipt) and not self._retry_due()
-                    and not any(row.key not in receipt.get('queued', {}) for row in seed)):
+            if not receipt.get('deferred') and not self._display_due(receipt) and not self._retry_due():
                 return False
             receipt['dispatch_complete'] = False
         # 影片补全只有一条通道、一次一条；不等前面那批跑下去就每分钟再派一批，

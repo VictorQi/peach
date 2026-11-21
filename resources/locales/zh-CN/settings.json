@@ -258,7 +258,7 @@
     "sectionsLabel": "配置分区"
   },
   "dataSharing": {
-    "reportErrors": "发送版本统计与错误诊断（推荐）",
+    "reportErrors": "发送版本统计与错误诊断",
     "reportErrorsHelp": "上传版本、系统信息、故障类型、代码位置与发生次数。",
     "title": "数据上传"
   },

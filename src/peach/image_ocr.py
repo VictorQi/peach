@@ -86,7 +86,9 @@ class ImageReader:
         return texts
 
     def _windows(self, paths):
-        executable = shutil.which('powershell.exe')
+        from .folder_picker import _windows_powershell
+        shell = Path(_windows_powershell())
+        executable = str(shell) if shell.is_absolute() and shell.is_file() else shutil.which('powershell.exe')
         if executable is None:
             raise OcrUnavailable('Windows PowerShell unavailable')
         helper = PROJECT_ROOT / 'resources/ocr/windows.ps1'
