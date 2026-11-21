@@ -1,8 +1,8 @@
-# ADR-0137：Fork 的发布与更新归属
+# ADR-0177：Fork 的发布与更新归属
 
 - 状态：已接受
 - 日期：2026-11-05
-- 关联：[消费者边界](0134-consumer-control-and-privacy.md)、[macOS 应用内更新](0130-macos-sparkle-in-app-update.md)
+- 关联：[消费者边界](0174-consumer-control-and-privacy.md)、[macOS 应用内更新](0130-macos-sparkle-in-app-update.md)
 
 ## 决策
 

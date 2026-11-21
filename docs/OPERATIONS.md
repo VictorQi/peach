@@ -104,7 +104,7 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.github.longmeidao.pea
 
 ### macOS 应用内更新（Sparkle）
 
-本 Fork 当前未配置自己的签名密钥与 feed，Sparkle 默认不启用；设置页检查本 Fork 的发行版，下载本机架构 DMG 后手动覆盖应用。下列签名部署说明保留为主动启用时的配置流程，不表示本 Fork 已具有上游的服务或密钥。发布与缓存边界见 [ADR-0137](adr/0137-fork-release-publisher.md)。
+本 Fork 当前未配置自己的签名密钥与 feed，Sparkle 默认不启用；设置页检查本 Fork 的发行版，下载本机架构 DMG 后手动覆盖应用。下列签名部署说明保留为主动启用时的配置流程，不表示本 Fork 已具有上游的服务或密钥。发布与缓存边界见 [ADR-0177](adr/0177-fork-release-publisher.md)。
 
 应用随包带 [Sparkle 2](https://sparkle-project.org/) 框架（`Contents/Frameworks/Sparkle.framework`，版本与摘要固定在 `scripts/sparkle-macos.json`），取舍见 [ADR-0130](adr/0130-macos-sparkle-in-app-update.md)。`src/peach/sparkle_update.py` 的 `PUBLIC_ED_KEY` 决定是否启用：有值时构建写入 `SUPublicEDKey` 与更新源地址；清空后构建不写这些键，菜单栏「检查更新」改回版本检查与系统通知。
 
@@ -266,7 +266,7 @@ Windows 测试包默认使用 `%LOCALAPPDATA%\Peach\peach-data`。首次设置�
 
 程序更新与页面刷新状态在设置页查看，不在浏览页面顶部常驻催更。首次未设置自动更新时，每天检查版本；明确关闭过的设置继续保留。下载、重启安装与页面刷新分别沿用用户选择。独立包在新程序通过启动检查后才恢复已启用的后台任务；安装失败恢复程序、数据库、配置与任务检查点。
 
-「资料更新」可下载本地复核记录。`GET /api/client-updates` 只读取本机快照，不触发外部版本检查；接口与权限见[路由清单](ROUTES.md)。规则版本边界见 [ADR-0126](adr/0126-upgrade-effective-repairs.md)，默认行为按 [ADR-0134](adr/0134-consumer-control-and-privacy.md)。
+「资料更新」可下载本地复核记录。`GET /api/client-updates` 只读取本机快照，不触发外部版本检查；接口与权限见[路由清单](ROUTES.md)。规则版本边界见 [ADR-0126](adr/0126-upgrade-effective-repairs.md)，默认行为按 [ADR-0174](adr/0174-consumer-control-and-privacy.md)。
 
 ### 容量保护与显示尺寸补测
 
