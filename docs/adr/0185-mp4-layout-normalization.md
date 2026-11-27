@@ -1,8 +1,8 @@
-# ADR-0178：入库整理 MP4 布局，存量播放使用虚拟头
+# ADR-0185：入库整理 MP4 布局，存量播放使用虚拟头
 
 - 状态：已接受
 - 日期：2026-11-10
-- 关联：[媒体引擎](0002-media-engine-and-stash.md)、[消费者边界](0174-consumer-control-and-privacy.md)
+- 关联：[媒体引擎](0002-media-engine-and-stash.md)、[消费者边界](0181-consumer-control-and-privacy.md)
 
 ## 问题
 

@@ -1,8 +1,8 @@
-# ADR-0176：馆藏内容优先显示
+# ADR-0183：馆藏内容优先显示
 
 - 状态：已接受
 - 日期：2026-11-05
-- 关联：[消费者行为边界](0174-consumer-control-and-privacy.md)、[前端分层](0031-frontend-react-boardui-tailwind.md)
+- 关联：[消费者行为边界](0181-consumer-control-and-privacy.md)、[前端分层](0031-frontend-react-boardui-tailwind.md)
 
 ## 决策
 

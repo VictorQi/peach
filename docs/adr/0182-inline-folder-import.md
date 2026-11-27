@@ -1,8 +1,8 @@
-# ADR-0175：原位添加文件夹与目录热生效
+# ADR-0182：原位添加文件夹与目录热生效
 
 - 状态：已接受
 - 日期：2026-11-05
-- 关联：[消费者行为边界](0174-consumer-control-and-privacy.md)、[任务后继](0040-tasks-declare-followups-at-the-end.md)
+- 关联：[消费者行为边界](0181-consumer-control-and-privacy.md)、[任务后继](0040-tasks-declare-followups-at-the-end.md)
 
 ## 决策
 

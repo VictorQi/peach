@@ -353,7 +353,7 @@ JavDB 没给演员、给了企划名义，或名字没有本机身份依据时�
 
 补别名、补女优资料与名册维护共用 `SourceTransport` 的 HTTP 连接策略和来源冷却。403、429、验证页和服务器暂时不可用分别记录并停止本轮访问，不转交独立 Chrome 或 Edge。522 表示来源连接问题，不作为要求用户登录的依据。
 
-旧配置中的 `transport: browser` 不再启用浏览器采集，旧冷却仍有效。用户主动发起的账号连接与后台采集边界见 [ADR-0174](adr/0174-consumer-control-and-privacy.md)。
+旧配置中的 `transport: browser` 不再启用浏览器采集，旧冷却仍有效。用户主动发起的账号连接与后台采集边界见 [ADR-0181](adr/0181-consumer-control-and-privacy.md)。
 
 补别名、补女优资料（`MinnanoPages`）与 `harvest_performer_links.py`、`harvest_agency_rosters.py`、
 `resync_performer_agency.py` 都经 `SourceTransport` 取 minnano-av，共用同一份冷却与固定状态。2026-10-01 实测：

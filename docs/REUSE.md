@@ -358,7 +358,7 @@ macOS 复用 FFmpeg 的 VideoToolbox H.264 编码及 H.264、HEVC、AV1 解码�
 
 ## 普通 MP4 的多媒体盒布局整理
 
-`mp4layout` 复用现有盒子读取、`RepairedHeader` 与 `SplicedMp4Response`，沿用标准库文件读写、摘要和持久化恢复记录。对单个前置索引且后续只有媒体与填充盒子的完整 MP4，把首个 `mdat` 声明为延伸到 EOF，样本地址和压缩数据不变；入库媒体探测只在本地源文件原位改四字节，失败恢复，存量播放仅拼接响应头。布局读取有界，结果按文件版本缓存，不新增依赖。对比完整样本已核对压缩流哈希及隔离 Chromium 首帧、中段跳转；协议边界和恢复要求见 [ADR-0178](adr/0178-mp4-layout-normalization.md)。FFmpeg 的 [`faststart`](https://ffmpeg.org/ffmpeg-formats.html#Options-9) 需要搬移索引，整片复制的 I/O 和临时空间不符合这类片源只改长度字段的约束，因此不作为默认路径。
+`mp4layout` 复用现有盒子读取、`RepairedHeader` 与 `SplicedMp4Response`，沿用标准库文件读写、摘要和持久化恢复记录。对单个前置索引且后续只有媒体与填充盒子的完整 MP4，把首个 `mdat` 声明为延伸到 EOF，样本地址和压缩数据不变；入库媒体探测只在本地源文件原位改四字节，失败恢复，存量播放仅拼接响应头。布局读取有界，结果按文件版本缓存，不新增依赖。对比完整样本已核对压缩流哈希及隔离 Chromium 首帧、中段跳转；协议边界和恢复要求见 [ADR-0185](adr/0185-mp4-layout-normalization.md)。FFmpeg 的 [`faststart`](https://ffmpeg.org/ffmpeg-formats.html#Options-9) 需要搬移索引，整片复制的 I/O 和临时空间不符合这类片源只改长度字段的约束，因此不作为默认路径。
 
 存量布局头沿用 `HeaderRepairStore` 的 `.mp4hdr` 格式、文件版本键与清理路径持久保存，冷盘首次检查后的跳读成本不会在每次重启重复发生。内存缓存最多四份头；并发准备按资产版本合并，跨进程写入复用 `fsutil.atomic_path` 的独立临时文件和原子替换，缓存不可写时本次仍可使用内存中的头。
 
