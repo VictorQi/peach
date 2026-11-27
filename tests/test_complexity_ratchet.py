@@ -47,7 +47,7 @@ BASELINE: dict[str, int] = {
     "scripts/harvest_social_avatars.py:run": 45,
     "scripts/fetch_studio_avatar_candidates.py:main": 44,
     "src/peach/web_catalog.py:q_item": 38,
-    "src/peach/web_follow.py:_follow_author_rows": 35,
+    "src/peach/web_follow.py:_follow_author_rows": 30,
     "src/peach/taste_history.py:_taste_analysis": 34,
     "src/peach/web_catalog.py:catalog_filter": 36,
     "scripts/audit_domain_codes.py:collect": 39,
@@ -64,16 +64,16 @@ BASELINE: dict[str, int] = {
 #: 判过就该这么长的函数：`(分支数, 为什么拆开更差)`。键与 `BASELINE` 同形、不重叠。
 ACCEPTED: dict[str, tuple[int, str]] = {
     "src/peach/library_processing.py:process_library": (
-        57, "顺序流水线：垃圾检查、媒体属性、本地资料、本地预览、联网采集、写候选、收尾共用一份进度状态"
+        55, "顺序流水线：垃圾检查、媒体属性、本地资料、本地预览、联网采集、写候选、收尾共用一份进度状态"
             "与问题记录；来源扫描、资产查询与外部会话分别归 `_scan_sources`、"
-            "`_collection_rows`、`_RemoteSession`，剩下的是任务编排、逐项目资料处理与指定范围的存量重新核查；"
+            "`_collection_rows`、`_RemoteSession`，剩下的是任务编排、逐项目资料处理与指定范围的存量重新核查与 Fork 快速扫描；"
             "不同阶段、暂停及取消共用同一份文件版本快照，确保结算不会撤掉处理期间到达的新版本"),
     "src/peach/api.py:create_app": (
         31, "服务组装入口集中绑定路由、鉴权、迁移状态和后台服务生命周期，入口参数及部署形态决定共享的实例"),
     "src/peach/standalone_update.py:apply": (
         30, "本地替换事务同时核对已暂存包的发布方和校验值，备份、安装、恢复及失败处理共用原安装路径"),
     "src/peach/web_library_processing.py:w_library_processing": (
-        35, "同一处理请求的重试范围、流量授权、恢复参数和文件版本必须与实际派发的任务一起建立和记录"),
+        36, "同一处理请求的重试范围、流量授权、恢复参数、自动触发标记和文件版本须与实际派发的任务一起记录"),
     "src/peach/jav_cover_fetch.py:run": (
         50, "批处理的主循环：每个番号依次量本机尺寸、择优、比较、落盘、记日志，统计、日志行"
             "和出错后换新的连接池在整轮里共用，逐段拆开只是把这几样来回传"),

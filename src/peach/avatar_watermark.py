@@ -83,6 +83,21 @@ class WatermarkModelUnavailable(UserFacingError, RuntimeError):
     """模型取不到。调用方据此决定跳过还是整轮停下，不要静默当成「没有水印」。"""
 
 
+class OnnxLoadError(RuntimeError):
+    """本地模型无法加载，保留原始异常供诊断。"""
+
+
+def read_onnx_network(path: Path):
+    import cv2
+    import numpy as np
+
+    # Python 可读取含中文的 Windows 路径；OpenCV 只接收模型内容。
+    try:
+        return cv2.dnn.readNetFromONNX(np.frombuffer(path.read_bytes(), dtype=np.uint8))
+    except (OSError, cv2.error) as error:
+        raise OnnxLoadError(str(error)) from error
+
+
 @dataclass(frozen=True)
 class Mark:
     """一处水印的位置与检出分数。人工补的框分数记 1.0。"""
@@ -152,7 +167,7 @@ class MarkDetector:
 
         self.model_path = ensure_model(model, allow_download=allow_download)
         self.min_score = float(min_score)
-        net = cv2.dnn.TextDetectionModel_DB(str(self.model_path))
+        net = cv2.dnn.TextDetectionModel_DB(read_onnx_network(self.model_path))
         net.setBinaryThreshold(BINARY_THRESHOLD)
         net.setPolygonThreshold(POLYGON_THRESHOLD)
         net.setMaxCandidates(MAX_CANDIDATES)

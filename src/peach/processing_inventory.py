@@ -31,8 +31,8 @@ class InventoryPreview:
     def __init__(self, config, db_path, stage, asset_ids, incremental=False, library_id=None):
         self.identity = _identity(config, db_path, stage, asset_ids, incremental)
         if incremental:
-            from .library_new_assets import pending
-            asset_ids = pending(db_path)
+            from .library_processing import incremental_pending
+            asset_ids = incremental_pending(config, db_path)
         self.meter = ProcessingTraffic(config, db_path, stage, scoped_assets(config, db_path, library_id, asset_ids))
         with closing(sqlite3.connect(db_path)) as connection:
             self.known = {(location, str(PureWindowsPath(path)).casefold()) for location, path

@@ -54,6 +54,22 @@ class CoverArtworkTests(unittest.TestCase):
             json.dumps({'source_url': 'https://c0.jdbstatic.com/covers/x.jpg'}), encoding='utf-8')
         self.assertTrue(cover_artwork.has_javdb_source(self.target))
 
+    def test_an_unreadable_optional_model_does_not_block_cover_installation(self):
+        from peach import avatar_watermark, body_parts, spine_label
+
+        data = jpeg((80, 90, 100))
+        model = self.root / '模型.onnx'
+        model.write_bytes(b'invalid model')
+        with (patch.object(body_parts, '_DETECTOR', []),
+              patch.object(body_parts, 'ensure_model', return_value=model),
+              patch.object(spine_label, '_READER', []),
+              patch.object(spine_label, 'ensure_recognizer', return_value=model),
+              patch.object(avatar_watermark, 'ensure_model', return_value=model),
+              patch.object(cover_artwork, '_default_detector', return_value=Detector())):
+            cover_artwork.install_cover(self.target, 'XV-507', data, (840, 472))
+        self.assertEqual(self.target.read_bytes(), data)
+        self.assertTrue(self.target.with_suffix(jav_poster_crop.SIDECAR_SUFFIX).is_file())
+
     def test_a_paper_canvas_keeps_a_face_left_of_the_expected_spine(self):
         detector = Detector()
         with patch.object(detector, 'detect', return_value=[Face(.478, .094, .085, .155, .838)]):

@@ -18,7 +18,7 @@ import threading
 from pathlib import Path
 
 from . import avatar_watermark
-from .avatar_watermark import WatermarkModelUnavailable
+from .avatar_watermark import OnnxLoadError, WatermarkModelUnavailable
 from .config import TOOLS_DIR
 
 #: opencv_zoo 定版的 CRNN 英文识别模型，和检测模型同一个仓库、同一个提交、同一种取法（media. 域名，见
@@ -96,14 +96,14 @@ class SpineReader:
 
         detector_path = avatar_watermark.ensure_model(allow_download=allow_download)
         recognizer_path = ensure_recognizer(allow_download=allow_download)
-        self._detector = cv2.dnn_TextDetectionModel_DB(str(detector_path))
+        self._detector = cv2.dnn.TextDetectionModel_DB(avatar_watermark.read_onnx_network(detector_path))
         self._detector.setBinaryThreshold(avatar_watermark.BINARY_THRESHOLD)
         self._detector.setPolygonThreshold(avatar_watermark.POLYGON_THRESHOLD)
         self._detector.setMaxCandidates(avatar_watermark.MAX_CANDIDATES)
         self._detector.setUnclipRatio(avatar_watermark.UNCLIP_RATIO)
         side = avatar_watermark.INPUT_SIDE
         self._detector.setInputParams(avatar_watermark.INPUT_SCALE, (side, side), avatar_watermark.INPUT_MEAN)
-        self._recognizer = cv2.dnn.readNet(str(recognizer_path))
+        self._recognizer = avatar_watermark.read_onnx_network(recognizer_path)
         # OpenCV 的 dnn 网络不能并发调用：同一批里几个线程同时装封面会撞上。
         self._lock = threading.Lock()
 
@@ -214,6 +214,6 @@ def default_reader(*, allow_download: bool = False) -> SpineReader | None:
         if not _READER:
             try:
                 _READER.append(SpineReader(allow_download=allow_download))
-            except (WatermarkModelUnavailable, ImportError):
+            except (WatermarkModelUnavailable, OnnxLoadError, ImportError):
                 return None
         return _READER[0]

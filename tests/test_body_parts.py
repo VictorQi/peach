@@ -80,6 +80,16 @@ class FaceRecordTests(unittest.TestCase):
 
 
 class ModelTests(unittest.TestCase):
+    def test_native_reader_receives_model_bytes_from_a_unicode_path(self):
+        import cv2
+
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "模型.onnx"
+            path.write_bytes(b"model")
+            with patch.object(cv2.dnn, "readNetFromONNX") as read:
+                self.assertIs(avatar_watermark.read_onnx_network(path), read.return_value)
+            self.assertEqual(read.call_args.args[0].tobytes(), b"model")
+
     def test_the_model_is_taken_out_of_the_wheel_and_checked(self):
         payload = io.BytesIO()
         with zipfile.ZipFile(payload, "w") as archive:

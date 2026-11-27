@@ -121,6 +121,7 @@ export function NumberSetting({ id, label, value, disabled = false, onApply }: {
   };
 
   const blocked = disabled || value === null;
+  const days = dayReading(Number(draft), spec.unit);
   return (
     <div data-number-setting="">
       {optional
@@ -130,7 +131,7 @@ export function NumberSetting({ id, label, value, disabled = false, onApply }: {
       <div data-number-fields="" hidden={optional && !on}>
         <div data-number-control="">
           <input ref={input} type="number" inputMode="numeric" className="geist-input" min={min} max={max} step={1}
-            value={draft} disabled={blocked} aria-label={label} aria-describedby={`${id}-error`}
+            value={draft} disabled={blocked} aria-label={label} aria-describedby={`${id}-unit ${id}-error`}
             onChange={(event) => {
               setDraft(event.target.value);
               if (event.target.value && event.target.checkValidity()) {
@@ -139,7 +140,7 @@ export function NumberSetting({ id, label, value, disabled = false, onApply }: {
               }
             }}
             onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commit() } }} />
-          <span aria-hidden="true">{unit}{dayReading(Number(draft), spec.unit) ? ` · ${dayReading(Number(draft), spec.unit)}` : ''}</span>
+          <span><span id={`${id}-unit`}>{unit}</span>{days ? <span aria-hidden="true">{` · ${days}`}</span> : null}</span>
         </div>
         <small id={`${id}-error`} data-number-error="" role="status" hidden={!error}>{error}</small>
       </div>

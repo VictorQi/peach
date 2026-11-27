@@ -6,7 +6,8 @@
 普通的筛选列表，留给排查用。
 
 「最近完成」按结束时刻从新到旧排，一页数的是顶层那几轮，后继随父任务一起下发；
-活动页通过 `page` 与 `limit` 读取当前页和总数，轮询刷新同一页。
+活动页通过 `page` 与 `limit` 读取当前页和总数，轮询刷新同一页；`q` 是查找框的词，
+只收窄这一段（`TaskRunStore._search_condition`）。
 原游标调用通过 `before_finished_at` 与 `before_id` 读取更早的终态任务，
 响应仅包含该页及后继计数。
 """
@@ -33,8 +34,29 @@ TASK_FOLLOWUP_LIMIT = SETTLED_FOLLOWUP_LIMIT
 NO_TABLE = "api.tasks.noTaskTable"
 
 
-def running_tasks(contract) -> list[dict]:
-    """在排或在跑的任务，每个 `task_key` 一项 `{task_key, run_id, status}`，按 `task_key` 排。
+def q_result_updates(contract, _args):
+    """每个页面常驻的轻量轮询：结果版本、入库通知与在排或在跑的任务，不组装任务列表。
+
+    全局组件只用这几样，却曾每两秒取一次完整的 `/api/tasks`；任务一多，那份组装就把服务进程
+    占满，所有页面一起变慢。完整列表只留给任务中心页。
+
+    `running_tasks` 是全站「有什么任务在跑」的唯一来源：页面据此决定要不要开始盯自己那份
+    任务进度，闲着时不各自轮询。
+    """
+    try:
+        running, library_revision = _task_updates(contract)
+    except sqlite3.OperationalError:
+        running, library_revision = [], None
+    busy = bool(running)
+    versions = _throttled_versions(contract, busy)
+    if library_revision is not None:
+        versions = {**versions, 'library_processing': library_revision}
+    return {"ok": True, "result_versions": versions,
+            "ingest_notices": NOTICES.snapshot(), "busy": busy, "running_tasks": running}
+
+
+def _task_updates(contract) -> tuple[list[dict], str]:
+    """返回在排在跑的任务和最近结束的扫描任务编号。
 
     有一轮在跑时 `status` 是 `running`，`run_id` 是在跑的最新一轮；只在排队时是 `pending`
     与最新排进来的那一轮。一轮派出上千条后继也只多几项，一条分组查询取齐。
@@ -44,12 +66,16 @@ def running_tasks(contract) -> list[dict]:
         rows = connection.execute(
             f"SELECT task_key, status, MAX(id) FROM task_run WHERE status IN ({marks}) "
             "GROUP BY task_key, status").fetchall()
+        terminal = ",".join("?" for _ in TERMINAL_STATUSES)
+        latest = connection.execute(
+            f"SELECT id FROM task_run WHERE task_key='library-processing' AND status IN ({terminal}) "
+            "ORDER BY id DESC LIMIT 1", TERMINAL_STATUSES).fetchone()
     tasks: dict[str, dict] = {}
     for task_key, status, run_id in rows:
         known = tasks.get(task_key)
         if known is None or (status == "running" and known["status"] != "running"):
             tasks[task_key] = {"task_key": task_key, "run_id": int(run_id), "status": status}
-    return [tasks[key] for key in sorted(tasks)]
+    return [tasks[key] for key in sorted(tasks)], str(latest[0]) if latest else '0'
 
 
 #: 有任务在跑时，结果版本最多隔这么久变一次（`_throttled_versions`）。
@@ -77,17 +103,6 @@ def _throttled_versions(contract, busy: bool) -> dict:
     return current
 
 
-def q_result_updates(contract, _args):
-    """常驻刷新读取版本、通知与活动任务摘要，完整列表留给任务中心。"""
-    try:
-        running = running_tasks(contract)
-    except sqlite3.OperationalError:
-        running = []
-    busy = bool(running)
-    return {"ok": True, "result_versions": _throttled_versions(contract, busy),
-            "ingest_notices": NOTICES.snapshot(), "busy": busy, "running_tasks": running}
-
-
 def q_tasks(contract, args):
     try:
         return _tasks(contract, args)
@@ -112,12 +127,7 @@ def _tasks(contract, args):
         rows = contract.task_runs.query(status=status, task_key=task_key, limit=limit)
         return {"ok": True, "filtered": True, "available": True,
                 "runs": [payload(row) for row in rows]}
-    page = int((args or {}).get('page') or 1)
-    if page < 1 or (before is not None and page != 1):
-        raise UserValueError('api.tasks.invalidPage')
-    total = contract.task_runs.finished_count()
-    page = min(page, max(1, (total + limit - 1) // limit))
-    finished, has_more = contract.task_runs.finished_page(before=before, limit=limit, offset=(page - 1) * limit)
+    page, total, finished, has_more = _recent_page(contract, args, limit, before)
     if before is not None:
         return {"ok": True, "filtered": False, "available": True,
                 "finished": [payload(row) for row in finished],
@@ -151,6 +161,22 @@ def _tasks(contract, args):
         "followup_counts": _parent_counts(contract, (*running, *finished, *working)),
         "statuses": {"active": list(ACTIVE_STATUSES), "finished": list(TERMINAL_STATUSES)},
     }
+
+
+def _recent_page(contract, args, limit: int, before):
+    """「最近完成」这一段的当前页：页号、总数、这一页的行与后面还有没有。
+
+    页号越界收回末页。查找词只收窄这一段：在排在跑的就那几条，一眼看得完，照常全给。
+    """
+    page = int((args or {}).get('page') or 1)
+    if page < 1 or (before is not None and page != 1):
+        raise UserValueError('api.tasks.invalidPage')
+    search = str((args or {}).get('q') or '').strip()
+    total = contract.task_runs.finished_count(search)
+    page = min(page, max(1, (total + limit - 1) // limit))
+    finished, has_more = contract.task_runs.finished_page(
+        before=before, limit=limit, offset=(page - 1) * limit, q=search)
+    return page, total, finished, has_more
 
 
 def _active(contract, limit: int) -> list:
