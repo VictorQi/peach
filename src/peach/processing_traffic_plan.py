@@ -10,6 +10,7 @@ from contextlib import closing
 
 from .catalog_rules import is_local_extra
 from .catalog_vocabulary import PERFORMER_TAG_PREFIX
+from . import western_artwork
 
 MIB = 1024 ** 2
 
@@ -52,10 +53,11 @@ def typical_size(directory, pattern, fallback):
 
 
 class TrafficPlan:
-    def __init__(self, config, stage, media_key, *, allow_metered=False):
+    def __init__(self, config, stage, media_key, *, code_patterns, allow_metered=False):
         from .library_processing import _MissCache, _RemoteSession, misses_path
         from .library_processing import MAX_SOURCE_BYTES
         self.config, self.stage, self.media_key = config, stage, media_key
+        self.code_patterns = code_patterns
         #: 本趟采集预算里的下载字节上限；`ProcessingTraffic` 按账本设置换掉默认档。
         self.budget_bytes = MAX_SOURCE_BYTES
         self.allow_metered = allow_metered
@@ -119,8 +121,7 @@ class TrafficPlan:
         self.extend(rows)
 
     def extend(self, rows):
-        from .library_processing import _provider_code, _scrapes_as_jav, _missing_fields, preview_readable
-        from .catalog_rules import release_code_from_filename
+        from .library_processing import _filename_code, _provider_code, _scrapes_as_jav, _missing_fields, preview_readable
         changed = set()
         for row in rows:
             self.assets.append(row)
@@ -129,7 +130,7 @@ class TrafficPlan:
             key = self.media_key(row['path'], row['location'])
             if key is None:
                 continue
-            code = _provider_code(row.get('code')) or release_code_from_filename(row.get('name') or '')
+            code = _provider_code(row.get('code')) or _filename_code(row, self.code_patterns)
             eligible = bool(code and _scrapes_as_jav(row, code))
             counts = self.counts.setdefault(key, dict(video_files=0, jav_files=0, titles=set()))
             counts['video_files'] += 1
@@ -147,6 +148,9 @@ class TrafficPlan:
                     if self.stage != 'covers':
                         title['missing'].update(_missing_fields(row))
                     changed.add(code)
+                elif western_artwork.scene_identity(row) is not None:
+                    self._add('local:' + path, key, self.nfo_bytes)
+                    self._western_downloads(row, _missing_fields(row))
             self._media(row, key)
         for code in changed:
             token = 'metadata:' + code
@@ -174,12 +178,13 @@ class TrafficPlan:
             self._add('media:' + path, key, min(size, 9 * self.history.average(key + ':frame', 8 * MIB)))
 
     def _downloads(self, code, title):
-        from .library_processing import _studio_evidence
+        from .library_processing import _dated_studio, _studio_evidence
         from .metadata_routes import stage_name
-        chain = self.remote._chain(code, *_studio_evidence(title['row']))
+        evidence = _studio_evidence(title['row'])
+        chain = self.remote._chain(code, *evidence)
         askable = self.remote._askable(chain, code)
         names = [source for source in askable if f'{code}-{source}.json'.casefold() in self.evidence_names]
-        cached = {source for source, _, _ in self.remote._cached_evidence(names, code)}
+        cached = {source for source, _, _ in self.remote._cached_evidence(names, code, studio=_dated_studio(evidence))}
         pending = [source for source in askable if source not in cached]
         token = 'metadata:' + code
         wants_cover = (not self._ready(code) and chain
@@ -216,17 +221,45 @@ class TrafficPlan:
                 self.baselines.pop(token, None)
         titles = {}
         for row, code, verify, local_fields, *_ in prepared:
-            if code and _scrapes_as_jav(row, code):
+            if western_artwork.scene_identity(row) is not None:
+                self._western_downloads(row, COLLECTED_FIELDS if verify else _missing_fields(row, local_fields))
+            elif code and _scrapes_as_jav(row, code):
                 title = titles.setdefault(code, dict(row=row, missing=set()))
                 if self.stage != 'covers':
                     title['missing'].update(COLLECTED_FIELDS if verify else _missing_fields(row, local_fields))
         for code, title in titles.items():
             self._downloads(code, title)
 
-    def finish(self, stage, code=None):
+    def _western_downloads(self, row, missing):
+        from .library_processing import _processing_libraries
+        route = self.remote.western_sources(row)
+        if route is None:
+            return
+        identity, sources = route
+        stages = _processing_libraries(self.config, self.stage)(row['path'])
+        metadata = self.stage != 'covers' and 'metadata' in stages and bool(missing)
+        cover = 'cover' in stages
+        requests = [(source, metadata) for source in sources if metadata or cover]
+        if row.get('id') is not None:
+            plan = self.remote._western_plan(row, missing if metadata else [], self.cover_root, (), cover)
+            if plan is None:
+                return
+            identity, requests, cover = plan
+        token = 'metadata:western:' + str(row.get('id') or row['path'])
+        for source, _metadata in requests:
+            if not self.remote._western_asks(identity.cache_key, source, cover):
+                continue
+            network = self._network(source)
+            cached = self.remote._cached_evidence((source,), identity.cache_key)
+            if not cached:
+                self._add(token, network, 3 * 250 * 1024)
+            if cover and (not cached or cached[0][1].get('image_url')):
+                self._add(token, network, self.cover_bytes)
+
+    def finish(self, stage, code=None, *, western_asset_id=None):
         from .library_processing import _provider_code
         if stage == 'metadata':
-            release = _provider_code(code)
+            release = f'western:{western_asset_id}' if western_asset_id is not None else _provider_code(code)
             if not release:
                 return
             tokens = ['metadata:' + release]

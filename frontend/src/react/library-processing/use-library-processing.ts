@@ -52,5 +52,5 @@ export function useLibraryProcessingJob(
     if (witnessed) announceCompletion(state, toast, witnessed);
   }, [state, mode, toast]);
 
-  return { job, settled, forget: () => setSettled(null) };
+  return { job, settled: settled?.job_id === state?.job_id ? settled : null, forget: () => setSettled(null) };
 }

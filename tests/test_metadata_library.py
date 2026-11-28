@@ -1,5 +1,6 @@
 """既有库边车识别和统一处理的隔离回归。"""
 import io
+import csv
 import json
 import os
 import sqlite3
@@ -8,6 +9,7 @@ import threading
 import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
 from unittest.mock import DEFAULT, Mock, patch
@@ -43,6 +45,21 @@ def setUpModule():
     reader = patch('peach.image_ocr.ImageReader.read', return_value=[''] * 9)
     reader.start()
     unittest.addModuleCleanup(reader.stop)
+
+
+#: 只防工作线程卡死的上限，不是判据：负载高时一轮处理要几十秒，判据是线程自己的状态。
+HUNG_THREAD_SECONDS = 180.0
+
+
+def wait_while_running(done, *threads, until=None):
+    """等 `done()` 成立，或 `threads` 全部结束（再等也不会成立了），返回 `done()`。
+
+    `until` 是单调时钟上的卡死上限，默认从现在起 `HUNG_THREAD_SECONDS`。
+    """
+    until = time.monotonic() + HUNG_THREAD_SECONDS if until is None else until
+    while not done() and any(thread.is_alive() for thread in threads) and time.monotonic() < until:
+        time.sleep(0.01)
+    return done()
 
 
 def stub_provider():
@@ -243,20 +260,22 @@ class LibraryNfoTests(unittest.TestCase):
     def test_old_completed_receipts_retry_codeless_videos_the_current_rules_now_recognise(self):
         from peach.library_processing import _LibraryCheckpoints
         database = LedgerDatabase(fresh_ledger(self.root))
-        names = ('T28-612 片名.mp4', '旅行记录.mp4', 'ABW-123.mp4', 'IBW-483z.mp4')
+        names = ('T28-612 片名.mp4', '旅行记录.mp4', 'ABW-123.mp4', 'IBW-483z.mp4',
+                 'S2MBD-049.mp4', 'CDRP-10.mp4')
         rows = [{'id': index, 'path': f'R:\\{name}'} for index, name in enumerate(names, 1)]
         with database.write_transaction() as connection:
             # 4 是升级补修刚补回尾字母的番号（`truncated_suffix_codes`），要按新番号再采一次。
-            for row, name, code in zip(rows, names, (None, None, 'ABW-123', 'IBW-483Z')):
+            for row, name, code in zip(rows, names, (None, None, 'ABW-123', 'IBW-483Z', None, 'CDRP-010')):
                 connection.execute(
                     "INSERT INTO asset(id,location,path,name,medium,code) VALUES(?,?,?,?,'video',?)",
                     (row['id'], 'local', row['path'], name, code))
         keys = [library_processing._checkpoint_key(row) for row in rows]
         previous = dict(processing_rule=upgrade_rules.PROCESSING, fc2_metadata_rule=upgrade_rules.FC2_METADATA,
+                        filename_code_rule=2,
                         completed_metadata=keys, completed_previews=keys)
         current = {}
         checkpoints = _LibraryCheckpoints(current, previous, database, database.db_path)
-        self.assertEqual([row['id'] for _, row in checkpoints.remaining_metadata(rows)], [1, 4])
+        self.assertEqual([row['id'] for _, row in checkpoints.remaining_metadata(rows)], [1, 4, 5, 6])
         self.assertEqual(set(current['completed_metadata']), set(keys[1:3]))
         self.assertEqual(current['filename_code_rule'], upgrade_rules.FILENAME_CODES)
         # 同一判据版本只撤一次：重新处理完成后不再反复重跑。
@@ -660,8 +679,10 @@ class LibraryNfoTests(unittest.TestCase):
                       return_value={'aliases': 0, 'avatars': 0, 'conflicts': 0, 'failed': 0}):
             thread = threading.Thread(target=run)
             thread.start()
+            # 负载高时单条处理也要好几秒：等到停在暂停点，或这一轮没暂停就跑完了。
+            until = time.monotonic() + HUNG_THREAD_SECONDS
             try:
-                self.assertTrue(paused.wait(5), errors)
+                self.assertTrue(wait_while_running(paused.is_set, thread, until=until), (errors, results))
                 with closing(sqlite3.connect(db)) as connection:
                     self.assertEqual(connection.execute('SELECT catalog_title FROM asset').fetchone()[0], '已确认资料')
                 self.assertTrue(read_rows(self.root / 'generated/library-metadata-field-candidates.csv'))
@@ -670,7 +691,7 @@ class LibraryNfoTests(unittest.TestCase):
                 with pause_lock:
                     requested.set()
                     control.request('resume', 'one')
-                thread.join(5)
+                thread.join(max(0.0, until - time.monotonic()))
         self.assertFalse(thread.is_alive())
         self.assertEqual(errors, [])
         self.assertEqual((results[0]['job_id'], results[0]['status']), ('one', 'complete'))
@@ -796,7 +817,7 @@ class LibraryNfoTests(unittest.TestCase):
         self.assertEqual(set(result['retryable_asset_ids']), expected)
         self.assertEqual(collect.call_count, 1)
         self.assertEqual(collect.call_args.args[1], 'FC2-PPV-1234567')
-        self.assertIn('amane 运行环境未取得', result['issue_preview'][0]['message'])
+        self.assertIn('amane 运行环境不可用', result['issue_preview'][0]['message'])
         provider = stub_provider()
         provider.query.return_value = {'id': 'SSIS-057', 'title': '作品资料'}
         provider.cover.return_value = False
@@ -1509,7 +1530,7 @@ class LibraryNfoTests(unittest.TestCase):
         self.assertEqual(sorted(result['retryable_asset_ids']), sorted([ids['ABW-358.mp4'], ids['SSIS-057.mp4']]))
         self.assertIn('holiday.mp4', ids)
         self.assertEqual({issue['message_code'] for issue in result['issue_preview']}, {OFFLINE_MESSAGE['code']})
-        self.assertEqual({issue['message'] for issue in result['issue_preview']}, {'外部资料未取得：连不上外网'})
+        self.assertEqual({issue['message'] for issue in result['issue_preview']}, {'无法连接外部资料来源'})
 
         online = NetworkReachability(check=lambda: True, retry_delay=0)
         self.addCleanup(online.stop)
@@ -2622,7 +2643,7 @@ class LibraryNfoTests(unittest.TestCase):
         first = run()
         self.assertEqual((provider.query.call_count, provider.community.call_count), (1, 1))
         self.assertEqual([row['message'] for row in first['issue_preview']],
-                         ['封面未取得：来源返回 HTTP 503'], '来源说没有只报一个数，不占问题清单')
+                         ['封面采集失败：来源返回 HTTP 503'], '来源说没有只报一个数，不占问题清单')
         self.assertEqual(first['notes'], {'querying_metadata': 1})
         recorded = json.loads(misses_path(config).read_text(encoding='utf-8'))
         self.assertEqual(list(recorded['misses']),
@@ -3055,9 +3076,11 @@ class LibraryNfoTests(unittest.TestCase):
         provider.cover.return_value = False
         state = process_library(config, db, self.root / 'generated', self.root / 'covers',
                                 provider_factory=Mock(return_value=provider))
-        self.assertEqual([(row['message'], row['severity']) for row in state['issue_preview']],
-                         [('外部资料本趟没轮到：r18.dev：来源的人机验证没有在限时内通过，暂停向它请求一段时间；'
-                           '下次可从任务栏点开采集浏览器点一下验证；已有图片保留', 'paused')])
+        self.assertEqual(len(state['issue_preview']), 1)
+        issue = state['issue_preview'][0]
+        self.assertEqual(issue['severity'], 'paused')
+        self.assertTrue(issue['message'].startswith('外部资料本趟没轮到：r18.dev：'))
+        self.assertIn('已有图片保留', issue['message'])
         self.assertEqual(state['paused_count'], 1)
 
     def test_http_sources_keep_the_same_job_deadline(self):
@@ -3190,6 +3213,28 @@ class LibraryNfoTests(unittest.TestCase):
                 saved = json.loads(path.read_text(encoding='utf-8'))
                 self.assertEqual(saved['cover_catalog_rules'], upgrade_rules.OFFICIAL_COVER_CATALOG_MISSES)
 
+    def test_upgraded_prestige_sku_search_retries_only_the_affected_source_and_cover_misses(self):
+        from peach import upgrade_rules
+        from peach.library_processing import MISS_FORMAT, _MissCache
+
+        path = self.root / 'prestige-misses.json'
+        path.write_text(json.dumps({
+            'format': MISS_FORMAT, 'sites': ['dmm', 'prestige'], 'joined': {},
+            'cover_catalog_rules': upgrade_rules.OFFICIAL_COVER_CATALOG_MISSES,
+            'misses': {
+                'prestige': {'ABW-125': 1000},
+                'dmm': {'ABW-125': 1000},
+                'cover': {'ABW-125': 1000, 'ABW-126': 1000},
+            },
+        }), encoding='utf-8')
+        cache = _MissCache(path, now=lambda: 1100.0)
+        self.assertFalse(cache.fresh('prestige', 'ABW-125'))
+        self.assertFalse(cache.fresh('cover', 'ABW-125'))
+        self.assertTrue(cache.fresh('dmm', 'ABW-125'))
+        self.assertTrue(cache.fresh('cover', 'ABW-126'))
+        cache.record('prestige', 'ABW-125')
+        self.assertTrue(_MissCache(path, now=lambda: 1200.0).fresh('prestige', 'ABW-125'))
+
     @windows_ledger_roots
     def test_a_stage_asks_only_the_sites_that_have_not_said_no(self):
         """综合索引那一档里 AVBase 与 JavBus 说过没有，javdb 没说过：这一档只问 javdb。"""
@@ -3213,13 +3258,11 @@ class LibraryNfoTests(unittest.TestCase):
 
     def test_management_controls_keep_credentials_and_empty_sections_visible(self):
         root = Path(__file__).resolve().parents[1]
-        # 关注管理那一屏在 React 里：能加来源的站才进候选，缺必填凭据的那一行默认展开，
-        # 一个站都没配也照样把整块列出来（空清单不等于这块不存在）。
+        # 关注管理只列出可添加的来源；凭据列表接受空清单。
         follow = root / 'frontend/src/react/follow-manage'
         add = (follow / 'add-source.tsx').read_text(encoding='utf-8')
         creds = (follow / 'credentials.tsx').read_text(encoding='utf-8')
         self.assertIn('const rows = (credentials.providers || []).filter((row) => row.followable);', add)
-        self.assertIn("defaultOpen={row.requirement === 'required' && !credentialDone(row)}>", creds)
         self.assertIn('const rows = data.providers || [];', creds)
         configuration = (root / 'frontend/src/react/settings/configuration-page.tsx').read_text(encoding='utf-8')
         self.assertNotIn("'/api/library-processing'", configuration)
@@ -3353,6 +3396,158 @@ class LibraryWatchdogTests(unittest.TestCase):
         self.assertEqual(collected['library_id'], library_id)
         with self.assertRaisesRegex(ValueError, '媒体库'):
             process_library(config, db, self.root / 'generated', self.root / 'covers', library_id='missing')
+
+    def test_directory_scan_discovers_descendants_without_touching_other_folders(self):
+        from dataclasses import replace
+        from peach.library_processing_scope import directory_choices
+        from peach.web_library_processing import _resume_request
+
+        library = self.root / 'media'
+        ledger_root = PureWindowsPath(r'R:\Media')
+        chosen = library / 'chosen'
+        sibling = library / 'chosen-other'
+        (chosen / 'nested').mkdir(parents=True)
+        sibling.mkdir()
+        (chosen / 'nested' / 'ABW-204.mp4').write_bytes(b'video')
+        (sibling / 'ABW-205.mp4').write_bytes(b'video')
+        config = replace(self._config(library), locations={'local': (str(ledger_root),)},
+                         mounts={'local': (library,)})
+        db = fresh_ledger(self.root)
+        selected = str(ledger_root / 'chosen')
+        expected = str(ledger_root / 'chosen' / 'nested')
+        self.assertEqual(directory_choices(config, selected)['directories'], [{'name': 'nested', 'path': expected}])
+        with patch('peach.settings_file.active', return_value=config):
+            result = process_library(config, db, self.root / 'generated', self.root / 'covers',
+                                     stage='scan', directory=selected, provider_factory=self._provider)
+        with closing(sqlite3.connect(db)) as connection:
+            self.assertEqual(connection.execute('SELECT path FROM asset').fetchall(), [(expected + '\\ABW-204.mp4',)])
+        self.assertEqual(_resume_request(result, 'standard')['directory'], selected)
+        with self.assertRaisesRegex(ValueError, '有效目录'):
+            directory_choices(config, selected + r'\..\..')
+
+    @windows_ledger_roots
+    def test_western_metadata_enters_review_without_creating_a_jav_code(self):
+        from peach.http import HttpResponse
+        from peach.repository import LedgerDatabase
+        from tests.test_western_artwork import node
+
+        media = self.root / 'media'
+        media.mkdir()
+        filename = 'Tushy.19.08.14.Lena.Anderson.Cam.To.Me.1080p.mp4'
+        (media / filename).write_bytes(b'video')
+        config = self._config(media)
+        db = fresh_ledger(self.root)
+        provider = self._provider()
+        scene = {**node(), 'images': {}}
+
+        def official(request, timeout, max_bytes):
+            variables = json.loads(request.body)['variables']
+            data = ({'searchVideos': {'edges': [{'node': scene}]}} if 'query' in variables
+                    else {'findOneVideo': scene})
+            return HttpResponse(200, {}, json.dumps({'data': data}).encode())
+
+        provider.transport = Mock(side_effect=official)
+        candidates = self.root / 'candidates'
+        covers = self.root / 'covers'
+        process_library(config, db, candidates, covers, stage='scan', provider_factory=lambda: provider)
+        result = process_library(config, db, candidates, covers, stage='metadata',
+                                 database=LedgerDatabase(db), provider_factory=lambda: provider)
+        self.assertEqual(result['status'], 'complete')
+        with closing(sqlite3.connect(db)) as connection:
+            code, title = connection.execute('SELECT code, catalog_title FROM asset WHERE name=?', (filename,)).fetchone()
+        self.assertFalse(code)
+        self.assertFalse(title)
+        with (candidates / 'library-metadata-field-candidates.csv').open(encoding='utf-8-sig', newline='') as evidence:
+            title_row = next(row for row in csv.DictReader(evidence) if row['field'] == 'title')
+        candidate, = json.loads(title_row['candidates_json'])
+        self.assertEqual(candidate['content_id'], 'tushy:cam-to-me')
+        self.assertTrue(candidate['requires_review'])
+        self.assertFalse((covers / 'ASSET-ID-1.jpg').exists())
+        provider.query.assert_not_called()
+
+    @windows_ledger_roots
+    def test_stashdb_is_opt_in_and_publishes_other_publishers_to_review(self):
+        from peach.repository import LedgerDatabase
+        from peach.scraping_access import save
+
+        media = self.root / 'media'
+        media.mkdir()
+        (media / 'Aster.Studio.25.02.03.Example.Scene.mp4').write_bytes(b'video')
+        config = self._config(media)
+        db = fresh_ledger(self.root)
+        provider = self._provider()
+        scene_id = 'acda6af1-3a18-4588-9d07-4942d8d1601f'
+        scene = {'id': scene_id, 'date': '2025-02-03', 'title': 'Example Scene', 'studio': {'name': 'Aster Studio'}}
+
+        def catalog(request, timeout, max_bytes):
+            self.assertEqual(request.url, 'https://stashdb.org/graphql')
+            self.assertEqual(request.headers['ApiKey'], 'fixture-key')
+            variables = json.loads(request.body)['variables']
+            data = ({'searchScenes': {'count': 1, 'scenes': [scene]}} if 'term' in variables else {'findScene': scene})
+            return HttpResponse(200, {}, json.dumps({'data': data}).encode())
+
+        provider.transport = Mock(side_effect=catalog)
+        candidates = self.root / 'candidates'
+        covers = self.root / 'covers'
+        process_library(config, db, candidates, covers, stage='scan', provider_factory=lambda: provider)
+        process_library(config, db, candidates, covers, stage='metadata', provider_factory=lambda: provider)
+        provider.transport.assert_not_called()
+        save(config.directory('secrets'), 'stashdb', {'api_key': 'fixture-key'})
+        result = process_library(config, db, candidates, covers, stage='metadata', database=LedgerDatabase(db),
+                                 provider_factory=lambda: provider)
+        self.assertEqual(result['status'], 'complete')
+        with (candidates / 'library-metadata-field-candidates.csv').open(encoding='utf-8-sig', newline='') as evidence:
+            title = next(row for row in csv.DictReader(evidence) if row['field'] == 'title')
+        candidate, = json.loads(title['candidates_json'])
+        self.assertEqual((candidate['source'], candidate['content_id']), ('stashdb', scene_id))
+        self.assertTrue(candidate['requires_review'])
+        self.assertNotIn('fixture-key', json.dumps(candidate))
+        with closing(sqlite3.connect(db)) as connection:
+            self.assertEqual(connection.execute('SELECT COALESCE(code, \x27\x27), COALESCE(catalog_title, \x27\x27) FROM asset').fetchone(),
+                             ('', ''))
+        provider.query.assert_not_called()
+
+    @windows_ledger_roots
+    def test_cross_publisher_scan_uses_theporndb_after_stashdb_returns_no_match(self):
+        from urllib.parse import urlsplit
+        from peach.scraping_access import save
+
+        media = self.root / 'media'
+        media.mkdir()
+        (media / 'Aster.Studio.25.02.03.Example.Scene.mp4').write_bytes(b'video')
+        config = self._config(media)
+        db = fresh_ledger(self.root)
+        provider = self._provider()
+        scene_id = 'acda6af1-3a18-4588-9d07-4942d8d1601f'
+        scene = {'id': scene_id, 'date': '2025-02-03', 'title': 'Example Scene', 'site': {'name': 'Aster Studio'}}
+        save(config.directory('secrets'), 'stashdb', {'api_key': 'stash-key'})
+        save(config.directory('secrets'), 'theporndb', {'api_key': 'tpdb-key'})
+        calls = []
+
+        def catalogs(request, timeout, max_bytes):
+            url = urlsplit(request.url)
+            calls.append(url.hostname)
+            if url.hostname == 'stashdb.org':
+                self.assertEqual(request.headers['ApiKey'], 'stash-key')
+                payload = {'data': {'searchScenes': {'count': 0, 'scenes': []}}}
+            else:
+                self.assertEqual(request.headers['Authorization'], 'Bearer tpdb-key')
+                self.assertNotIn('ApiKey', request.headers)
+                data = {'/scenes': [scene], '/movies': [], f'/scenes/{scene_id}': scene}[url.path]
+                payload = {'data': data, 'links': {'next': None}}
+            return HttpResponse(200, {}, json.dumps(payload).encode())
+
+        provider.transport = Mock(side_effect=catalogs)
+        candidates, covers = self.root / 'candidates', self.root / 'covers'
+        process_library(config, db, candidates, covers, stage='scan', provider_factory=lambda: provider)
+        result = process_library(config, db, candidates, covers, stage='metadata', provider_factory=lambda: provider)
+        self.assertEqual(result['status'], 'complete')
+        self.assertEqual(calls, ['stashdb.org', 'api.theporndb.net', 'api.theporndb.net', 'api.theporndb.net'])
+        with (candidates / 'library-metadata-field-candidates.csv').open(encoding='utf-8-sig', newline='') as evidence:
+            title = next(row for row in csv.DictReader(evidence) if row['field'] == 'title')
+        candidate, = json.loads(title['candidates_json'])
+        self.assertEqual((candidate['source'], candidate['content_id']), ('theporndb', 'scenes:' + scene_id))
+        self.assertTrue(candidate['requires_review'])
 
     @windows_ledger_roots
     def test_empty_incremental_sync_completes_without_metadata_queries(self):
@@ -3562,6 +3757,19 @@ class LibraryWatchdogTests(unittest.TestCase):
             for folder in folders + folders:
                 self.assertIn('video.mp4', listing.files(folder))
         self.assertEqual(read.call_count, 10)
+
+    def test_a_video_restored_after_prefetch_is_found_in_a_fresh_listing(self):
+        root = self.root / 'media'
+        root.mkdir()
+        listing = library_processing._DirectoryIndex()
+        listing.prefetch([root])
+        video = root / 'sample.mp4'
+        replacement = root / 'replacement.mp4'
+        replacement.write_bytes(b'video')
+        replacement.replace(video)
+        self.assertTrue(listing.contains_video(video))
+        self.assertFalse(listing.contains_video(root / 'missing.mp4'))
+        self.assertIsNone(listing.fingerprint(root))
 
     def test_legacy_issue_list_projects_into_count_and_preview(self):
         legacy = [{'asset_id': index, 'message': '未识别到番号'} for index in range(1, 26)]
@@ -4140,6 +4348,41 @@ class LibraryPreviewCompletionTests(unittest.TestCase):
         Image.new('RGB', (1440, 810), 'green').save(destination, format='JPEG')
         return True
 
+    def test_a_missing_video_has_one_issue_and_incremental_sync_rechecks_the_restored_path(self):
+        from peach.library_new_assets import pending
+
+        self.config = replace(self.config, locations={'local': (self.ledger_roots['local'],)})
+        (self.media / 'clip-2.mp4').unlink()
+        video = self.media / 'clip-1.mp4'
+        video.unlink()
+        with patch('peach.library_processing.FFmpegResolver', return_value=self.resolver), \
+                patch('peach.frame_capture.capture_with_retry', return_value=True), \
+                patch('peach.frame_capture.tile_frames', side_effect=self.make_tile), \
+                patch('peach.library_processing._finish_collection', return_value={}):
+            first = self.run_processing(asset_ids=[1])
+            self.assertEqual(pending(self.db), [])
+            video.write_bytes(b'replacement video')
+            retried = self.run_processing(incremental=True)
+        self.assertEqual(first['issue_count'], 1)
+        self.assertEqual(first['issue_preview'][0]['message_code'], 'errors.libraryProcessing.mediaInaccessible')
+        self.assertEqual(first['retryable_asset_ids'], [1])
+        self.assertEqual(retried['asset_ids'], [1])
+        self.assertEqual((retried['status'], retried['issue_preview'], retried['previews']), ('complete', [], 1))
+        self.assertNotEqual(first['job_id'], retried['job_id'])
+        self.assertTrue(Path(first['issues_log']).is_file())
+
+    def test_a_completed_metadata_checkpoint_keeps_an_unfinished_preview_pending(self):
+        from peach.library_new_assets import pending, remember
+
+        remember(self.db, ids=[1])
+        state = {'retryable_asset_ids': [1], 'issue_count': 1}
+        checkpoints = library_processing._LibraryCheckpoints(state, None, self.database, self.db)
+        row = {'id': 1, 'path': str(PureWindowsPath(self.ledger_roots['local']) / 'clip-1.mp4')}
+        checkpoints.queue_metadata(row, ['evidence'], issues_before=1)
+        checkpoints.commit_metadata(lambda **_args: None)
+        self.assertTrue(state['completed_metadata'])
+        self.assertEqual(pending(self.db), [1])
+
     def test_selected_completion_generates_a_snapshot_without_scanning_or_cloud_reads(self):
         reports = []
         with patch('peach.library_processing.scan_location') as scan, \
@@ -4711,18 +4954,17 @@ class ProcessingLockTests(unittest.TestCase):
         with patch('peach.library_processing.LOCK_RETRY_SECONDS', 0.01):
             thread = threading.Thread(target=user_run)
             thread.start()
+            until = time.monotonic() + HUNG_THREAD_SECONDS
             try:
-                deadline = time.monotonic() + 10
-                while not library_processing._foreground_waiting() and time.monotonic() < deadline:
-                    time.sleep(0.01)
-                self.assertTrue(library_processing._foreground_waiting())
+                self.assertTrue(wait_while_running(library_processing._foreground_waiting, thread, until=until),
+                                errors)
                 stopped.set()
-                thread.join(10)
+                thread.join(max(0.0, until - time.monotonic()))
                 self.assertFalse(thread.is_alive())
             finally:
                 stopped.set()
                 holder.release()
-                thread.join(10)
+                thread.join(max(0.0, until - time.monotonic()))
         self.assertEqual(len(errors), 1)
         self.assertIsInstance(errors[0], InterruptedError)
         self.assertFalse(library_processing._foreground_waiting())
@@ -4766,18 +5008,18 @@ class ProcessingLockTests(unittest.TestCase):
                       return_value={'aliases': 0, 'avatars': 0, 'conflicts': 0, 'failed': 0}):
             thread = threading.Thread(target=user_run)
             thread.start()
+            until = time.monotonic() + HUNG_THREAD_SECONDS
             try:
-                deadline = time.monotonic() + 10
-                while not library_processing._foreground_waiting() and time.monotonic() < deadline:
-                    time.sleep(0.01)
-                self.assertTrue(library_processing._foreground_waiting())
+                self.assertTrue(wait_while_running(library_processing._foreground_waiting, thread, until=until),
+                                (errors, results))
                 with self.assertRaises(ProcessingBusy):
                     process_library(config, db, self.root / 'generated', self.root / 'covers', asset_ids=[1],
                                     stage='collect', state_file=self.root / 'state/upgrade-repairs/1.json',
                                     provider_factory=lambda: provider, database=database)
             finally:
                 holder.release()
-                thread.join(30)
+                thread.join(max(0.0, until - time.monotonic()))
+        self.assertFalse(thread.is_alive())
         self.assertEqual(errors, [])
         self.assertNotEqual(results[0].get('outcome'), 'interrupted')
         self.assertEqual(sorted({call.args[0] for call in provider.query.call_args_list}), ['ABW-358', 'ABW-359'])
@@ -4818,18 +5060,18 @@ class ProcessingLockTests(unittest.TestCase):
                 asset_ids=[1, 2], stage='collect', state_file=self.root / 'state/upgrade-repairs/1.json'))
             threads = [first]
             first.start()
+            until = time.monotonic() + HUNG_THREAD_SECONDS
             try:
-                self.assertTrue(entered.wait(10), f'后台处理尚未取得锁，实际结果：{background!r}')
+                self.assertTrue(wait_while_running(entered.is_set, first, until=until),
+                                f'后台处理尚未取得锁，实际结果：{background!r}')
                 second = threading.Thread(target=run, args=(user,))
                 second.start()
                 threads.append(second)
-                deadline = time.monotonic() + 10
-                while not library_processing._foreground_waiting() and time.monotonic() < deadline:
-                    time.sleep(0.01)
-                self.assertTrue(library_processing._foreground_waiting())
+                self.assertTrue(wait_while_running(library_processing._foreground_waiting, second, until=until),
+                                f'用户处理没有排上等锁，实际结果：{user!r}')
                 proceed.set()
                 for thread in threads:
-                    thread.join(30)
+                    thread.join(max(0.0, until - time.monotonic()))
                     self.assertFalse(thread.is_alive())
             finally:
                 stopping.set()

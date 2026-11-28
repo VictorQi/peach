@@ -8,33 +8,52 @@ describe('来源链接与凭据布局', () => {
   before(async () => { browser = await launch(); });
   after(async () => { await browser?.close(); });
   for (const viewport of VIEWPORTS) {
-    it(`目录跳转保留表单内容，窄屏滚轮可横向浏览来源（${viewport.name}）`, { timeout: 60_000 }, async () => {
+    it(`目录只列分类，站点深链展开表单且保留草稿（${viewport.name}）`, { timeout: 60_000 }, async () => {
       const opened = await visit(browser, '/sources', viewport);
       const { page } = opened;
       try {
         const nav = page.getByRole('navigation', { name: '本页目录', exact: true });
         await nav.waitFor();
         await settle(page);
-        const anchors = await nav.locator('a').evaluateAll(links => links.map(link => ({
-          target: Boolean(document.getElementById(link.getAttribute('href')!.slice(1))),
-          icon: Boolean(link.querySelector('img,svg')),
-        })));
-        assert.ok(anchors.every(link => link.target), '目录链接缺少对应正文分区');
-        assert.ok(anchors.slice(0, 3).every(link => !link.icon), '非站点分区显示了站标');
+        const anchors = await nav.locator('a').evaluateAll(links => links.map(link => link.getAttribute('href')));
+        assert.deepEqual(anchors, ['#source-group-western', '#source-group-japanese', '#source-group-fc2',
+          '#source-group-people', '#source-group-resources', '#source-tools']);
+        const headingSizes = await page.evaluate(() => {
+          const size = (selector: string) => parseFloat(getComputedStyle(document.querySelector(selector)!).fontSize);
+          return { western: size('#source-group-western > h3'), tools: size('#source-tools > h3'),
+            check: size('#check-all > p') };
+        });
+        assert.equal(headingSizes.western, headingSizes.tools);
+        assert.ok(headingSizes.tools > headingSizes.check, JSON.stringify(headingSizes));
+        const western = page.getByRole('region', { name: '欧美影视', exact: true });
+        const stash = western.locator('#source-stashdb summary');
+        assert.equal(await stash.getAttribute('aria-expanded'), 'false');
+        await stash.scrollIntoViewIfNeeded();
+        await page.waitForFunction(() =>
+          Boolean(document.querySelector<HTMLImageElement>('#source-stashdb summary img')?.naturalWidth));
         const code = page.getByRole('textbox', { name: '馆藏番号', exact: true });
         await code.fill('DEMO-001');
-        await nav.locator('a[href="#source-javdb"]').focus();
+        await nav.locator('a[href="#source-group-japanese"]').focus();
         await page.keyboard.press('Enter');
         await page.waitForFunction(() => {
-          const target = document.getElementById('source-javdb')!;
+          const target = document.getElementById('source-group-japanese')!;
           const offset = parseFloat(getComputedStyle(target).scrollMarginTop)
             + parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop);
           return Math.abs(target.getBoundingClientRect().top - offset) <= 2
-            && document.querySelector('[data-section-toc] [aria-current]')?.getAttribute('href') === '#source-javdb';
+            && document.querySelector('[data-section-toc] [aria-current]')?.getAttribute('href') === '#source-group-japanese';
         });
         assert.equal(await code.inputValue(), 'DEMO-001');
-        assert.ok(await page.locator('#source-dmm').isVisible(), '跳转后其余来源正文被隐藏');
+        await page.evaluate(() => { location.hash = '#source-javdb' });
+        await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#source-javdb details')?.open);
+        assert.equal(await page.locator('#source-javdb summary').getAttribute('aria-expanded'), 'true');
+        assert.ok(await page.locator('#source-dmm summary').isVisible(), '跳转后其余来源入口被隐藏');
+        assert.equal(await page.locator('#source-dmm summary').getAttribute('aria-expanded'), 'false');
         if (viewport.mobile) {
+          await page.waitForFunction(() => {
+            const summary = document.querySelector('#source-javdb summary')!;
+            const toc = document.querySelector('[data-section-toc]')!;
+            return summary.getBoundingClientRect().top >= toc.getBoundingClientRect().bottom;
+          });
           await nav.evaluate(node => { node.scrollLeft = 0 });
           const before = await page.evaluate(() => scrollY);
           await nav.hover();
@@ -47,6 +66,24 @@ describe('来源链接与凭据布局', () => {
           await page.mouse.wheel(0, -5000);
           await page.waitForFunction(() => document.querySelector('[data-section-toc]')!.scrollLeft <= 2);
           assert.equal(await page.evaluate(() => scrollY), before, '反向目录滚轮带动了正文');
+        }
+        await page.evaluate(() => { location.hash = '#source-sukebei' });
+        await page.locator('#source-sukebei details[open]').waitFor();
+        await page.locator('#source-manko summary').click();
+        await page.locator('#source-manko details[open]').waitFor();
+        const cards = await page.evaluate(() => {
+          const first = document.querySelector('#source-manko > div')!;
+          const second = document.querySelector('#source-sukebei > div')!;
+          const bottom = (node: Element) => getComputedStyle(node).borderBottomLeftRadius;
+          const corners = [first, second].map(card => ({
+            card: bottom(card), footer: bottom(card.querySelector('form > div:last-child')!),
+          }));
+          return { gap: second.getBoundingClientRect().top - first.getBoundingClientRect().bottom, corners };
+        });
+        assert.ok(cards.gap > 0);
+        for (const { card, footer } of cards.corners) {
+          assert.ok(parseFloat(card) > 0);
+          assert.equal(footer, card);
         }
         const dimensions = await layout(page);
         assert.ok(dimensions.scrollWidth <= dimensions.viewportWidth + 1, JSON.stringify(dimensions));

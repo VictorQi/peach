@@ -22,6 +22,9 @@ from .os_errors import CodedOSError, CodedTimeoutError
 #: 单项读取的期限。目录枚举按「多久没有新条目」计：挂死的挂载一条也不返回，到期判失败；
 #: 网络盘上的大目录逐条返回得慢，只要还在返回就不按总时长判死。
 TIMEOUT_SECONDS = 20.0
+#: `MountWorker` 子进程从启动到报「就绪」的上限。解释器启动和导入不碰挂载，不占单项读取的期限；
+#: 这一项只防子进程根本起不来。
+STARTUP_SECONDS = 60.0
 OPERATIONS = ('directory', 'files', 'nfo', 'art', 'online', 'resolve', 'stat', 'browse', 'volume', 'serve', 'present', 'directories', 'rmdirs')
 
 
@@ -656,12 +659,13 @@ def _identity_unused(name):
     return name.casefold().endswith('.nfo') or system_file(name)
 
 
-def _local_directory(path, value):
+def _local_directory(path, value, *, identity_stat=None):
     """逐条读取本机目录。
 
     Windows 的目录快照没有文件 ID，`os.stat` 是身份的唯一来源，身份请求时逐个补读；
     网络盘上每次补读都是一趟往返，扫描用不上身份的条目不补读。
     """
+    identity_stat = os.stat if identity_stat is None else identity_stat
     with os.scandir(path) as entries:
         for entry in entries:
             item = dict(name=entry.name, path=entry.path, directory=False, symlink=False,
@@ -671,7 +675,7 @@ def _local_directory(path, value):
                 if not item['directory']:
                     info = entry.stat()
                     if value == 'identity' and not info.st_ino and not _identity_unused(entry.name):
-                        info = os.stat(entry.path)
+                        info = identity_stat(entry.path)
                     item['attributes'] = _attributes(info)
             except OSError as error:
                 item['error'] = str(error)
@@ -744,12 +748,19 @@ class MountWorker:
     def __init__(self):
         self._process = None
         self._replies = None
+        #: 当前子进程报过「就绪」没有；没报之前等的是起进程，不按单项期限计。
+        self._ready = False
 
     def __enter__(self):
         return self
 
     def __exit__(self, *_exc):
         self.close()
+
+    def scan_directory(self, path, *, file_identity, timings):
+        items, measured = self.call('scan_directory', os.fspath(path), file_identity, interruptible=True)
+        timings.merge(measured)
+        return [DirectoryEntry(item) for item in items]
 
     def _start(self):
         if self._process is None:
@@ -773,13 +784,14 @@ class MountWorker:
                     process.stdout.close()
                     replies.put(None)
             threading.Thread(target=pump, name='PeachMountWorker', daemon=True).start()
-            self._process, self._replies = process, replies
+            self._process, self._replies, self._ready = process, replies, False
         return self._process, self._replies
 
     def call(self, operation, *args, timeout=None, interruptible=False):
         """执行一条操作并返回结果；操作自己抛的异常原样抛出。
 
-        `timeout` 按「多久没有回音」计，操作中途报进度会重新计时。`interruptible` 的操作
+        `timeout` 按「多久没有回音」计，操作中途报进度会重新计时；新起的子进程报就绪之后才开始
+        计时，起进程慢（机器忙、杀毒扫描）不会把健康的文件判成挂死。`interruptible` 的操作
         在等待期间响应任务的暂停与取消（取消时结束子进程）；改名这类做到一半不能丢下的
         操作保持默认，取消在它答完之后生效。
         """
@@ -792,7 +804,7 @@ class MountWorker:
         except OSError as error:
             self.close()
             raise CodedOSError(errno.EIO, 'errors.mediaIo.readerFailed', filename=subject) from error
-        deadline = time.monotonic() + limit
+        deadline = time.monotonic() + (limit if self._ready else STARTUP_SECONDS)
         while True:
             if interruptible:
                 from .task_control import checkpoint
@@ -805,7 +817,10 @@ class MountWorker:
                 deadline += time.monotonic() - paused
             remaining = deadline - time.monotonic()
             if remaining <= 0:
+                ready = self._ready
                 self.close()
+                if not ready:
+                    raise CodedOSError(errno.EIO, 'errors.mediaIo.readerFailed', filename=subject)
                 raise CodedTimeoutError(errno.ETIMEDOUT, 'errors.mediaIo.readTimedOut', filename=subject)
             try:
                 line = replies.get(timeout=min(remaining, .2) if interruptible else remaining)
@@ -815,6 +830,10 @@ class MountWorker:
                 self.close()
                 raise CodedOSError(errno.EIO, 'errors.mediaIo.readerFailed', filename=subject)
             message = json.loads(line)
+            if 'ready' in message:
+                self._ready = True
+                deadline = time.monotonic() + limit
+                continue
             if 'progress' in message:
                 deadline = time.monotonic() + limit
                 continue
@@ -837,6 +856,22 @@ class MountWorker:
             process.wait(timeout=1)
         except subprocess.TimeoutExpired:
             pass
+
+
+def _scan_directory(path, file_identity, *, progress):
+    """持续报告读盘进展，保留文件身份查询在目录读取中的耗时。"""
+    from .scan_timings import ScanTimings
+    timings = ScanTimings()
+    entries = []
+    next_progress = time.monotonic() + .25
+    for entry in _local_directory(path, 'identity' if file_identity else '',
+                                  identity_stat=lambda name: timings.call('file_identity', os.stat, name)):
+        entries.append(entry)
+        now = time.monotonic()
+        if now >= next_progress:
+            progress(len(entries))
+            next_progress = now + .25
+    return entries, timings.totals()
 
 
 def stat_of(path):
@@ -876,6 +911,9 @@ def move(source, target, case_only=False, rename=True):
 #: `MountWorker` 能执行的操作：名字 → (模块, 函数)，在子进程里用到时才导入。
 #: 带 `progress` 参数的操作中途报进度，父进程据此重新计时。
 SERVED = {
+    'browse_directory': ('peach.nas_directories', 'browse_directory'),
+    'change_directory': ('peach.file_browser_io', 'change_directory'),
+    'scan_directory': ('peach.media_io', '_scan_directory'),
     'stat': ('peach.media_io', 'stat_of'),
     'probe': ('peach.media_io', 'probe'),
     'move': ('peach.media_io', 'move'),
@@ -891,6 +929,11 @@ def _serve():
     """`MountWorker` 的子进程一端：一行一条请求，一行一条回答；异常连同类型一起交回。"""
     import importlib
     import inspect
+    try:
+        # 起来了就先报一声：父进程从这之后才按单项期限计时。
+        _emit({'ready': True})
+    except OSError:
+        return 0
     for line in sys.stdin:
         request = json.loads(line)
         module, name = SERVED[request['op']]

@@ -1,11 +1,13 @@
 import './styles.css';
 import { installErrorReporting } from '../error-reporting';
 import { mountApplication } from './application';
+import { mountFeedback } from './feedback/feedback';
 import { t } from '../i18n';
 import { installCatalogPerformance } from '../catalog-performance';
 
 installCatalogPerformance();
 installErrorReporting();
+mountFeedback();
 const host = document.getElementById('appRoot');
 if (!host) throw new Error(t('shell:errorReport.hostMissing'));
 mountApplication(host);

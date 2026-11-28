@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { rememberVolume } from '../src/player/volume-memory';
+import { mountVolumeMemory, rememberVolume } from '../src/player/volume-memory';
 
 const KEY = 'peach.player.volume.v1';
 const savedVolume = () => JSON.parse(localStorage.getItem(KEY) || 'null')?.volume;
@@ -25,7 +25,7 @@ describe('音量记忆', () => {
     cleanup.abort();
   });
 
-  it('用户调音量时记下，也保留 0，播放器销毁后不再写', () => {
+  it('用户调音量时记下，包括 0，播放器销毁后不再写', () => {
     const { element, change } = video();
     const cleanup = new AbortController();
     rememberVolume(element, cleanup.signal);
@@ -34,6 +34,9 @@ describe('音量记忆', () => {
     expect(savedVolume()).toBe(0.4);
     change(0);
     expect(savedVolume()).toBe(0);
+    const reopened = video();
+    mountVolumeMemory(reopened.element, new AbortController().signal);
+    expect(reopened.element.volume).toBe(0);
     cleanup.abort();
     change(0.9);
     expect(savedVolume()).toBe(0);
@@ -49,7 +52,7 @@ describe('音量记忆', () => {
     cleanup.abort();
   });
 
-  it.each(['abc', '0', '-1', '2', ''])('存的值不合法（%s）时保持原音量', raw => {
+  it.each(['abc', '-1', '2', ''])('存的值不合法（%s）时保持原音量', raw => {
     localStorage.setItem(KEY, raw);
     const { element } = video(0.7);
     const cleanup = new AbortController();

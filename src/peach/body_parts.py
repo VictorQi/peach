@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import avatar_watermark
-from .avatar_watermark import WatermarkModelUnavailable
+from .avatar_watermark import OnnxLoadError, WatermarkModelUnavailable
 from .config import TOOLS_DIR
 
 MODEL_URL = ("https://files.pythonhosted.org/packages/1c/ee/1aa02d44ba958cc77e16ff1e41a0aac5e721037db7bf62b9c9d124917f87/"
@@ -74,9 +74,7 @@ class PartDetector:
     """模型建一次反复用。"""
 
     def __init__(self, *, allow_download: bool = True) -> None:
-        import cv2
-
-        self._net = cv2.dnn.readNet(str(ensure_model(allow_download=allow_download)))
+        self._net = avatar_watermark.read_onnx_network(ensure_model(allow_download=allow_download))
         # OpenCV 的 dnn 网络不能并发调用：同一批里几个线程同时装封面会撞上。
         self._lock = threading.Lock()
 
@@ -138,6 +136,6 @@ def default_detector(*, allow_download: bool = False) -> PartDetector | None:
         if not _DETECTOR:
             try:
                 _DETECTOR.append(PartDetector(allow_download=allow_download))
-            except (WatermarkModelUnavailable, ImportError):
+            except (WatermarkModelUnavailable, OnnxLoadError, ImportError):
                 return None
         return _DETECTOR[0]

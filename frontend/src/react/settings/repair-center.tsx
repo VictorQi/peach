@@ -95,11 +95,11 @@ function reading(item: RepairItem) {
   return item.changed ? t('settings:repairCenter.changedCount', { count: item.changed }) : '';
 }
 
-function Row({ title, description, progress, options, children }: {
-  title: string; description: string; progress?: ReactNode; options?: ReactNode; children: ReactNode;
+function Row({ id, title, description, progress, options, children }: {
+  id?: string; title: string; description: string; progress?: ReactNode; options?: ReactNode; children: ReactNode;
 }) {
   return (
-    <div className={`${RESULT_SECTION} flex flex-wrap items-center justify-between gap-x-4 gap-y-2`}>
+    <div id={id} className={`${RESULT_SECTION} flex flex-wrap items-center justify-between gap-x-4 gap-y-2`}>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="text-body-medium text-text-primary">{title}</span>
         <span className="text-body-2-regular text-text-secondary">{description}</span>
@@ -205,7 +205,7 @@ export function RepairCenterPage() {
               const [label, tone] = STATES[item.state] || STATES.none;
               const text = reading(item);
               return (
-                <Row key={item.id} title={item.title} description={item.summary}
+                <Row key={item.id} id={`repair-item-${item.id}`} title={item.title} description={item.summary}
                   options={item.automatic === undefined ? null : <div className="flex flex-col gap-1 pt-2">
                     <Switch isSelected={item.automatic} isDisabled={!data.available || !!action.busy} onChange={setCoverAutomatic}
                       aria-describedby="cover-automatic-help">

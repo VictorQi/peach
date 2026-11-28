@@ -28,6 +28,7 @@ const READINGS: Record<string, string[]> = {
   follow: [...FOLLOW, 'stats', 'taste'],
   discoveries: DISCOVERIES,
   review: ['review'],
+  library_processing: ['library-processing'],
   artwork: [...CATALOG, ...FOLLOW, ...DISCOVERIES, 'avatar-choices'],
 };
 

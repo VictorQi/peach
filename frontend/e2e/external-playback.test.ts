@@ -44,8 +44,7 @@ describe('外部播放器', () => {
         await focusedListbox.waitFor({ timeout: 5_000 });
         await page.keyboard.press('Escape');
         await waitForChevron(false);
-        // React Aria 在浮层卸载后的动画帧恢复焦点，此时箭头可能已经复位。
-        await chooser.and(page.locator(':focus')).waitFor({ timeout: 5_000 });
+        await page.waitForFunction(selector => document.activeElement?.matches(selector), PLAYER_SELECT);
         assert.match(await chooser.ariaSnapshot(), /外部播放器/);
 
         await page.keyboard.press('Enter');
@@ -53,7 +52,8 @@ describe('外部播放器', () => {
         await focusedListbox.waitFor({ timeout: 5_000 });
         await page.keyboard.press('Tab');
         await waitForChevron(false);
-        await openButton.and(page.locator(':focus')).waitFor({ timeout: 5_000 });
+        // 弹层卸下后焦点才由 FocusScope 交还触发键、再按 Tab 移到下一个控件，和 Escape 一样是异步的。
+        await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === '使用外部播放器打开');
 
         await chooser.click();
         await page.getByRole('option', { name: 'PotPlayer', exact: true }).click();

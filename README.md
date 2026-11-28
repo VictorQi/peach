@@ -4,7 +4,7 @@
 
 A local-first video metadata scraper and media manager.
 
-[Upstream website](https://peach.video) · [Download](#download-and-use) · [Upstream demo](https://demo.peach.video) · [Documentation](#documentation) · [简体中文](README.zh-CN.md)
+[Upstream website](https://peach.video) · [Download](#download-and-use) · [Upstream demo](https://demo.peach.video) · [Documentation](#documentation) · [Upstream Telegram channel](https://t.me/peach_mitao) · [简体中文](README.zh-CN.md)
 
 [![Release](https://img.shields.io/github/v/release/VictorQi/peach?include_prereleases&sort=semver&label=release&logo=github)](https://github.com/VictorQi/peach/releases)
 [![CI pipelines](https://img.shields.io/github/actions/workflow/status/VictorQi/peach/test.yml?branch=master&label=CI&logo=githubactions&logoColor=white)](https://github.com/VictorQi/peach/actions/workflows/test.yml)
@@ -47,14 +47,14 @@ Movie demo data; see [asset credits and licenses](https://peach.video/en/credits
 - **Local and cloud libraries**: browse local drives, SMB, mounted cloud storage and PikPak libraries together.
 - **Playback and history**: web and external players, subtitles, playback speed, rotation, resume and timeline previews.
 - **Follows and discovery**: track performer and creator updates, discover titles and manage a want list.
-- **Cloud download**: search by video code or submit a magnet link, then organize completed downloads into your library.
+- **Cloud and local download**: search by video code or submit a magnet link to 115, PikPak or qBittorrent, then organize completed downloads into your library.
 - **Library management**: manage tags, duplicates, versions and parts; permanently delete videos by performer while keeping profiles and photos. Metadata and watch history are stored locally.
 - **Task center**: pause, resume or cancel local background tasks and view their CPU, GPU and download activity where available.
 - **Guided tours**: open help when needed to learn the interface and settings; tutorial progress is shared across devices connected to the same instance.
 
 Background collection does not open or control a browser. Restricted content is skipped when optional source credentials are missing, while your existing library remains available. Optional library updates after an upgrade start when you choose and can be stopped. Version information and update actions stay in settings.
 
-When reading media information for a newly imported local video, Peach can optimize supported MP4 layouts in place without re-encoding or creating another video copy. It keeps a small recovery record and restores the original header if validation fails. Existing videos can use the same optimization during playback without changing the file. [Scope and recovery](docs/adr/0178-mp4-layout-normalization.md).
+When reading media information for a newly imported local video, Peach can optimize supported MP4 layouts in place without re-encoding or creating another video copy. It keeps a small recovery record and restores the original header if validation fails. Existing videos can use the same optimization during playback without changing the file. [Scope and recovery](docs/adr/0185-mp4-layout-normalization.md).
 
 ## Download and use
 
@@ -77,7 +77,7 @@ Choose your media folders after installation, then scan to start browsing and pl
 
 ## Documentation
 
-[Operations](docs/OPERATIONS.md) · [Sources](docs/SOURCING.md) · [External players](docs/EXTERNAL_PLAYERS.md) · [Diagnostics and data sharing](docs/DIAGNOSTICS.md) · [Changelog](CHANGELOG.md)
+[Operations](docs/OPERATIONS.md) · [Sources](docs/SOURCING.md) · [Local download](docs/LOCAL_DOWNLOAD.md) · [External players](docs/EXTERNAL_PLAYERS.md) · [Diagnostics and data sharing](docs/DIAGNOSTICS.md) · [Changelog](CHANGELOG.md)
 
 Development: [Contributing](CONTRIBUTING.md) · [Development guide](AGENTS.md) · [Testing](docs/TESTING.md)
 

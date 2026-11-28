@@ -50,6 +50,9 @@ SOURCE_SPECS = {
         "dmm": "official",
         # FC2 发行方自己的商品页（`peach.sources.fc2`）。
         "fc2": "official",
+        "vixen-network": "official",
+        "stashdb": "community",
+        "theporndb": "community",
         # 历史来源身份，见 `HISTORICAL_SOURCES`。
         "libredmm": "official_mirror",
         "tokyohot": "official",
