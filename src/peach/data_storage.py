@@ -45,7 +45,8 @@ from .user_messages import (UserFacingError, UserInterruptedError, UserOSError, 
                             UserValueError, message_fields, nested_message)
 
 USAGE_NAME = "storage-usage.json"
-USAGE_CATEGORY_VERSION = 2
+#: 更新扫描规则时让页面重新统计，避免沿用已有的部分结果。
+USAGE_CATEGORY_VERSION = 3
 REQUEST_NAME = "data-relocation-request.json"
 RESULT_NAME = "data-relocation.json"
 RELOCATION_PROOF = ".peach-relocation-id"
@@ -203,7 +204,8 @@ def measure(config, *, should_stop: Callable[[], bool] = lambda: False,
             report(files, size_seen)
         folder, inherited = stack.pop()
         try:
-            entries = list(os.scandir(folder))
+            with os.scandir(storage_budget.capacity_path(folder)) as scanned:
+                entries = list(scanned)
         except FileNotFoundError:
             continue
         except OSError as error:
@@ -214,8 +216,9 @@ def measure(config, *, should_stop: Callable[[], bool] = lambda: False,
             try:
                 if entry.is_symlink() or Path(entry.path).is_junction():
                     continue
+                path = folder / entry.name
                 if entry.is_dir(follow_symlinks=False):
-                    stack.append((Path(entry.path), roots.get(_key(Path(entry.path)), inherited)))
+                    stack.append((path, roots.get(_key(path), inherited)))
                     continue
                 info = storage_budget.file_stat(entry)
                 size = info.st_size
@@ -232,10 +235,10 @@ def measure(config, *, should_stop: Callable[[], bool] = lambda: False,
             size_seen += size
             try:
                 if storage_budget.count_file(info, allocated_files):
-                    allocated += storage_budget.allocated_bytes(Path(entry.path), info)
+                    allocated += storage_budget.allocated_bytes(path, info)
             except OSError as error:
                 allocated_error = str(error)
-            if _reclaimable(category, Path(entry.path), Path(folder).name):
+            if _reclaimable(category, path, folder.name):
                 bucket["reclaimable"] += size
     live = config.directory("database") / "ledger.db"
     totals["backups"]["reclaimable"] = sum(

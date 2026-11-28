@@ -4284,7 +4284,7 @@
         "configuration": "配置",
         "database": "数据库",
         "schema": "数据库迁移",
-        "tools": "FFmpeg／OpenSSL",
+        "tools": "FFmpeg／ffprobe",
         "security": "访问安全",
         "mediaMounts": "媒体挂载",
         "dataRoot": "数据目录",

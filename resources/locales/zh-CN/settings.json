@@ -1225,7 +1225,6 @@
     "installAfterRestart": "Peach {{version}} 将在重启后安装。",
     "installation": "安装方式",
     "installerHelp": "打开镜像，把 Peach 拖入「应用程序」替换旧版本，数据与设置保留；提示已损坏时见发布页说明。",
-    "latestTestBuild": "已是最新测试版。",
     "latestVersion": "最新版本",
     "macosDiskImage": "macOS 安装镜像",
     "notChecked": "尚未检查",

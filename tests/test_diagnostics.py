@@ -98,11 +98,24 @@ class DiagnosticsTests(unittest.TestCase):
         self.settings.access_path.write_text("broken", encoding="utf-8")
         self.assertEqual(diagnostics.security(self.settings)["status"], "failed")
         with patch.object(diagnostics.FFmpegResolver, "ffmpeg", return_value=None), \
-             patch.object(diagnostics.FFmpegResolver, "ffprobe", return_value=None), \
-             patch.object(diagnostics.shutil, "which", return_value=None):
+             patch.object(diagnostics.FFmpegResolver, "ffprobe", return_value=None):
             result = diagnostics.tools(self.settings)
         self.assertEqual(result["status"], "warning")
         self.assertTrue(all(not binary["available"] for binary in result["details"].values()))
+
+    def test_media_tools_work_without_openssl_on_path(self):
+        ffmpeg = BinaryChoice(self.root / "ffmpeg.exe", "peach-bundled")
+        ffprobe = BinaryChoice(self.root / "ffprobe.exe", "peach-bundled")
+        with patch.object(diagnostics.FFmpegResolver, "ffmpeg", return_value=ffmpeg), \
+             patch.object(diagnostics.FFmpegResolver, "ffprobe", return_value=ffprobe), \
+             patch("shutil.which", return_value=None), \
+             patch.object(diagnostics, "binary_diagnostics", side_effect=[
+                 {"available": True, "usable": True, "av1_software": True},
+                 {"available": True, "usable": True},
+             ]):
+            result = diagnostics.tools(self.settings)
+        self.assertEqual((result["status"], result["target"]), ("ok", None))
+        self.assertEqual(set(result["details"]), {"ffmpeg", "ffprobe"})
 
     def test_port_reports_occupied_without_guessing_the_owner(self):
         with socket.socket() as listener:
@@ -215,11 +228,11 @@ class DiagnosticsTests(unittest.TestCase):
                                                         action="fixDataRootPermission"), "en")
         self.assertEqual(denied["reason"], "No permission to write to the data directory")
         tools = diagnostics.item("tools", "warning", "", reason_parts=diagnostics.joined([
-            {"code": "labels.diagnostics.reason.toolsMissing", "params": {"names": ["ffmpeg", "openssl"]}},
+            {"code": "labels.diagnostics.reason.toolsMissing", "params": {"names": ["ffmpeg", "ffprobe"]}},
             {"code": "labels.diagnostics.reason.av1Missing"}]))
-        self.assertEqual(tools["reason"], "未找到：ffmpeg、openssl；FFmpeg 缺少 AV1 软件解码器")
+        self.assertEqual(tools["reason"], "未找到：ffmpeg、ffprobe；FFmpeg 缺少 AV1 软件解码器")
         self.assertEqual(diagnostics.localized(tools, "en")["reason"],
-                         "Not found: ffmpeg, openssl; FFmpeg has no AV1 software decoder")
+                         "Not found: ffmpeg, ffprobe; FFmpeg has no AV1 software decoder")
 
     def test_doctor_text_reports_failure_and_exits_nonzero(self):
         result = {"version": "test", "status": "failed", "checks": {

@@ -249,6 +249,31 @@ describe('检查更新', () => {
       expect(fetcher.mock.calls.some(([url]) => url === '/api/configuration/update-status' || url === '/api/configuration/automatic-updates')).toBe(false);
     });
 
+    it('更新完成后随服务版本刷新，保留独立的检查状态', async () => {
+      vi.useFakeTimers();
+      vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+      const completed: UpdateJob = { state: 'complete', progress: 100, version: '0.10.0', message: '已更新至 0.10.0' };
+      const installed = { ...release, current_version: '0.10.0' };
+      let result = installed;
+      const fetcher = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({
+        ...snapshot(completed), runtime: { version: installed.current_version, build_id: 'build-b' }, release: result,
+      }) }));
+      vi.stubGlobal('fetch', fetcher);
+      const host = await mount(<ReleaseUpdates initial={{ ...release, state: 'available', latest_version: '0.10.0' }} />);
+      await settle();
+      const updates = section(host, '检查更新')!;
+      expect(updates.textContent).toContain('当前版本0.10.0');
+      expect(updates.textContent).toContain('最新版本未知');
+      expect(updates.textContent).toContain('尚未检查');
+      expect(updates.textContent).toContain('已更新至 0.10.0');
+      expect(updates.textContent).not.toContain('检查完成');
+
+      result = { ...installed, state: 'available', latest_version: '0.11.0', checked_at: 1 };
+      await advance(CLIENT_UPDATES_INTERVAL);
+      expect(updates.textContent).toContain('最新版本0.11.0');
+      expect(buttonNamed('下载并安装', updates)).toBeTruthy();
+    });
+
     it('横幅的快照约 2 分钟取不到就说明连不上，取到后撤掉', async () => {
       vi.useFakeTimers();
       vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');

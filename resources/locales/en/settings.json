@@ -1239,7 +1239,6 @@
     "installAfterRestart": "Peach {{version}} will be installed after a restart.",
     "installation": "Installation",
     "installerHelp": "Open the disk image and drag Peach to Applications to replace the old version. Your data and settings are kept. If macOS says the app is damaged, see the release page.",
-    "latestTestBuild": "You have the latest test build.",
     "latestVersion": "Latest version",
     "macosDiskImage": "macOS disk image",
     "notChecked": "Not checked",

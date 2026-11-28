@@ -351,6 +351,15 @@ class StandaloneUpdateTests(unittest.TestCase):
             self.assertEqual(update.public()["state"], "error")
         self.assertNotIn("target", update.public())
 
+    def test_completed_job_is_visible_only_in_the_version_it_installed(self):
+        update.write({}, state="complete", version="0.53.0", progress=100)
+        with patch.object(update, "__version__", "0.63.0"):
+            self.assertEqual(update.public(), {"state": "idle", "progress": 0})
+            self.assertEqual(update.read()["state"], "complete")
+        with patch.object(update, "__version__", "0.53.0"):
+            self.assertEqual(update.public()["state"], "complete")
+            self.assertEqual(update.public()["progress"], 100)
+
     def test_progress_carries_its_code_and_a_plain_message_drops_the_previous_one(self):
         update.write({}, state="downloading", **update.message_fields("jobMessage.standaloneUpdate.complete",
                                                                        {"version": "1.2.0"}))

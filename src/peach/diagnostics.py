@@ -4,7 +4,6 @@ from __future__ import annotations
 import ipaddress
 import os
 import platform
-import shutil
 import socket
 import sqlite3
 import sys
@@ -128,9 +127,6 @@ def tools(settings, *, inspect=True):
         found[name] = (binary_diagnostics(choice, decoders=name == 'ffmpeg') if inspect else
                        {'available': choice is not None, 'source': choice.source if choice else None,
                         'path': str(choice.path) if choice else None})
-    openssl = shutil.which("openssl")
-    found["openssl"] = {"available": openssl is not None, "source": "path" if openssl else None,
-                        "path": openssl}
     missing = [name for name, value in found.items() if not value["available"]]
     unavailable = [name for name in ('ffmpeg', 'ffprobe') if found[name]['available'] and not found[name].get('usable', True)]
     incomplete = found['ffmpeg'].get('usable') and not found['ffmpeg'].get('av1_software')

@@ -631,6 +631,26 @@ class CapacityProtectionTests(unittest.TestCase):
         self.assertEqual(measured['categories']['playback']['files'], 2)
         self.assertEqual(measured['categories']['playback']['bytes'], 4096)
 
+    @unittest.skipUnless(os.name == 'nt', 'Windows 长路径')
+    def test_storage_counts_files_below_windows_long_paths(self):
+        archive = self.root / 'state' / 'project-context'
+        base_allocated = self.budget.data_usage(self.config)
+        folder = archive / ('a' * 100) / ('b' * 100) / ('c' * 80)
+        target = folder / 'c' / 'receipt.json'
+        self.assertGreater(len(str(folder)), 260)
+        extended_target = Path('\\\\?\\' + str(target))
+        write(extended_target, 139)
+        self.addCleanup(shutil.rmtree, Path('\\\\?\\' + str(archive)))
+
+        budget_bytes = self.budget.data_usage(self.config)
+        measured = data_storage.measure(self.config)
+
+        self.assertEqual(measured['allocation_error'], '')
+        self.assertEqual(measured['categories']['project_archives']['files'], 1)
+        self.assertEqual(measured['categories']['project_archives']['bytes'], 139)
+        self.assertGreater(measured['allocated_bytes'], base_allocated)
+        self.assertEqual(budget_bytes, measured['allocated_bytes'])
+
     def test_cleaning_a_hardlink_with_a_retained_alias_does_not_claim_freed_allocation(self):
         cached = write(self.root / 'generated/transcodes/1-key.mp4', 2048)
         kept = self.root / 'retained.mp4'
