@@ -6329,12 +6329,22 @@ class ReleaseAnnouncementTests(unittest.TestCase):
         cls.release = load_script("release_tag")
 
     def test_main_calls_the_announcement_after_release_and_readme_recovery(self):
-        for mode, method in (("--ship", "ship"), ("--point-readme", "point_readme")):
-            with self.subTest(mode=mode), \
-                    mock.patch.object(self.release, method, return_value={"applied": True, "tag": "v0.8.0"}), \
-                    mock.patch.object(self.release, "finish_release", return_value=0) as finish:
-                self.assertEqual(self.release.main([mode, "--apply", "--timeout", "60"]), 0)
-                finish.assert_called_once_with("peach-mitao/peach", {"applied": True, "tag": "v0.8.0"}, timeout=60)
+        modes = (("--ship", "ship"), ("--point-readme", "point_readme"))
+        publishers = (([], "VictorQi/peach"), (["--repo", "owner/repo"], "owner/repo"))
+        result = {"applied": True, "tag": "v0.8.0"}
+        for mode, method in modes:
+            for options, repo in publishers:
+                actions = mock.Mock()
+                actions.apply.return_value = result
+                actions.finish.return_value = 0
+                with self.subTest(mode=mode, repo=repo), \
+                        mock.patch.object(self.release, method, actions.apply), \
+                        mock.patch.object(self.release, "finish_release", actions.finish):
+                    self.assertEqual(self.release.main([mode, "--apply", "--timeout", "60", *options]), 0)
+                    self.assertEqual(actions.mock_calls, [
+                        mock.call.apply(repo, apply=True, timeout=60),
+                        mock.call.finish(repo, result, timeout=60),
+                    ])
 
     def test_dry_run_keeps_the_release_plan_without_running_the_announcement(self):
         result = {"applied": False, "tag": "v0.8.0"}
