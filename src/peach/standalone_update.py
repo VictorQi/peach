@@ -85,6 +85,8 @@ def write(data: dict, **changes) -> dict:
 
 def public() -> dict:
     data = read()
+    if data.get("state") == "complete" and data.get("version") != __version__:
+        return {"state": "idle", "progress": 0}
     if data.get("state") in ACTIVE and time.time() - data.get("updated_at", 0) > 180:
         data = dict(data, state="error", **message_fields("jobMessage.standaloneUpdate.interrupted"))
     return {key: value for key, value in data.items() if key in {

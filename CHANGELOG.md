@@ -16,6 +16,12 @@ Entries are written for users to scan: one sentence each, saying where something
 
 ## [Unreleased]
 
+### Fixed / 修复
+
+- **Updates**: Keep the running version and update check status accurate when an older installation receipt is still on disk. / **更新**：保留真实的当前版本和检查状态，避免旧安装回执覆盖它们。
+- **Settings**: Count files under long Windows paths when measuring storage. / **配置**：存储统计可计入 Windows 长路径下的文件。
+- **Settings**: Report missing FFmpeg or ffprobe under media tools. / **配置**：媒体工具诊断会指出缺失的 FFmpeg 或 ffprobe。
+
 ## [0.63.0] - 2026-11-27
 
 ### Added / 新增

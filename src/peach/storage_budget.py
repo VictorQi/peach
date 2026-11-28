@@ -388,6 +388,18 @@ def _compressed_file_size():
     return function
 
 
+def capacity_path(path: Path) -> Path:
+    """以 Windows 扩展长度路径访问文件，供目录遍历和实际占盘统计共用。"""
+    if os.name != 'nt':
+        return path
+    absolute = os.path.abspath(path)
+    if absolute.startswith(('\\\\?\\', '\\\\.\\')):
+        return Path(absolute)
+    if absolute.startswith('\\\\'):
+        return Path('\\\\?\\UNC\\' + absolute[2:])
+    return Path('\\\\?\\' + absolute)
+
+
 def allocated_bytes(path: Path, info: os.stat_result) -> int:
     """稀疏缓存按实际占盘计量，不把文件逻辑长度当作分配量。"""
     if os.name != 'nt':
@@ -396,8 +408,9 @@ def allocated_bytes(path: Path, info: os.stat_result) -> int:
     from ctypes import wintypes
     function = _compressed_file_size()
     high = wintypes.DWORD()
+    filename = str(capacity_path(path))
     ctypes.set_last_error(0)
-    low = function(str(path), ctypes.byref(high))
+    low = function(filename, ctypes.byref(high))
     error = ctypes.get_last_error()
     if low == 0xFFFFFFFF and error:
         raise ctypes.WinError(error)
@@ -410,23 +423,25 @@ def _files(root: Path, skipped=None):
     统计期间被删、被占用或正在删除的单个文件与子目录跳过并计入 `skipped`，几十万个文件里
     总有正在变的，不能让一个文件作废整轮统计；根目录本身读不到照常抛出。
     """
-    if root.is_symlink() or root.is_junction():
+    native_root = capacity_path(root)
+    if native_root.is_symlink() or native_root.is_junction():
         return
     stack = [root]
     while stack:
         folder = stack.pop()
         try:
-            with os.scandir(folder) as entries:
+            with os.scandir(capacity_path(folder)) as entries:
                 for entry in entries:
                     try:
                         if entry.is_symlink() or Path(entry.path).is_junction():
                             continue
+                        path = folder / entry.name
                         if entry.is_dir(follow_symlinks=False):
-                            stack.append(Path(entry.path))
+                            stack.append(path)
                         else:
                             info = file_stat(entry)
                             if stat.S_ISREG(info.st_mode):
-                                yield Path(entry.path), info
+                                yield path, info
                     except (FileNotFoundError, PermissionError):
                         if skipped is not None:
                             skipped[0] += 1

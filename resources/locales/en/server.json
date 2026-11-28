@@ -4284,7 +4284,7 @@
         "configuration": "Configuration",
         "database": "Database",
         "schema": "Database migrations",
-        "tools": "FFmpeg/OpenSSL",
+        "tools": "FFmpeg / ffprobe",
         "security": "Access security",
         "mediaMounts": "Media mounts",
         "dataRoot": "Data directory",

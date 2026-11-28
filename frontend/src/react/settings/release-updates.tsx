@@ -113,13 +113,10 @@ export function ReleaseUpdates({ initial, initialJob }: { initial: ReleaseState;
 
   useEffect(() => {
     if (!snapshot || snapshot === mountedSnapshot.current) return;
-    const next = snapshot.update_job;
-    setJob(next);
-    // 没检查过时快照里是默认的「尚未检查」，不覆盖本页已有的结果。
-    if (snapshot.release.checked_at) setData(snapshot.release);
-    if (next.state === 'complete') {
-      setData((current) => ({ ...current, current_version: next.version || current.current_version, state: 'current', message: t('settings:releaseUpdates.latestTestBuild') }));
-    }
+    setJob(snapshot.update_job);
+    // 服务版本变更后，检查结果从新版本的快照重新开始。
+    setData((current) => snapshot.release.checked_at || snapshot.release.current_version !== current.current_version
+      ? snapshot.release : current);
   }, [snapshot]);
 
   const download = () => {
